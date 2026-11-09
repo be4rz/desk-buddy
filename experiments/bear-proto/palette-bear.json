@@ -1,0 +1,35 @@
+{
+  "note": "Bear ramps, added to ../scene-proto/palette.json (the room palette). Ramps run dark -> light. 'ink' is the line/eye/nose colour for the FAITHFUL treatment; the INTEGRATED treatment uses selective coloured outlines from each ramp's darkest steps instead. Clover uses the room's 'moss' ramp.",
+  "ink": [
+    "#1b1820",
+    "#2a2530"
+  ],
+  "fur": [
+    "#4a4458",
+    "#8a83a0",
+    "#b9b3cb",
+    "#dcd8e6",
+    "#f1eff4",
+    "#fbfaf8"
+  ],
+  "pants": [
+    "#2f5a58",
+    "#4f8a83",
+    "#7dbcb0",
+    "#a9dccf",
+    "#cdeee6"
+  ],
+  "hat": [
+    "#5a4a72",
+    "#8b78ad",
+    "#b4a3d4",
+    "#d3c6ea",
+    "#ead9ef"
+  ],
+  "blush": [
+    "#c97f8c",
+    "#e8a9b2",
+    "#f4c9cc",
+    "#f8d4dc"
+  ]
+}

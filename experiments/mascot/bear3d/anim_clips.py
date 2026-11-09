@@ -1,0 +1,142 @@
+"""Stage A clips for the cute bear: idle, walk, run and their start/stop transitions (pure Python, no bpy).
+
+Each clip is a list of per-frame pose parameters at 12 fps, plus the root track (forward distance in world
+units, cumulative from the clip start). Root motion is NOT baked into the frames: the rig stays in place
+and the engine moves the sprite by root[k+1] - root[k] after frame k.
+
+Pose parameters (all relative to the rest pose, 0 / 1 = rest):
+  bob        body lift, world units          sz        body vertical scale (xy scale = 1/sqrt(sz), keeps volume)
+  roll       waddle, deg about world Y (+ = top towards the bear's left, +X)
+  lean       deg about world X at the floor (+ = top forward, -Y)
+  armL/armR  deg arm swing at the shoulder (+ = paw forward)
+  fL/fR      foot forward offset, world units (+ = forward)      hL/hR  foot lift, world units
+  earL/earR  deg ear tilt (+ = outward)     clX/clY  deg clover tilt (+X = forward, +Y = towards +X)
+  blink      eye vertical scale (1 = open)
+
+Speeds are chosen so that, on the 2:1 iso axes (SE, NE, NW, SW), the root moves a whole number of pixels per
+frame at the ~100 px render size: walk 2 px, run 4 px (V = world units per 2 px along an iso axis). A planted
+foot then moves exactly that many pixels backwards inside the sprite, so it stays put on the floor.
+"""
+import math
+
+FPS = 12
+REST = dict(bob=0.0, sz=1.0, roll=0.0, lean=0.0, armL=0.0, armR=0.0, fL=0.0, fR=0.0, hL=0.0, hR=0.0,
+            earL=0.0, earR=0.0, clX=0.0, clY=0.0, blink=1.0)
+
+
+def P(**kw):
+    d = dict(REST); d.update(kw); return d
+
+
+def ease(t):
+    return t * t * (3 - 2 * t)
+
+
+def build(V, PXZ, HB=2.06):
+    """V: world units per 2 px along an iso axis (walk speed per frame). PXZ: world z per screen pixel.
+    HB: body height, to turn 'n pixels of squash' into a scale factor."""
+    def szpx(n): return 1.0 + n * PXZ / HB      # body top moves n px (n < 0 squashes)
+    clips = {}
+
+    # ------------------------------------------------------------------ idle (30 frames, 2.5 s, loop)
+    R = P()
+    seq = []
+    seq += [R] * 6
+    seq += [P(sz=szpx(1))] * 3                                         # breathe in
+    seq += [P(sz=szpx(2), earL=-2, earR=-2, clX=-3)] * 6              # full breath, clover lags back
+    seq += [P(sz=szpx(1), earL=3, earR=3, clX=4)] * 3                 # breathe out: ears/clover overshoot
+    seq += [P(sz=szpx(-1), earL=1, earR=1, clX=-2)] * 3               # little mochi settle
+    seq += [P(blink=0.45), P(blink=0.12), P(blink=0.45)]              # blink
+    seq += [R] * 6
+    clips['idle'] = dict(loop=True, frames=seq, root=[0.0] * len(seq), next_root=0.0)
+
+    # ------------------------------------------------------------------ walk (12 frames, 1 s, loop): waddle
+    v = V; s = 6 * v; h = 3 * PXZ                  # ~3 px foot lift
+    BOB = [0, 1, 2, 2, 2, 1]                     # whole pixels, per half cycle
+    SQ = [-2, -1, 0, 0, 0, 0]                    # squash on contact (px)
+
+    def walk_pose(f):
+        p = (f % 12) / 12
+        def foot(fr):
+            fr %= 12
+            if fr <= 6: return s / 2 - v * fr, 0.0                     # stance: planted, slides back with the root
+            t = (fr - 6) / 6
+            return -s / 2 + s * ease(t), h * math.sin(math.pi * t)
+        fL, hL = foot(f); fR, hR = foot(f + 6)
+        hc = f % 6
+        roll = 5 * math.sin(2 * math.pi * p)                         # sway over the stance foot
+        return P(bob=BOB[hc] * PXZ, sz=szpx(SQ[hc]), roll=roll,
+                 armL=-10 * math.cos(2 * math.pi * p), armR=10 * math.cos(2 * math.pi * p),
+                 fL=fL, hL=hL, fR=fR, hR=hR,
+                 earL=-3 * math.sin(2 * math.pi * (p - 1 / 12)), earR=3 * math.sin(2 * math.pi * (p - 1 / 12)),
+                 clX=4 * math.cos(4 * math.pi * (p - 1 / 12)), clY=-5 * math.sin(2 * math.pi * (p - 1 / 12)))
+    walk = [walk_pose(f) for f in range(12)]
+    clips['walk'] = dict(loop=True, frames=walk, root=[v * f for f in range(12)], next_root=12 * v)
+
+    # walk_start: rest -> (walk frame 0). Right foot stays planted, left foot swings to the front.
+    w0 = walk[0]
+    root = [0, 0, v, 2 * v]; nxt = 3 * v
+    Lw = [0, 0, s * ease(1 / 3), s * ease(2 / 3)]                      # left foot, world
+    st = [P(),
+          P(sz=szpx(-2), roll=-3, armL=3, armR=-3, earL=2, earR=2),   # anticipation: weight onto the right foot
+          P(bob=1 * PXZ, roll=-4, armL=-5, armR=5, fL=Lw[2] - root[2], hL=h * math.sin(math.pi / 3),
+            fR=-root[2], earL=-1, earR=1, clX=-3, clY=3),
+          P(bob=1 * PXZ, roll=-2, armL=-8, armR=8, fL=Lw[3] - root[3], hL=h * math.sin(2 * math.pi / 3),
+            fR=-root[3], earL=-2, earR=2, clX=3, clY=4)]
+    clips['walk_start'] = dict(loop=False, frames=st, root=root, next_root=nxt)
+
+    # walk_stop: (after walk frame 11) walk frame 0 pose -> rest. Left foot planted, right foot catches up.
+    root = [0, v, 2 * v, 3 * v, 3 * v, 3 * v]
+    Rw = [-s / 2, -s / 2 + s * ease(1 / 3), -s / 2 + s * ease(2 / 3), s / 2]   # right foot, world
+    sp = [dict(w0),
+          P(bob=1 * PXZ, roll=3, armL=-6, armR=6, fL=s / 2 - root[1], fR=Rw[1] - root[1],
+            hR=h * math.sin(math.pi / 3), earL=1, earR=-1, clX=2, clY=-4),
+          P(bob=1 * PXZ, roll=2, armL=-3, armR=3, fL=s / 2 - root[2], fR=Rw[2] - root[2],
+            hR=h * math.sin(2 * math.pi / 3), clX=-2, clY=-3),
+          P(sz=szpx(-2), clX=5, clY=1, earL=3, earR=3),                # both feet down: settle squash
+          P(sz=szpx(1), clX=-3, earL=-1, earR=-1),                     # tiny rebound
+          P()]
+    clips['walk_stop'] = dict(loop=False, frames=sp, root=root, next_root=3 * v)
+
+    # ------------------------------------------------------------------ run (8 frames, 0.67 s, loop)
+    vr = 2 * V; sr = 3 * vr; hr = 5 * PXZ
+    RBOB = [0, 1, 3, 2]; RSQ = [-4, -1, 2, 0]; LEAN = [7, 8, 9, 8]
+
+    def run_pose(f):
+        p = (f % 8) / 8
+        def foot(fr):
+            fr %= 8
+            if fr <= 3: return sr / 2 - vr * fr, 0.0
+            t = (fr - 3) / 5
+            return -sr / 2 + sr * ease(t), hr * math.sin(math.pi * t)
+        fL, hL = foot(f); fR, hR = foot(f + 4)
+        hc = f % 4
+        return P(bob=RBOB[hc] * PXZ, sz=szpx(RSQ[hc]), lean=LEAN[hc], roll=2.5 * math.sin(2 * math.pi * p),
+                 armL=-24 * math.cos(2 * math.pi * p), armR=24 * math.cos(2 * math.pi * p),
+                 fL=fL, hL=hL, fR=fR, hR=hR,
+                 earL=-4 + 3 * math.cos(4 * math.pi * p), earR=-4 + 3 * math.cos(4 * math.pi * p),
+                 clX=-9 + 5 * math.cos(4 * math.pi * (p - 1 / 8)), clY=-4 * math.sin(2 * math.pi * (p - 1 / 8)))
+    run = [run_pose(f) for f in range(8)]
+    clips['run'] = dict(loop=True, frames=run, root=[vr * f for f in range(8)], next_root=8 * vr)
+
+    # run_start: rest -> crouch -> push off (right foot planted) -> run frame 0
+    root = [0, 0, 0.5 * vr]; nxt = 1.5 * vr
+    clips['run_start'] = dict(loop=False, root=root, next_root=nxt, frames=[
+        P(),
+        P(sz=szpx(-4), lean=4, armL=12, armR=12, earL=3, earR=3, clX=4),               # crouch, arms ready
+        P(bob=2 * PXZ, sz=szpx(2), lean=9, armL=-16, armR=16, fL=3 * vr * ease(0.5) - root[2],
+          hL=hr, fR=-root[2], earL=-4, earR=-4, clX=-8)])
+
+    # run_stop: run frame 0 -> brake (lean back) -> settle -> rest. Left foot planted, right catches up.
+    root = [0, vr, 1.5 * vr, 1.5 * vr, 1.5 * vr]
+    clips['run_stop'] = dict(loop=False, root=root, next_root=1.5 * vr, frames=[
+        dict(run[0]),
+        P(bob=2 * PXZ, lean=3, armL=-10, armR=10, fL=sr / 2 - root[1], fR=(-sr / 2 + sr * 0.5) - root[1],
+          hR=hr * 0.8, earL=-3, earR=-3, clX=-6),
+        P(sz=szpx(-4), lean=-4, armL=8, armR=8, clX=9, clY=2, earL=4, earR=4),     # brake: both feet down
+        P(sz=szpx(1), lean=2, clX=-4, earL=-1, earR=-1),                           # wobble back
+        P()])
+    return clips
+
+
+ORDER = ['idle', 'walk_start', 'walk', 'walk_stop', 'run_start', 'run', 'run_stop']

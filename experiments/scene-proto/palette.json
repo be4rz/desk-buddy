@@ -1,0 +1,11 @@
+{
+  "note": "Shared muted, hue-shifted palette for both art pipelines (shadows lean blue/purple, lights lean warm). Quantize every output PNG to these colors (plus full transparency). Ramps run dark -> light.",
+  "void":    ["#161c22", "#1e2a30", "#24343a"],
+  "moss":    ["#2f4440", "#384c45", "#556c5d", "#7f926f", "#a3ad84", "#cdd3a6"],
+  "wood":    ["#2e2630", "#4a3a3c", "#6b5248", "#8f6f5a", "#b48f70", "#d4b48c"],
+  "wall":    ["#3c3a4a", "#4f4c5e", "#66627a", "#827c94", "#a49db2", "#c6c0d0"],
+  "fabric":  ["#33405a", "#46597a", "#62799a", "#8aa2bc", "#b6c8d8"],
+  "pip":     ["#2c4f4a", "#3d6b5c", "#5a917a", "#7fb795", "#a9d6b0", "#d4eecf"],
+  "accent":  ["#5e3f4e", "#886871", "#c08a8f", "#e6b3b0", "#e8d49a", "#f4ecc8", "#eae9ec"],
+  "eye":     ["#1a1a26"]
+}

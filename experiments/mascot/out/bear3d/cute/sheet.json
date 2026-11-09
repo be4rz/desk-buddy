@@ -1,0 +1,83 @@
+{
+ "note": "Iso 2:1 (camera X60 Z45, ortho). Directions are screen directions: S faces the viewer, E faces screen right. anchor_feet = pixel (x, y) of the world origin between the feet.",
+ "strips": {
+  "100": {
+   "file": "bear3d_100_8dir.png",
+   "frame_w": 70,
+   "frame_h": 110,
+   "order": [
+    "S",
+    "SE",
+    "E",
+    "NE",
+    "N",
+    "NW",
+    "W",
+    "SW"
+   ],
+   "yaw_deg": {
+    "S": 45,
+    "SE": 90,
+    "E": 135,
+    "NE": 180,
+    "N": 225,
+    "NW": 270,
+    "W": 315,
+    "SW": 0
+   },
+   "anchor_feet": [
+    35,
+    97
+   ],
+   "sprite_height_px": [
+    100,
+    105,
+    105,
+    102,
+    97,
+    102,
+    105,
+    105
+   ]
+  },
+  "64": {
+   "file": "bear3d_64_8dir.png",
+   "frame_w": 44,
+   "frame_h": 69,
+   "order": [
+    "S",
+    "SE",
+    "E",
+    "NE",
+    "N",
+    "NW",
+    "W",
+    "SW"
+   ],
+   "yaw_deg": {
+    "S": 45,
+    "SE": 90,
+    "E": 135,
+    "NE": 180,
+    "N": 225,
+    "NW": 270,
+    "W": 315,
+    "SW": 0
+   },
+   "anchor_feet": [
+    22,
+    60
+   ],
+   "sprite_height_px": [
+    61,
+    63,
+    64,
+    62,
+    59,
+    62,
+    64,
+    63
+   ]
+  }
+ }
+}

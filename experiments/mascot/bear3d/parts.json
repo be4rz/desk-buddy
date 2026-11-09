@@ -1,0 +1,65 @@
+{
+ "body": {
+  "id": 1
+ },
+ "arm_L": {
+  "id": 2
+ },
+ "arm_R": {
+  "id": 3
+ },
+ "ear_L": {
+  "id": 4
+ },
+ "ear_R": {
+  "id": 5
+ },
+ "ear_in_L": {
+  "id": 6
+ },
+ "ear_in_R": {
+  "id": 7
+ },
+ "foot_L": {
+  "id": 8
+ },
+ "foot_R": {
+  "id": 9
+ },
+ "pants": {
+  "id": 10
+ },
+ "hat": {
+  "id": 11
+ },
+ "stem": {
+  "id": 12
+ },
+ "clover": {
+  "id": 13
+ },
+ "eyes": {
+  "id": 14
+ },
+ "brows": {
+  "id": 15
+ },
+ "nose": {
+  "id": 16
+ },
+ "blush": {
+  "id": 17
+ },
+ "mouth": {
+  "id": 18
+ },
+ "hat_face": {
+  "id": 19
+ },
+ "stitch": {
+  "id": 20
+ },
+ "clover_b": {
+  "id": 21
+ }
+}
