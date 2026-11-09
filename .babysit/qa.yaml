@@ -1,0 +1,23 @@
+version: 1
+# desk-buddy is a native macOS desktop app (Tauri 2 + NSPanel), not a web app:
+# there is no localhost URL. The only runnable target today is spike S1.
+# Visual review of the mascot is done on the real desktop by the user; agents
+# verify through the checks below plus S1's stderr stats.
+target: native macOS app (spikes/s1-window), no HTTP endpoint
+cwd: spikes/s1-window
+start: S1_STATS=1 cargo run        # menu-bar accessory; mascot panel on screen 0, prints "[s1] … fps" every 10 s
+check: cargo check && cargo test   # no unit tests yet (0 tests)
+services:
+  s1-window:
+    cwd: spikes/s1-window
+    start: S1_STATS=1 cargo run
+    check: cargo check && cargo test
+  mascot-pipeline:
+    cwd: experiments/mascot/bear3d
+    # full rebuilds need Blender (BLENDER=/Applications/Blender.app/Contents/MacOS/Blender): sh run.sh / run_anim.sh / run_b.sh
+    check: python3 verify_b.py      # Stage B hand-off frames must be pixel-identical; exit 1 on mismatch
+flows: >-
+  primary: mascot panel appears, idles/walks at 12 fps, idle CPU < 1% (S1_STATS output);
+  tray menu zoom x1-x3 and 64/100 px size switch; S1_OPEN_WEBVIEW=1 opens the webview in the same process (s1_info shows the same pid);
+  error: S1_ANIM_DIR=/nonexistent cargo run exits 1 with "[s1] cannot load mascot assets";
+  pipeline: verify_b.py PASS after any change to experiments/mascot/out/bear3d/anim_b

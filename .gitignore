@@ -19,3 +19,7 @@ target/
 
 # Python
 __pycache__/
+
+# 2build local state
+.babysit/.env
+.babysit/qa.local.yaml
