@@ -6,12 +6,16 @@ plan switched to **pixel art**, which changes §3–§5 and §7. Reference
 implementation for the harness: 2market (`~/Desktop/work/2market`,
 `docs/designs/2market-agent-harness.md`).
 
+Last updated 2026-11-10 against the code: all art now comes from Blender (D13),
+S0, S1 and S2 are done on macOS (D14), and S3 is dropped (D15). §7's roadmap
+shows what is done and what comes next.
+
 ### Decisions so far
 
 | # | Decision |
 |---|---|
 | D1 | TS sidecar (Bun + pi-durable) for the agent loop; Rust everywhere else. |
-| D2 | **Pixel art, "64-bit" style**: the user's term for fine-detail, rich-palette pixel art (not chunky 16-bit or 32-bit sprites). Size and color both matter: enough resolution for real detail, and a large, muted, hue-shifted palette, while keeping the nostalgic pixel look. The user shared a reference image (third-party art, used only as a reference, never copied). The first mascot is an agent attempt; the likely final path is an artist's base sprite that agents derive from. |
+| D2 | **Pixel art, "64-bit" style**: the user's term for fine-detail, rich-palette pixel art (not chunky 16-bit or 32-bit sprites). Size and color both matter: enough resolution for real detail, and a large, muted, hue-shifted palette, while keeping the nostalgic pixel look. The user shared a reference image (third-party art, used only as a reference, never copied). "64-bit" names the level of detail, not a 64×64 canvas: the bear is about 100 px tall (D14). ~~The first mascot is an agent attempt; the likely final path is an artist's base sprite that agents derive from.~~ Superseded by D13: the sprites are rendered from a Blender model, and the user's own drawings (`experiments/bear-proto/ref/`) are the reference. |
 | D3 | macOS menu bar accessory app (no Dock icon). |
 | D4 | 4 unprompted model turns/hour; 0 during quiet hours and DND. |
 | D5 | Music: YouTube IFrame widget + OS media controls; yt-dlp opt-in. |
@@ -20,10 +24,12 @@ implementation for the harness: 2market (`~/Desktop/work/2market`,
 | D8 | **Distributed in the future** → the product must not depend on anything we can't ship. |
 | D9 | Every pi-ai provider; Claude as the default. |
 | D10 | busybox-w32 as the Windows shell. |
-| D11 | **Aseprite, compiled from source, is for development only** (EULA §2g allows personal builds; §2b forbids distributing them). The product depends only on the documented `.aseprite` file format and our own toolkit. |
+| D11 | **Aseprite, compiled from source, is for development only** (EULA §2g allows personal builds; §2b forbids distributing them). The product depends only on the documented `.aseprite` file format and our own toolkit. Since D13/D15 the bear doesn't use Aseprite at all; this rule now applies only to `.aseprite` import for user-made mascots in P4. |
 | D12 | Before any app code: a **mascot demo** to judge whether agent-made pixel art is good enough. |
 | D13 | **The mascot lives in a world; the window is a view into it.** **Fake 3D**: the runtime is 2D sprites with depth ordering (no real-time 3D engine). A follow camera keeps the mascot centered. A small fixed set of **shots** (e.g. wide room, desk, talking close-up), each with its own angle, tied to activities; the app **cuts** between them (no smooth orbiting). The brain grows into a small life sim (places, needs, routines), and packs split into mascot packs + room packs. Decided 2026-11-06 after the `experiments/scene-proto/` prototypes: **isometric** (2:1) wide shot; **floating borderless view with a follow camera** (soft-edged, Pip always centered, room scrolls behind; no frame); **3 shots** (wide room, desk, talking close-up) with **hard cuts**, all shots sharing one aspect ratio; **hybrid art**: rooms and furniture pre-rendered from Blender (toon ramps to palette, ID/depth outlines, holdout occlusion), Pip hand-drawn (artist sprite later, agent-drawn for prototypes). Real-time 3D is reconsidered only if a freely decoratable room becomes core. **Changed 2026-11-09: all art comes from Blender, including the mascot.** The mascot is now a polar bear: a 3D model built from the user's pixel-bear reference, rigged and animated in Blender, and pre-rendered through the same toon → palette → ink-outline pipeline into iso pixel sprites in 8 directions at 12 fps. The pipeline lives in `experiments/mascot/bear3d/`. Isometric, the follow camera and the 3 shots are unchanged. |
 | D14 | **The S0 mascot demo (D12) passed, 2026-11-09.** The user approved the "cute" Blender bear (mochi body, flat plush face) and its Stage A clips: idle, walk, run and their start/stop transitions. The bear is about 100 px tall. S1 put it on the real desktop (spikes/s1-window: NSPanel + CALayer, 0.3% CPU idle), and the user found the 64/100 sizes and zoom ×1–×3 all fine. The default is 100 px, and zoom is a user setting. The brain and harness (S2) are worked on in a separate session. |
+| D15 | **S3 is dropped, 2026-11-10.** D13 moved all art to Blender, so the bear ships as PNG strips + JSON from `experiments/mascot/bear3d/`, not `.aseprite`. That removes S3's open question (`asefile` vs `aseprite-io`), and S1 already loads and composites the pipeline output, so no spike is left to run. The versioned **pack format** (manifest + loader over the pipeline output, intent → clip map) is built in P1a. Headless composite, `lint` and `diff` move to P4 with the studio; P1b may pull the composite forward. `.aseprite` import for user-made mascots also waits for P4. §3 and §5 were updated to match. |
+| D16 | **Face layers for blinking and talking; no eye look-at in v1, 2026-11-10.** The Blender pipeline renders the bear as whole-body frames, so the eyes and mouth come as separate small **face layers** per direction (eyes open/closed, a few mouth shapes), drawn over the body at a **per-frame face position** that Blender exports with each clip (as it does `root_px`), so the face follows head bobs. The brain then picks blink timing at random (jittered timers) and flaps the mouth while `Speaking` streams. Faces are rendered only for the directions where the face shows (not N, NE, NW). A pipeline check, like `verify_b.py`, requires body + open-eyes/closed-mouth layer to match the original render pixel for pixel. Baking blinks and talking into the clips was rejected: blinks would repeat on the idle loop's fixed beat (30 frames, 2.5 s), and a baked mouth can't follow streamed speech. **Look-at in v1 = turning the body** toward the target in the 8 directions. Moving the eyes within the face waits until blinking and talking have been judged on the desktop. P1a's pack format carries the face layers and positions; the art round renders them. |
 
 ## 0. Goals (from the request)
 
@@ -47,8 +53,8 @@ implementation for the harness: 2market (`~/Desktop/work/2market`,
   renderer, senses, widgets, permission policy, credentials (OS keychain), the
   host API with the `buddy` CLI, and storage.
 - **Agent loop = a Bun-compiled TypeScript sidecar** (pi-durable 1.5 + pi-ai).
-  It ships as one ~65 MB binary; no Node install. In 2market's spike it opened
-  in 0.07 s with 51 MB RSS.
+  It ships as one ~68 MB binary (`agent/dist/buddy-agent`); no Node install.
+  In 2market's spike it opened in 0.07 s with 51 MB RSS.
 - **Why not all Rust.** pi-durable is TypeScript. The existing Rust ports
   (pi-agent, rpi-ai, nowa/ri) cover pi-agent-core, not pi-durable: no crash
   recovery, durable timers or subagents. 2market built a Rust loop
@@ -59,15 +65,17 @@ implementation for the harness: 2market (`~/Desktop/work/2market`,
 - **The JSONL-over-stdio protocol is the seam**, so a future Rust harness can
   replace the sidecar.
 - **Ported from 2market:**
-  - `bridge.rs`, `protocol.rs`
-  - `policy.rs` + `rules.rs` + their tests
-  - the gate extension (fail closed, decide timeout)
-  - exact-env bash prepare
-  - the subagent extension (research child, web tools only, max 3)
-  - jobs/`wait` (durable `sleepUntil` = reminders)
-  - context/compaction
-  - `RustCredentialStore`
-  - pi-ai sign-ins
+  - done in S2: `bridge.rs`, `protocol.rs` (`crates/bridge`)
+  - done in S2: `policy.rs` + `rules.rs` + their tests (`crates/policy`;
+    2market's spend allowances and panel checks are not ported)
+  - done in S2: the gate extension (fail closed, decide timeout)
+  - done in S2: exact-env bash prepare
+  - P2b: the subagent extension (research child, web tools only, max 3)
+  - P2b: jobs/`wait` (durable `sleepUntil` = reminders)
+  - P2b: context/compaction
+  - P2c: `RustCredentialStore` (S2 keeps keys in Rust memory only, in
+    `crates/bridge/src/credentials.rs`)
+  - P2c: pi-ai sign-ins
 
 ## 2. Harness (shell-first)
 
@@ -75,9 +83,12 @@ implementation for the harness: 2market (`~/Desktop/work/2market`,
 
 - `bash`, `read`/`write`/`edit`, `web_fetch`/`web_search`, `look`, `task`,
   `wait`.
+- S2 offers only `bash`, `read`/`write`/`edit` (`agent/src/ext/tools`); the
+  rest come in P2b. On Windows `bash` stays off until a busybox-w32
+  `shellPath` is set.
 - `look` is offered only to image-capable models.
-- `web_search` = 2market's keyless DuckDuckGo path unless pi-ai 1.5 has
-  provider-native search (check in S2).
+- `web_search` = 2market's keyless DuckDuckGo path. S2 found that pi-ai 1.5
+  has no provider-native search.
 - **Every desk-buddy capability is the `buddy` Rust CLI** talking to the
   loopback host API. For example:
 
@@ -91,6 +102,9 @@ implementation for the harness: 2market (`~/Desktop/work/2market`,
   buddy studio render | sheet | gif | diff | audit --json
   ```
 
+  S2 built `buddy say`, `buddy mascot emote`, `buddy status` and
+  `buddy --help [--json]` (`crates/host/src/bin/buddy.rs`); the rest arrive
+  with the phases that need them.
 - The agent learns the CLI from skills (`SKILL.md`) plus `buddy --help --json`.
   There are no extra tool schemas, so the cached prompt prefix stays stable.
 - A typed tool is a later option, only if something needs streamed structured
@@ -100,12 +114,15 @@ implementation for the harness: 2market (`~/Desktop/work/2market`,
 
 - **Agent token.** bash prepare injects a per-agent token and
   `BUDDY_TURN=<requestId>` into each command's exact env.
-  - Auth is bound to the token, which is revoked when the agent tab closes.
+  - Auth is bound to the token. Each sidecar start gets a new one, which is
+    revoked when that sidecar exits.
   - `BUDDY_TURN` is attribution only. A stale turn id is accepted, logged and
     shown as "after turn", so a script may outlive its turn.
   - Research subagents never get the token.
 - **User token**, for the user's own terminal and own CLI agents (Claude Code,
-  Codex), so `buddy say/music/remind` works outside any sidecar turn.
+  Codex), so `buddy say/music/remind` works outside any sidecar turn. The host
+  writes it with the port to `~/.desk-buddy/host.json` (0600), and `buddy`
+  reads that file when it has no `BUDDY_TOKEN`.
 - **Widget tokens.** Widget webviews get no token by default. A widget that
   needs agent actions declares them and gets a narrower capability token.
 - **Loopback hygiene.** The browser widget runs arbitrary pages on the same
@@ -201,7 +218,7 @@ Harness ──MascotEvent + params──▶ Brain (shared, Rust) ──Intent─
     budget
 - **Pack** = a text-first folder that agents and users can author and git can
   diff:
-  - `manifest`, `art.aseprite` (or `sheet.png` + `sheet.json`), `behavior` map
+  - `manifest`, the art (PNG strips + their JSON, below), `behavior` map
   - an intent → behavior map with fallback chains (`celebrate → happy → idle`)
   - declared capabilities (look-at, lip-sync, …)
   - **temperament** params (energy, curiosity, shyness, chattiness, sleepiness)
@@ -209,29 +226,39 @@ Harness ──MascotEvent + params──▶ Brain (shared, Rust) ──Intent─
     personality without code
 - Packs are data only in v1. Sandboxed Rhai scripting is a later, optional
   extension.
-- **The pack's art is an `.aseprite` file** (or a PNG sheet + JSON in
-  Aseprite's export layout, for users without Aseprite). It maps one-to-one:
-
-  | Aseprite | Pack |
-  |---|---|
-  | layers | paper-doll parts |
-  | tags | clips |
-  | slices | anchors (bubble, eyes, hit area) |
-  | palette | palette |
-  | user data | metadata |
-
-  Rust reads it directly with `asefile` (read only) or `aseprite-io` (read and
-  write; maturity to be spiked).
-- **Backend in v1: `sprite` with paper-doll layers.**
-  - Layers move by **whole-pixel offsets and flips only**; everything else is a
-    cel swap.
-  - blink = eye-layer frames; look-at = 8-direction eye cels; speech = mouth
-    flaps; squash and stretch = pre-drawn body frames; bob = whole-sprite
-    integer offset.
-  - Effects (hearts, zzz, sweat drop) are sprites too.
-  - Liveliness comes from scheduling plus combinatorics (eyes × mouths ×
-    bodies × accessories). The brain's continuous params are quantized to the
-    pixel grid and to the clip fps (8–12).
+- **The pack's art is the Blender pipeline's output (D15)**: one PNG strip per
+  clip and direction, plus a JSON file describing them. The versioned pack
+  manifest and loader around it are built in P1a. Today's files
+  (`experiments/mascot/out/bear3d/`):
+  - `anim/anim.json` (Stage A: idle, walk, run and their start/stop
+    transitions): per clip `loop`, `fps` (12), `frame_w`/`frame_h` (84×123),
+    `anchor` (the floor point between the feet), one strip per direction
+    (S, SE, E, NE, N, NW, W, SW), and per frame `dur` plus `root_px` (how far
+    to move the sprite after that frame, so walks don't slide).
+  - `anim_b/anim_b.json` + `props/props.json` (Stage B: the bed and reading
+    sets, with `get_in_bed → sleep → wake_up` and `sit_down → read → stand_up`).
+    Each set comes in two placements: A, and B, its true 3D mirror. During a
+    Stage B clip the props and the bear are baked into one frame. Outside
+    those clips the props and the bear are separate sprites, sorted by floor
+    depth. Hand-off frames match the props + idle sprite pixel for pixel
+    (`verify_b.py`).
+  - `.aseprite` packs (layers → parts, tags → clips, slices → anchors) are
+    for user-made mascots and wait for P4 (D15).
+- **Backend in v1: `sprite` with face layers (D16).**
+  - The bear's frames are whole-body sprites per direction. Moves are
+    **whole-pixel offsets only**, and there are no flips, because every
+    direction is its own render.
+  - squash and stretch, bob and gait are in the rendered clips.
+  - blink = eyes-closed face layer; speech = mouth-shape layers flapped while
+    `Speaking` streams. Both are drawn at the clip's per-frame face position,
+    in the directions where the face shows. Not rendered yet (art round).
+  - look-at = turning the body toward the target in the 8 directions; no eye
+    movement within the face in v1.
+  - Effects (hearts, zzz, sweat drop) are sprites too. Stage B already
+    renders `zzz_<ori>.png` as an overlay.
+  - Liveliness comes from scheduling, clip variety and face layers on top of
+    any clip. The brain's continuous params are quantized to
+    the pixel grid and to the clip fps (12).
 - **Later:** a smooth `rig` backend through the same trait, only if a
   non-pixel mascot is ever wanted.
 - **Screen awareness** (walking along window edges, sitting on title bars)
@@ -245,23 +272,29 @@ Harness ──MascotEvent + params──▶ Brain (shared, Rust) ──Intent─
 
 ### Mascot window
 
-- **CPU composite by default** (a few blits per frame at 64×64), because pixel
-  art doesn't need a GPU vector pipeline.
+S1 (`spikes/s1-window`) built this on macOS; Windows is still unbuilt.
+
+- **CPU composite by default** (a few blits per frame on an ~84×123 canvas),
+  because pixel art doesn't need a GPU vector pipeline. S1 composites a faint
+  iso floor grid that scrolls with the follow camera, a soft vignette, and the
+  bear centered on top, at 0.3% CPU idle.
   - Windows: a layered window (`WS_EX_LAYERED` + `UpdateLayeredWindow`), which
-    passes clicks through alpha-0 pixels by itself.
-  - macOS: a CALayer fed from a CPU buffer.
+    passes clicks through alpha-0 pixels by itself. Not built yet.
+  - macOS: a CALayer fed from a CPU buffer (premultiplied BGRA).
   - wgpu and Vello leave v1, and the renderer trait stays.
 - **Display scale is always a whole multiple of sprite pixels**: backing scale
   × user zoom, floored. Never fractional, or Windows at 125%/150% blurs it.
-  64×64 at ×4–×8 is 256–512 device px.
-- **Per-pixel hit test from our own alpha** on macOS: toggle cursor
-  hit-testing when the cursor is over opaque pixels (as in Bevy's desk_toy).
+  Zoom is a user setting, ×1–×3 (D14), so the ~100 px bear is 200–600 device
+  px on a Retina display.
+- **Per-pixel hit test from our own alpha** on macOS: toggle
+  `ignoresMouseEvents` when the cursor is over opaque pixels (as in Bevy's
+  desk_toy). In S1 a press on the bear drags it.
 - Low fps when idle, 0 when hidden or occluded.
 - **macOS:**
   - a non-activating NSPanel
   - `collectionBehavior` = canJoinAllSpaces + fullScreenAuxiliary
-  - accessory activation policy → a **menu bar app, no Dock icon** (open
-    question)
+  - accessory activation policy → a **menu bar app, no Dock icon** (D3), with
+    a tray menu
   - window level just above *floating*; raised to the fullscreen-capable level
     only while the frontmost app is in a fullscreen Space (a level above
     statusBar would also paint over Spotlight, menus and Notification Center)
@@ -316,7 +349,24 @@ Harness ──MascotEvent + params──▶ Brain (shared, Rust) ──Intent─
 
 - **Pattern** from HyperFrames Studio: shared files; you point at a frame and
   leave a note for the agent.
-- **Pixel-art survey (2026-11):**
+- **Art pipeline (D13, D14): Blender → palette → ink outline.** All of the
+  bear's art comes from `experiments/mascot/bear3d/`. Nothing is drawn in code.
+  - A 3D bear built from the user's drawings (`experiments/bear-proto/ref/`),
+    kept cute and toy-like (mochi body, flat plush face), rigged and animated
+    in Blender 5.0 headless.
+  - Build order: `run.sh` (model) → `run_anim.sh` (Stage A clips) →
+    `run_b.sh` (Stage B sets and clips), each needing the previous step's
+    `.blend`. `verify_b.py` checks the Stage B hand-offs after a re-render.
+  - Pixel rules: iso 2:1 orthographic camera, 8 directions, 12 fps, 40.07 px
+    per world unit, alpha only 0 or 255, a 1 px ink outline, and colors only
+    from `bear-proto/palette-bear.json` + `scene-proto/palette.json` (+
+    `bear3d/palette-ext.json` for furniture).
+  - Review: GIFs and `preview.html` / `preview_b.html` pages, plus Pillow
+    contact sheets, and the real desktop through S1.
+  - New clips (think, talk, ask, oops, happy, celebrate) are the roadmap's
+    art round.
+- **Pixel-art survey (2026-11).** Written before D13, when the bear was
+  meant to be drawn by hand. It still matters for user-made mascots in P4:
 
   | Tool | Verdict |
   |---|---|
@@ -328,12 +378,13 @@ Harness ──MascotEvent + params──▶ Brain (shared, Rust) ──Intent─
 
   None of them has a real review step (comments, approval), so that part is
   ours. **Verdict: no GUI pixel editor of our own.** Aseprite is for human
-  edits; our studio handles behavior and review, plus a headless pixel toolkit
-  for agents.
-- **Headless pixel toolkit, `buddy studio px …`: the agent path that always
-  works**, with no Aseprite needed (D8/D11):
-  - `grid`: a layer/cel as a palette-indexed text grid (64×64 ≈ 4 KB), edited
-    and written back
+  edits of user-made mascots; our studio handles behavior and review, plus a
+  headless pixel toolkit for agents.
+- **Headless pixel toolkit, `buddy studio px …` (P4): the agent path that
+  always works**, with no Aseprite needed (D8/D11). It touches up sprites; it
+  doesn't replace the Blender pipeline:
+  - `grid`: a layer/cel as a palette-indexed text grid (a 64×64 cel ≈ 4 KB),
+    edited and written back
   - layer ops: integer shift, mirror, recolor within the palette, outline,
     flood fill, copy frame/tag, swap cels
   - `sheet`: contact sheets with zoom, onion skin, and a mock desktop
@@ -343,9 +394,10 @@ Harness ──MascotEvent + params──▶ Brain (shared, Rust) ──Intent─
     or anchor slices, frame counts per tag
   - Aseprite's own `-b --script` Lua bridge is an optional extra when it's
     found on the machine.
-- **Sprite spec for the artist:** one page covering canvas, palette, layer
-  names, required tags, anchor slices and fps. It's the contract that lets
-  agents derive the rest from the artist's base sprite.
+- **Sprite spec:** one page covering canvas, palette, directions, required
+  clips, anchors and fps. For the bear the pipeline's pixel rules and its JSON
+  files are that spec; P1a's pack README writes it down, and P4 hands it to
+  people who make their own mascots.
 - **The studio is the app's own binary in studio mode**, so the preview is
   exactly what the app renders. Its UI is a webview inside that binary.
   - hot reload of the pack folder
@@ -362,33 +414,45 @@ Harness ──MascotEvent + params──▶ Brain (shared, Rust) ──Intent─
   stills → look → fix without a window, the same loop as in tiktok-motion.
 - The studio doubles as the **user-facing "make your own mascot" tool**, so its
   UX matters beyond agents.
-- **Art (the hardest problem).** First an agent attempt (the D12 demo); most
-  likely an artist's base sprite after that, with agents deriving clips, eye
-  and mouth cels, effects and variants from it under the sprite spec.
+- **Art (the hardest problem).** Solved for now by the Blender pipeline: the
+  S0 demo passed (D14), and agents add clips by animating the same rig. An
+  artist is no longer on the plan.
 
 ## 6. Workspace layout
 
+✅ = exists today; the rest is planned (the roadmap step that adds it is in
+brackets).
+
 ```
+Cargo.toml             workspace; spikes/s1-window is excluded (own lockfile and target/)
 crates/
-  buddy-app/           Tauri shell
-  mascot-protocol/     MascotEvent, params, pack schema (versioned)
-  mascot-core/         brain + runtime (scheduler, reflexes, temperament)
-  mascot-render/       CPU composite + integer upscale (trait for later backends)
-  host/                buddy CLI + loopback API (tokens, origin/host checks)
-  policy/              modes, rules, taint (ported from 2market)
-  bridge/              sidecar process + JSONL protocol
-  widgets/             widget manager, manifest, JS SDK
-  studio/              studio mode + headless render/audit
-agent/                 TS sidecar (pi-durable + extensions + skills)
-mascots/<name>/        packs
+  buddy-app/           Tauri shell                                    [P1b]
+  mascot-protocol/ ✅  MascotEvent (versioned); params + pack schema [P1a]
+  mascot-core/         brain + runtime (scheduler, reflexes, temperament) [P1a]
+  mascot-render/       CPU composite + integer upscale (trait for later backends) [P1b]
+  host/ ✅             buddy CLI + loopback API (tokens, origin/host checks)
+  policy/ ✅           modes, rules, taint (ported from 2market)
+  bridge/ ✅           sidecar process + JSONL protocol, MascotEvent mapping, in-memory credentials
+  widgets/             widget manager, manifest, JS SDK               [P3]
+  studio/              studio mode + headless render/audit            [P4]
+agent/ ✅              TS sidecar (pi-durable + extensions; skills [P2])
+mascots/<name>/        packs                                          [P1a]
+spikes/
+  s1-window/ ✅        S1: NSPanel mascot window, demo behaviour loop (folds into buddy-app in P1b)
+  s2-harness/ ✅       S2: driver for one prompt through the whole harness
+experiments/
+  mascot/bear3d/ ✅    the Blender pipeline; output in mascot/out/bear3d/
+  bear-proto/ref/ ✅   the user's original bear drawings + palette-bear.json
+  scene-proto/ ✅      palette.json from the D13 scene prototypes
 ```
 
 ## 7. Spikes (with pass criteria), then phases
 
-- **S0 mascot demo (D12, now):** an agent-drawn 64×64 original mascot as an
-  `.aseprite` file with paper-doll layers and a handful of clips, rendered to
-  GIFs and sheets at display scale for review. Its job is to judge whether
-  agent pixel art is good enough, which shapes how much depends on an artist.
+- **S0 mascot demo (D12): passed 2026-11-09 (D14).** The plan was an
+  agent-drawn 64×64 `.aseprite` mascot. What passed is the Blender polar bear
+  (§5 art pipeline): Stage A clips in 8 directions, reviewed as GIFs, preview
+  pages and on the desktop through S1. Stage B (bed and reading sets) was
+  rendered after it.
 - **S1 window**
   - transparent + topmost + per-pixel click-through on macOS, including over
     fullscreen Spaces with the dynamic window level
@@ -405,11 +469,9 @@ mascots/<name>/        packs
   - a crash mid-turn resumes
   - **Windows:** pi-durable's bash tool runs under busybox-w32 via `shellPath`
     (check for assumptions like `-lc`)
-  - check whether pi-ai 1.5 has native search
-- **S3 studio/format**
-  - `asefile` vs `aseprite-io`: reading layers, tags, slices and user data;
-    a byte-stable write round trip
-  - headless composite of the S0 mascot to PNG/GIF, plus `diff` and `lint`
+  - check whether pi-ai 1.5 has native search (it doesn't)
+- **S3 studio/format: dropped (D15).** The pack format moves to P1a; headless
+  composite, `lint`, `diff` and `.aseprite` reading move to P4.
 - **Media spike** (before P3)
   - IFrame embed from the loopback origin
   - audio keeps playing while hidden (or the off-screen parking fallback works)
@@ -420,12 +482,45 @@ mascots/<name>/        packs
 - **P3:** widgets (media, browser) + screen awareness
 - **P4:** studio + mascot SDK for users
 
+### Roadmap (status as of 2026-11-10)
+
+Each step is one autopilot ticket unless it says otherwise. Do them in order,
+because each one builds on the one before it.
+
+| # | Step | Status | Builds on |
+|---|---|---|---|
+| 1 | **S0** mascot demo: the Blender bear, Stage A clips (D12, D14) | ✅ done | — |
+| 2 | **S1** window on macOS: NSPanel, click-through, fullscreen Spaces, mixed-DPI display moves, 0.3% CPU idle, webview in the same process (`0b1f66e`) | ✅ macOS · ⏳ Windows 11 deferred (no Windows machine) | S0 |
+| 3 | **S2** harness: sidecar, policy gate, host API + `buddy`, `BUDDY_TURN`, crash resume, MascotEvents (`e1df770`). pi-ai 1.5 has no native search. | ✅ macOS · ⏳ busybox-w32 check deferred | — |
+| — | ~~S3 studio/format~~ | dropped (D15) | — |
+| 4 | **P1a** brain + intents: the versioned pack format (manifest + loader over the pipeline output, with room for face layers and per-frame face positions, D16) with the bear pack's intent → clip map and fallbacks; `crates/mascot-core` (event → intent, idle scheduler, timers, temperament, DND/quiet-hours inputs); a replay driver | ⬜ next | S0 art, S2 events |
+| 5 | **P1b** app shell: `crates/buddy-app` (Tauri) folds S1 in, with the brain driving the window from real events; S1's demo loop retires | ⬜ | S1, P1a |
+| 6 | **P1c** senses + reflexes: frontmost app, idle time, time of day, DND (fullscreen, screen share, toggle), quiet hours | ⬜ | P1b |
+| 7 | **Art round:** Blender clips for think, talk, ask, oops, happy and celebrate (asked for by P1a's pack README), plus the D16 face layers (eyes open/closed, mouth shapes, per-frame face positions) and their pixel-match check | ⬜ can run any time after P1a | S0 pipeline |
+| 8 | **P2a** harness in the app: `Agent` + `Host` in buddy-app, the speech bubble streaming `Speaking`, `buddy say` lines, the approval card as a mascot behavior, the user token | ⬜ | P1b, S2 |
+| 9 | **P2b** harness depth (S2b): context capping and compaction, `web_fetch`/`web_search` (DuckDuckGo), `look`, research subagent (`task`), jobs/`wait` reminders | ⬜ | S2 |
+| 10 | **P2c** credentials (S2c): OS keychain + pi-ai sign-ins, and the attention budget (D4: 4 unprompted turns/hour, 0 in DND and quiet hours) | ⬜ | P2a, P1c |
+| 11 | **Media spike:** IFrame embed from the loopback origin, hidden audio | ⬜ | P2a |
+| 12 | **P3** widgets (manager, manifest, JS SDK, media, browser) + screen awareness | ⬜ | media spike |
+| 13 | **P4** studio + mascot SDK: studio mode, `buddy studio …` (headless composite, `lint`, `diff`), liveliness audit, `.aseprite` import (D15) | ⬜ | P1a |
+| 14 | **Windows pass:** S1 layered window + S2 busybox-w32 on Windows 11 | ⏳ needs a Windows machine | S1, S2 |
+| 15 | Release profile + distribution (D8) | ⬜ | P2 |
+
 ## 8. Open questions
 
-All ten earlier questions are answered (D1–D10). Still open:
-1. Does "64-bit pixel art" mean a 64×64 canvas? Assumed yes.
-2. Does LibreSprite (a free fork of an older Aseprite) handle tags and slices
-   well enough to recommend to users without Aseprite? Unverified.
+All ten earlier questions are answered (D1–D10). Answered since:
+- ~~Does "64-bit pixel art" mean a 64×64 canvas?~~ No. "64-bit" is the user's
+  word for the level of detail and color (D2), not a canvas size. Bit depth
+  counts colors; canvas size counts pixels. The bear is about 100 px tall on
+  an 84×123 frame (D14).
+- ~~Does LibreSprite handle tags and slices well enough to recommend to users
+  without Aseprite?~~ No longer relevant: the bear comes from Blender (D13),
+  and `.aseprite` import waits for P4 (D15). Check it again then, if P4 still
+  wants a free editor to point users at.
+- ~~Blink, look-at and speech for the Blender bear?~~ Face layers for blinking
+  and talking; look-at by turning the body (D16).
+
+Nothing else is open right now.
 
 ## Sources
 

@@ -6,7 +6,7 @@ and talks through speech bubbles, powered by an LLM.
 
 ## Ground rules
 
-- Decisions D1–D14 in the plan (below) are settled. Re-read them before
+- Decisions D1–D16 in the plan (below) are settled. Re-read them before
   proposing anything, and don't reopen one without the user.
 - All art comes from Blender, pre-rendered to iso pixel art (D13). Never draw
   sprites in code. Keep the bear cute and toy-like, never realistic bear anatomy.
@@ -19,7 +19,7 @@ and talks through speech bubbles, powered by an LLM.
 
 - **Architecture and decisions:** [docs/designs/desk-buddy-plan.md](docs/designs/desk-buddy-plan.md).
   Read §1 (runtime split), §3 (mascot contract) and §6 (workspace layout) before
-  adding code or crates, and §7 for spike pass criteria.
+  adding code or crates, and §7 for spike pass criteria and the roadmap (what is done and what comes next).
 - **Art and visual design:** the same plan, D2/D13 and §5 (pixel style, iso
   world, shots, Blender → palette → ink-outline pipeline). Read it before any
   mascot, room or UI art change. Pipeline: `experiments/mascot/bear3d/`;
