@@ -55,11 +55,6 @@ S = 6
 ref = Image.open(os.path.join(MASCOT, 'in', 'chatgpt-01.png')).convert('RGBA').crop((330, 50, 900, 1180))
 ref = ref.resize((round(ref.width * v01.height * S / ref.height), v01.height * S), Image.LANCZOS)
 row([ref, up(v01, S), up(mine, S)]).save(os.path.join(OUT, 'compare.png'))
-# round 1 vs round 2 at the same angle and scale (round1_yaw112.5.png = the round-1 sprite, kept for this)
-r1p = os.path.join(HERE, 'round1_yaw112.5.png')
-if os.path.exists(r1p):
-    r1 = Image.open(r1p).convert('RGBA')
-    row([ref, up(r1, S), up(mine, S)]).save(os.path.join(OUT, 'compare_v1_v2.png'))
 print('compare heights: v01', v01.height, '3D', mine.height)
 
 # preview of both strips

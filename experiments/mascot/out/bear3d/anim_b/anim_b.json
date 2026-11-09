@@ -1,0 +1,904 @@
+{
+ "note": "Stage B clips (bed: get_in_bed -> sleep (loop) -> wake_up; reading: sit_down -> read (loop) -> stand_up). Same iso camera, PPU and palette rules as Stage A. Each frame is the WHOLE set (props + bear) baked on one canvas; anchor = pixel of the set origin (bed: footprint centre; reading: table footprint centre) on the floor. ori A is the default placement, ori B its true 3D mirror (light unchanged, not a sprite flip). Hand-off: the first frame of get_in_bed / sit_down and the last of wake_up / stand_up are pixel-identical to the props-only frame + the Stage A idle sprite (frame 0) at handoff.px from the anchor (Stage A anchor on that pixel), facing handoff.facing; pos_world is the same spot in world units from the set origin.",
+ "sorting": "Outside these clips the runtime draws the props (props/*.png, or set_<set>_<ori>.png) and the free bear sprite as separate sprites and sorts whole sprites back to front by floor depth (world x - y of each anchor, i.e. screen y of the floor point; bear vs bed: use the bed footprint in props.json). From the first to the last frame of a Stage B clip, hide the set's prop sprites and the bear sprite and draw the baked frame instead at the set anchor, sorted as the set (the bear never leaves the set footprint plus the hand-off spot). At the hand-off spots the bear is in front of every prop pixel, so swapping back to separate sprites cannot change the picture. Zzz: baked into sleep (and wake_up frame 0); zzz_<ori>.png is the same effect alone if the runtime wants to draw it as an overlay instead.",
+ "fps": 12,
+ "ppu": 40.0719967705934,
+ "sets": {
+  "bed": {
+   "A": {
+    "frame_w": 176,
+    "frame_h": 160,
+    "anchor": [
+     88,
+     115
+    ],
+    "props_frame": "../props/set_bed_A.png",
+    "orientation": "headboard to the NE (bed long axis along world +Y), entered from its SE side",
+    "zzz": {
+     "file": "zzz_A.png",
+     "frame_w": 21,
+     "frame_h": 33,
+     "frames_n": 36,
+     "anchor": [
+      -4,
+      37
+     ],
+     "head_px_in_set": [
+      24,
+      -65
+     ]
+    }
+   },
+   "B": {
+    "frame_w": 176,
+    "frame_h": 160,
+    "anchor": [
+     87,
+     115
+    ],
+    "props_frame": "../props/set_bed_B.png",
+    "orientation": "mirror of A: headboard to the NW, entered from its SW side",
+    "zzz": {
+     "file": "zzz_B.png",
+     "frame_w": 21,
+     "frame_h": 33,
+     "frames_n": 36,
+     "anchor": [
+      24,
+      37
+     ],
+     "head_px_in_set": [
+      -24,
+      -65
+     ]
+    }
+   }
+  },
+  "read": {
+   "A": {
+    "frame_w": 138,
+    "frame_h": 152,
+    "anchor": [
+     102,
+     135
+    ],
+    "props_frame": "../props/set_read_A.png",
+    "orientation": "pouf on the NW side of the table, bear reads facing SE"
+   },
+   "B": {
+    "frame_w": 138,
+    "frame_h": 152,
+    "anchor": [
+     35,
+     135
+    ],
+    "props_frame": "../props/set_read_B.png",
+    "orientation": "mirror of A: pouf on the NE side, bear reads facing SW"
+   }
+  }
+ },
+ "anims": {
+  "get_in_bed": {
+   "set": "bed",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 22,
+   "files": {
+    "A": "get_in_bed_A.png",
+    "B": "get_in_bed_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      1.7469,
+      -0.4411
+     ],
+     "px": [
+      37,
+      31
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    },
+    "B": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      0.4411,
+      -1.7469
+     ],
+     "px": [
+      -37,
+      31
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    }
+   ],
+   "next": "sleep"
+  },
+  "sleep": {
+   "set": "bed",
+   "loop": true,
+   "fps": 12,
+   "frames_n": 36,
+   "files": {
+    "A": "sleep_A.png",
+    "B": "sleep_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83,
+     "zzz": 0
+    },
+    {
+     "dur": 83,
+     "zzz": 1
+    },
+    {
+     "dur": 83,
+     "zzz": 2
+    },
+    {
+     "dur": 83,
+     "zzz": 3
+    },
+    {
+     "dur": 83,
+     "zzz": 4
+    },
+    {
+     "dur": 83,
+     "zzz": 5
+    },
+    {
+     "dur": 83,
+     "zzz": 6
+    },
+    {
+     "dur": 83,
+     "zzz": 7
+    },
+    {
+     "dur": 83,
+     "zzz": 8
+    },
+    {
+     "dur": 83,
+     "zzz": 9
+    },
+    {
+     "dur": 83,
+     "zzz": 10
+    },
+    {
+     "dur": 83,
+     "zzz": 11
+    },
+    {
+     "dur": 83,
+     "zzz": 12
+    },
+    {
+     "dur": 83,
+     "zzz": 13
+    },
+    {
+     "dur": 83,
+     "zzz": 14
+    },
+    {
+     "dur": 83,
+     "zzz": 15
+    },
+    {
+     "dur": 83,
+     "zzz": 16
+    },
+    {
+     "dur": 83,
+     "zzz": 17
+    },
+    {
+     "dur": 83,
+     "zzz": 18
+    },
+    {
+     "dur": 83,
+     "zzz": 19
+    },
+    {
+     "dur": 83,
+     "zzz": 20
+    },
+    {
+     "dur": 83,
+     "zzz": 21
+    },
+    {
+     "dur": 83,
+     "zzz": 22
+    },
+    {
+     "dur": 83,
+     "zzz": 23
+    },
+    {
+     "dur": 83,
+     "zzz": 24
+    },
+    {
+     "dur": 83,
+     "zzz": 25
+    },
+    {
+     "dur": 83,
+     "zzz": 26
+    },
+    {
+     "dur": 83,
+     "zzz": 27
+    },
+    {
+     "dur": 83,
+     "zzz": 28
+    },
+    {
+     "dur": 83,
+     "zzz": 29
+    },
+    {
+     "dur": 83,
+     "zzz": 30
+    },
+    {
+     "dur": 83,
+     "zzz": 31
+    },
+    {
+     "dur": 83,
+     "zzz": 32
+    },
+    {
+     "dur": 83,
+     "zzz": 33
+    },
+    {
+     "dur": 83,
+     "zzz": 34
+    },
+    {
+     "dur": 83,
+     "zzz": 35
+    }
+   ],
+   "next": "sleep or wake_up"
+  },
+  "wake_up": {
+   "set": "bed",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 25,
+   "files": {
+    "A": "wake_up_A.png",
+    "B": "wake_up_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "end",
+     "frame": 24,
+     "pos_world": [
+      1.7469,
+      -0.4411
+     ],
+     "px": [
+      37,
+      31
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    },
+    "B": {
+     "at": "end",
+     "frame": 24,
+     "pos_world": [
+      0.4411,
+      -1.7469
+     ],
+     "px": [
+      -37,
+      31
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83,
+     "zzz": 0
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    }
+   ],
+   "next": "Stage A idle (rest pose, same spot and facing)"
+  },
+  "sit_down": {
+   "set": "read",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 12,
+   "files": {
+    "A": "sit_down_A.png",
+    "B": "sit_down_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      -1.3411,
+      -1.1293
+     ],
+     "px": [
+      -70,
+      -3
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      1.1293,
+      1.3411
+     ],
+     "px": [
+      70,
+      -3
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    }
+   ],
+   "next": "read"
+  },
+  "read": {
+   "set": "read",
+   "loop": true,
+   "fps": 12,
+   "frames_n": 48,
+   "files": {
+    "A": "read_A.png",
+    "B": "read_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    }
+   ],
+   "next": "read or stand_up"
+  },
+  "stand_up": {
+   "set": "read",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 11,
+   "files": {
+    "A": "stand_up_A.png",
+    "B": "stand_up_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "end",
+     "frame": 10,
+     "pos_world": [
+      -1.3411,
+      -1.1293
+     ],
+     "px": [
+      -70,
+      -3
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "end",
+     "frame": 10,
+     "pos_world": [
+      1.1293,
+      1.3411
+     ],
+     "px": [
+      70,
+      -3
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    },
+    {
+     "dur": 83,
+     "zzz": -1
+    }
+   ],
+   "next": "Stage A idle (rest pose, same spot and facing)"
+  }
+ }
+}

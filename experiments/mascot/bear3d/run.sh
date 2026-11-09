@@ -1,8 +1,7 @@
 #!/bin/sh
 # Full rebuild: model -> data passes -> pixel art -> deliverables (~40 s).
-#   sh run.sh [cute|round1] [RAWDIR]
-#     cute   (default) bear3d/build_bear.py + pixelize.py  -> ../out/bear3d/cute/  (+ ab.png: round 1 vs cute)
-#     round1 bear3d/round1/ copies (untouched round 1)      -> ../out/bear3d/
+#   sh run.sh [cute] [RAWDIR]
+#     cute   (default) bear3d/build_bear.py + pixelize.py  -> ../out/bear3d/cute/
 #   OUT=dir overrides the output folder. RAWDIR = scratch for the big intermediate passes, deleted at the end.
 set -e
 cd "$(dirname "$0")"
@@ -11,8 +10,7 @@ VAR=${1:-cute}
 RAW=${2:-${TMPDIR:-/tmp}/bear3d_raw}
 case "$VAR" in
   cute)   SRC=.;      OUT=${OUT:-../out/bear3d/cute} ;;
-  round1) SRC=round1; OUT=${OUT:-../out/bear3d} ;;
-  *) echo "usage: sh run.sh [cute|round1] [RAWDIR]"; exit 1 ;;
+  *) echo "usage: sh run.sh [cute] [RAWDIR]"; exit 1 ;;
 esac
 rm -rf "$RAW"; mkdir -p "$RAW"
 $B -b -P $SRC/build_bear.py -- --out "$SRC/bear.blend"

@@ -1,0 +1,229 @@
+{
+ "note": "Stage B props, modelled in Blender (render_b.py, chunky superellipsoid toy shapes), pre-rendered with the Stage A camera and pixel step. Each prop sprite = that prop rendered alone with its own ink outline; anchor = pixel of the prop origin (bed / table / pouf: floor point at the footprint centre; book: its origin on the table top, z = 1.0). set_<set>_<ori>.png = the props-only frame on the clip canvas. Footprints in world units (1 unit = ppu px along the iso axes). ori B = true 3D mirror of ori A. Colours: palette-bear.json + moss + palette-ext.json (wood, fabric ramps; local extension). Each prop object has its own material / pass index (pass_ids).",
+ "ppu": 40.0719967705934,
+ "pass_ids": {
+  "bed_base": 22,
+  "bed_head": 23,
+  "bed_foot": 24,
+  "mattress": 25,
+  "pillow": 26,
+  "quilt": 27,
+  "quilt_lining": 28,
+  "table_top": 29,
+  "table_legs": 30,
+  "pouf": 31,
+  "pouf_btn": 32,
+  "book_cover_B": 33,
+  "book_cover_F": 34,
+  "book_pages_B": 35,
+  "book_pages_F": 36,
+  "book_leaf": 37
+ },
+ "props": {
+  "bed": {
+   "A": {
+    "file": "bed_A.png",
+    "size": [
+     170,
+     123
+    ],
+    "anchor": [
+     85,
+     85
+    ],
+    "offset_px_in_set": [
+     0,
+     0
+    ],
+    "layer_key": "bed_3a2ccc74ad8f"
+   },
+   "B": {
+    "file": "bed_B.png",
+    "size": [
+     170,
+     123
+    ],
+    "anchor": [
+     85,
+     85
+    ],
+    "offset_px_in_set": [
+     0,
+     0
+    ],
+    "layer_key": "bed_3a2ccc74ad8f"
+   },
+   "footprint_world": {
+    "x": [
+     -1.0,
+     1.0
+    ],
+    "y": [
+     -2.0,
+     2.0
+    ],
+    "note": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    0,
+    0,
+    0
+   ],
+   "set": "bed"
+  },
+  "table": {
+   "A": {
+    "file": "table_A.png",
+    "size": [
+     66,
+     64
+    ],
+    "anchor": [
+     33,
+     50
+    ],
+    "offset_px_in_set": [
+     0,
+     0
+    ],
+    "layer_key": "table_0"
+   },
+   "B": {
+    "file": "table_B.png",
+    "size": [
+     66,
+     64
+    ],
+    "anchor": [
+     33,
+     50
+    ],
+    "offset_px_in_set": [
+     0,
+     0
+    ],
+    "layer_key": "table_0"
+   },
+   "footprint_world": {
+    "x": [
+     -0.65,
+     0.65
+    ],
+    "y": [
+     -0.65,
+     0.65
+    ],
+    "note": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    0,
+    0,
+    0
+   ],
+   "set": "read"
+  },
+  "pouf": {
+   "A": {
+    "file": "pouf_A.png",
+    "size": [
+     38,
+     31
+    ],
+    "anchor": [
+     19,
+     23
+    ],
+    "offset_px_in_set": [
+     -37,
+     -19
+    ],
+    "layer_key": "pouf_0"
+   },
+   "B": {
+    "file": "pouf_B.png",
+    "size": [
+     38,
+     31
+    ],
+    "anchor": [
+     19,
+     23
+    ],
+    "offset_px_in_set": [
+     37,
+     -19
+    ],
+    "layer_key": "pouf_0"
+   },
+   "footprint_world": {
+    "x": [
+     -0.46,
+     0.46
+    ],
+    "y": [
+     -0.46,
+     0.46
+    ],
+    "note": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    -1.3234,
+    0.0176,
+    0
+   ],
+   "set": "read"
+  },
+  "book": {
+   "A": {
+    "file": "book_A.png",
+    "size": [
+     33,
+     22
+    ],
+    "anchor": [
+     24,
+     10
+    ],
+    "offset_px_in_set": [
+     -6,
+     -38
+    ],
+    "layer_key": "book_c0_l-1"
+   },
+   "B": {
+    "file": "book_B.png",
+    "size": [
+     33,
+     22
+    ],
+    "anchor": [
+     9,
+     10
+    ],
+    "offset_px_in_set": [
+     6,
+     -38
+    ],
+    "layer_key": "book_c0_l-1"
+   },
+   "footprint_world": {
+    "on": "table",
+    "x": [
+     -0.33,
+     0.33
+    ],
+    "y": [
+     -0.5,
+     0.5
+    ],
+    "note": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    -0.2222,
+    0.0105,
+    1.0
+   ],
+   "set": "read"
+  }
+ }
+}
