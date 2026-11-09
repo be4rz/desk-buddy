@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>desk-buddy S1 test webview</title>
+<style>
+  :root { color-scheme: light dark; font: 14px/1.4 -apple-system, system-ui, sans-serif; }
+  body { margin: 0; padding: 20px; background: Canvas; color: CanvasText; }
+  h1 { font-size: 15px; margin: 0 0 8px; }
+  code { font: 12px ui-monospace, monospace; }
+  button { margin-top: 12px; font: inherit; padding: 4px 12px; }
+</style>
+</head>
+<body>
+  <h1>Tauri webview, same process as the mascot</h1>
+  <p>Native NSPanel mascot + this WKWebView window share one Tauri 2 process.</p>
+  <p>Rust says: <code id="info">…</code></p>
+  <button id="poke">Make the bear walk now</button>
+  <script>
+    const inv = window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke;
+    const info = document.getElementById('info');
+    if (!inv) { info.textContent = 'no Tauri IPC'; }
+    else {
+      inv('s1_info').then(s => info.textContent = s, e => info.textContent = 'error: ' + e);
+      document.getElementById('poke').onclick = () => inv('s1_poke');
+    }
+  </script>
+</body>
+</html>
