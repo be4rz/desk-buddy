@@ -1,0 +1,20 @@
+# desk-buddy workspace (plan §6). Spike S1 keeps its own lockfile and target.
+[workspace]
+resolver = "2"
+members = ["crates/mascot-protocol", "crates/policy", "crates/bridge", "crates/host", "spikes/s2-harness"]
+exclude = ["spikes/s1-window"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tiny_http = "0.12"
+getrandom = "0.3"
+mascot-protocol = { path = "crates/mascot-protocol" }
+policy = { path = "crates/policy" }
+bridge = { path = "crates/bridge" }
+host = { path = "crates/host" }

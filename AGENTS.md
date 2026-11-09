@@ -29,6 +29,15 @@ and talks through speech bubbles, powered by an LLM.
   `S1_SIZE=64`, `S1_STATS=1`, `S1_VERBOSE=1`. It loads sprites from
   `experiments/mascot/out/bear3d/anim/`, so re-rendering Stage A changes what
   it shows. Its `target/` grows to ~3 GB and the disk is tight.
+- **Spike S2 (agent harness):** `agent/` is the Bun-compiled pi-durable 1.5 sidecar
+  (`bun run typecheck && bun test`; `bun run build` → `agent/dist/buddy-agent`, ~68 MB).
+  The root Cargo workspace holds `crates/mascot-protocol` (MascotEvent), `crates/policy`
+  (tool-call rules, approval cards, `policy.json`), `crates/host` (loopback API + the `buddy`
+  CLI) and `crates/bridge` (runs the sidecar; its e2e tests need bun), plus the driver
+  `spikes/s2-harness` (run it after `cargo build -p host --bin buddy`, which it puts on the
+  agent's PATH). Check with `cargo test --workspace`. Model keys stay in Rust memory:
+  never put one in the sidecar's or a command's env. pi-durable starts shell commands detached,
+  so a killed sidecar can leave them running (tests reap them).
 - **Deployment / release:** N/A for now. Nothing is distributed yet (Cargo
   `publish = false`, Tauri bundling off); D8 says it will be, so add a release
   profile when the app crate exists.

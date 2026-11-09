@@ -1,0 +1,23 @@
+{
+  "name": "@desk-buddy/agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The desk-buddy agent sidecar: pi-durable with desk-buddy's extensions, compiled with Bun into one binary that the Rust host starts.",
+  "type": "module",
+  "scripts": {
+    "build": "bun scripts/build.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "1.5.0",
+    "@earendil-works/pi-ai": "1.5.0",
+    "@earendil-works/pi-durable": "1.5.0",
+    "typebox": "1.4.6"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.14",
+    "@types/node": "24.10.1",
+    "typescript": "5.9.3"
+  }
+}

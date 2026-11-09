@@ -1,6 +1,7 @@
 version: 1
 # desk-buddy is a native macOS desktop app (Tauri 2 + NSPanel), not a web app:
-# there is no localhost URL. The only runnable target today is spike S1.
+# there is no localhost URL. Runnable targets: spike S1 (window) and spike S2
+# (agent harness, a CLI driver).
 # Visual review of the mascot is done on the real desktop by the user; agents
 # verify through the checks below plus S1's stderr stats.
 target: native macOS app (spikes/s1-window), no HTTP endpoint
@@ -12,6 +13,17 @@ services:
     cwd: spikes/s1-window
     start: S1_STATS=1 cargo run
     check: cargo check && cargo test
+  agent-sidecar:
+    cwd: agent
+    # needs bun; builds dist/buddy-agent (~68 MB) and runs it against the scripted fake model
+    check: bun run typecheck && bun test
+  harness:
+    cwd: .
+    # root Cargo workspace: crates/{mascot-protocol,policy,host,bridge} + spikes/s2-harness; bridge's e2e needs bun
+    check: cargo test --workspace
+    # one prompt through the harness against the fake: start the fake first
+    # (bun agent/test/support/fake.ts --port <p> --script <file.json>), then:
+    start: cargo build -p host --bin buddy && S2_HOME=<tmp> cargo run -p s2-harness -- --yes --fake http://127.0.0.1:<p> "<prompt>"
   mascot-pipeline:
     cwd: experiments/mascot/bear3d
     # full rebuilds need Blender (BLENDER=/Applications/Blender.app/Contents/MacOS/Blender): sh run.sh / run_anim.sh / run_b.sh
@@ -20,4 +32,6 @@ flows: >-
   primary: mascot panel appears, idles/walks at 12 fps, idle CPU < 1% (S1_STATS output);
   tray menu zoom x1-x3 and 64/100 px size switch; S1_OPEN_WEBVIEW=1 opens the webview in the same process (s1_info shows the same pid);
   error: S1_ANIM_DIR=/nonexistent cargo run exits 1 with "[s1] cannot load mascot assets";
-  pipeline: verify_b.py PASS after any change to experiments/mascot/out/bear3d/anim_b
+  pipeline: verify_b.py PASS after any change to experiments/mascot/out/bear3d/anim_b;
+  harness: s2-harness prints mascot events thinking → awaiting_permission → working(buddy) → speaking → idle and a host "say" whose turn is the prompt's request id;
+  harness error: a denied card never reaches the host; a model error ends in an "error" event and exit 1; kill -9 mid-tool restarts with an "interrupted" entry

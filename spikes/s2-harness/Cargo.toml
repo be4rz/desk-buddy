@@ -1,0 +1,13 @@
+[package]
+name = "s2-harness"
+description = "Spike S2: one prompt through the agent harness, printing mascot events"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+bridge.workspace = true
+host.workspace = true
+policy.workspace = true
+mascot-protocol.workspace = true

@@ -1,0 +1,11 @@
+[package]
+name = "policy"
+description = "What the agent's tool calls may do: modes, Claude Code-form rules, taint (ported from 2market)"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+getrandom.workspace = true

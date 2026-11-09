@@ -1,0 +1,13 @@
+[package]
+name = "bridge"
+description = "Runs the agent sidecar: JSONL stdio, policy and credential requests, MascotEvents"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+mascot-protocol.workspace = true
+policy.workspace = true
+host.workspace = true
