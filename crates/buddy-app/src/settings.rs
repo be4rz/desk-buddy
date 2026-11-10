@@ -142,13 +142,19 @@ pub struct Studio {
     pub extra: Extra,
 }
 
-/// `BUDDY_HOME`, default `~/.desk-buddy`.
+/// `BUDDY_HOME`, default `~/.desk-buddy`; always absolute (the sidecar and the agent's
+/// commands run in other folders, so a relative home would point somewhere else for them).
 pub fn home() -> PathBuf {
-    if let Some(h) = std::env::var_os("BUDDY_HOME") {
-        return PathBuf::from(h);
-    }
-    let base = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
-    base.join(".desk-buddy")
+    let h = match std::env::var_os("BUDDY_HOME").filter(|h| !h.is_empty()) {
+        Some(h) => PathBuf::from(h),
+        None => std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(".")).join(".desk-buddy"),
+    };
+    absolute(&h)
+}
+
+/// `p` against the current folder when relative.
+pub fn absolute(p: &Path) -> PathBuf {
+    std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf())
 }
 
 pub fn path(home: &Path) -> PathBuf {
@@ -285,5 +291,13 @@ mod tests {
         assert!(matches!(note, Some(LoadNote::Reset { .. })), "{note:?}");
         assert!(d.join("settings.json.bad").is_file() && !path(&d).exists());
         std::fs::remove_dir_all(d).ok();
+    }
+
+    #[test]
+    fn a_relative_home_is_made_absolute() {
+        let cwd = std::env::current_dir().unwrap();
+        assert_eq!(absolute(Path::new("rel/home")), cwd.join("rel/home"));
+        assert_eq!(absolute(Path::new("/abs/home")), PathBuf::from("/abs/home"));
+        assert!(home().is_absolute());
     }
 }

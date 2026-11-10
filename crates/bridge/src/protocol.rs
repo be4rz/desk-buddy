@@ -87,19 +87,34 @@ pub fn request_source(id: &str) -> Option<&'static str> {
     let (prefix, rest) = id.split_once(':')?;
     let free = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "_.:-".contains(c));
     match prefix {
-        "u" if rest.len() == 36 && rest.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c) || c == '-') => Some("chat"),
+        "u" if uuid(rest) => Some("chat"),
+        // a sense-triggered turn (p4, design §4.7)
+        "s" if uuid(rest) => Some("sense"),
         "continue" if free(rest) => Some("continue"),
         "retry" if free(rest) => Some("retry"),
         _ => None,
     }
 }
 
-/// A fresh chat request id: `u:<uuid v4>`.
-pub fn new_request_id() -> String {
+fn uuid(s: &str) -> bool {
+    s.len() == 36 && s.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c) || c == '-')
+}
+
+fn uuid_v4() -> String {
     let h = policy::random_hex(16);
     let v = format!("4{}", &h[13..16]);
     let var = format!("{:x}{}", (u8::from_str_radix(&h[16..17], 16).unwrap() & 0x3) | 0x8, &h[17..20]);
-    format!("u:{}-{}-{}-{}-{}", &h[0..8], &h[8..12], v, var, &h[20..32])
+    format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], v, var, &h[20..32])
+}
+
+/// A fresh chat request id: `u:<uuid v4>`.
+pub fn new_request_id() -> String {
+    format!("u:{}", uuid_v4())
+}
+
+/// A fresh sense-turn request id: `s:<uuid v4>`.
+pub fn new_sense_id() -> String {
+    format!("s:{}", uuid_v4())
 }
 
 /// Reads LF-terminated records. Anything that isn't a JSON object is skipped;
@@ -167,7 +182,9 @@ mod tests {
         assert_eq!(request_source(&new_request_id()), Some("chat"));
         assert_eq!(request_source("continue:01HX.2"), Some("continue"));
         assert_eq!(request_source("retry:r-1"), Some("retry"));
-        for bad in ["u:nope", "u:0F8FAD5B-D9CB-469F-A165-70867728950E", "answer:v1", "job:j-1", "continue:", "other:1", "plain"] {
+        assert_eq!(request_source(&new_sense_id()), Some("sense"));
+        assert_eq!(request_source("s:0f8fad5b-d9cb-469f-a165-70867728950e"), Some("sense"));
+        for bad in ["u:nope", "u:0F8FAD5B-D9CB-469F-A165-70867728950E", "answer:v1", "job:j-1", "continue:", "other:1", "plain", "s:nope", "s:"] {
             assert_eq!(request_source(bad), None, "{bad}");
         }
     }

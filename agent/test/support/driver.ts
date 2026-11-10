@@ -30,6 +30,8 @@ export type Handlers = {
   wait?: (args: Rec) => unknown | Promise<unknown>;
   /** `policy.taint`; default: newly the first time. */
   taint?: (args: Rec) => unknown | Promise<unknown>;
+  /** `auth.*` (the Sign in… window); default: refused. */
+  auth?: (args: Rec) => unknown | Promise<unknown>;
 };
 
 export const ALLOW_ALL: Handlers = { decide: () => ({ decision: "allow" }) };
@@ -161,10 +163,13 @@ export class Driver {
           return ok({ newly });
         }
         default:
+          if (String(req.op).startsWith("auth.")) return h.auth ? ok(await h.auth(req)) : err("no_ui", "No sign-in window in this test.");
           return err("unknown_op", req.op);
       }
     } catch (e) {
-      return err("error", e instanceof Error ? e.message : String(e));
+      // a handler can answer with a coded error: throw { code, message }
+      const code = (e as { code?: unknown })?.code;
+      return err(typeof code === "string" ? code : "error", e instanceof Error ? e.message : String((e as { message?: unknown })?.message ?? e));
     }
   }
 

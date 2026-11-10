@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "signin",
+  "description": "The Sign in… window: listen for signin://state (design ## accounts). App commands aren't in a Tauri app manifest, so no capability scopes them: each command checks its caller's window label (src/caller.rs); only this window may call the signin_* commands.",
+  "windows": ["signin"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+}

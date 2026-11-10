@@ -240,6 +240,9 @@ test("a reminder fires once, also across a kill -9 and restarts; list and cancel
   const fired = d.events().filter((e) => e.type === "reminder_fired");
   expect(fired).toHaveLength(1);
   expect(fired[0]).toMatchObject({ id, text: "stretch", atMs });
+  // When it was set, for the bubble's "set N min ago" chip.
+  expect(fired[0].setAtMs).toBeGreaterThan(atMs - 10000);
+  expect(fired[0].setAtMs).toBeLessThan(atMs);
   // Only a sleeping reminder: nothing was cut off.
   expect(d.events().some((e) => e.type === "interrupted")).toBe(false);
   expect((await d.send("remind.list")).result.reminders).toEqual([]);

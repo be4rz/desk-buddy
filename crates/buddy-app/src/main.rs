@@ -10,19 +10,30 @@
 //! `BUDDY_SENSES=1`), `BUDDY_SENSES_LOG=1` (sense changes to stderr).
 //!
 //! Talk (p3): the speech bubble (`bubble/`, page `web/bubble/`) and the agent harness
-//! (`harness.rs`: host API at `BUDDY_HOME/host.json`, policy gate, one agent). Dev credential:
-//! `BUDDY_FAKE_MODEL=<url>` or the app's own `ANTHROPIC_API_KEY` (kept in memory). Debug builds
-//! only: `BUDDY_PROMPT=<text>` (one prompt once the agent is ready), `BUDDY_ANSWER=allow|deny`.
+//! (`harness.rs`: host API at `BUDDY_HOME/host.json`, policy gate, one agent). Debug builds
+//! only: the dev credential `BUDDY_FAKE_MODEL=<url>`, `BUDDY_PROMPT=<text>` (one prompt once the agent
+//! is ready), `BUDDY_ANSWER=allow|deny`.
+//!
+//! Accounts (p4): keys live in the macOS login keychain (service `desk-buddy`) and in memory; the
+//! tray's Sign in… opens `signin/` (page `web/signin/`). Sense-triggered model turns go through
+//! `unprompted.rs` (4 an hour, none in DND or quiet hours). One app per `BUDDY_HOME`
+//! (`instance.rs`): a second launch logs `[buddy] already running (pid N)` and exits 0. Debug
+//! builds only: `ANTHROPIC_API_KEY` (a session key, never stored), `BUDDY_CRED_STORE=memory|fail`
+//! and `BUDDY_FAKE_OAUTH=1` (a scripted `fake-oauth` provider; see `harness.rs`).
 
 mod bubble;
+mod caller;
 mod driver;
 mod events;
 mod harness;
+mod instance;
 mod panel;
 mod senses;
 mod settings;
+mod signin;
 mod stats;
 mod tray;
+mod unprompted;
 
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
@@ -71,6 +82,14 @@ fn seed() -> u64 {
 
 fn main() {
     let home = settings::home();
+    // held (open) until the process exits
+    let _app_lock = match instance::claim(&home) {
+        Ok(lock) => lock,
+        Err(instance::Running(pid)) => {
+            eprintln!("[buddy] already running (pid {})", pid.map_or("?".into(), |p| p.to_string()));
+            std::process::exit(0);
+        }
+    };
     let (settings, note) = settings::load(&home);
     let warning = note.map(|settings::LoadNote::Reset { bad, why }| {
         eprintln!("[buddy] settings reset to defaults: {why} (kept {})", bad.display());
@@ -125,6 +144,14 @@ fn main() {
             bubble::window::bubble_size,
             bubble::window::bubble_retry,
             bubble::window::reminder_snooze,
+            signin::signin_state,
+            signin::signin_save_key,
+            signin::signin_start,
+            signin::signin_answer,
+            signin::signin_cancel,
+            signin::signin_remove,
+            signin::signin_reopen,
+            signin::signin_close,
         ])
         .setup(move |app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
@@ -148,12 +175,19 @@ fn main() {
             let win = bubble::window::BubbleWin::new(app, mtm)?;
             driver::with_app(|a| a.bubble_win = Some(win));
             tray::build(app, tray_init)?;
+            signin::window::init(app.handle().clone());
             match harness::Harness::start(&home2, &wanted) {
                 Ok(h) => {
                     let view = h.policy_view();
                     driver::with_app(|a| a.policy_changed(&view));
+                    signin::install(h, Box::new(signin::window::emit));
                 }
-                Err(e) => eprintln!("[buddy] cannot start the host API: {e}"),
+                Err(e) => {
+                    // R-start-err: the tray says so (it would read "starting…" for ever)
+                    eprintln!("[buddy] cannot start the host API: {e}");
+                    let s = harness::AgentState::Error(format!("host API: {e}"));
+                    driver::with_app(|a| a.agent_changed(&s));
+                }
             }
             if sensors {
                 senses::start();

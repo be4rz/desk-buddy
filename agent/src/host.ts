@@ -14,12 +14,13 @@ import { executionEnv } from "./env.ts";
 import { compactionSettings } from "./ext/context/index.ts";
 import { bindRoot, command, EVENT_KIND, INPUT_KIND, recordEvent } from "./ext/core/index.ts";
 import { currentTrigger, gate, markAsked, setTrigger, type Trigger } from "./ext/gate/index.ts";
+import { addFakeOAuth, rustInteraction } from "./ext/auth/index.ts";
 import { bindJobs } from "./ext/jobs/index.ts";
 import { bindHarness } from "./ext/task/index.ts";
 import { buildModels } from "./models.ts";
 import { CmdError, type Cmd, exit, type Init, type ModelRef, requestSource, send, type Status, V } from "./protocol.ts";
 import { buildRegistry } from "./registry.ts";
-import { failAll, settle } from "./rpc.ts";
+import { failAll, isCancelled, settle } from "./rpc.ts";
 import { openBunSqliteDatabase } from "./storage/bun-sqlite.ts";
 import { messageText } from "./text.ts";
 
@@ -59,6 +60,8 @@ export async function host(init: Init, input: AsyncIterator<Record<string, unkno
   if (init.v !== V) throw new CmdError("bad_version", `Expected protocol version ${V}, got ${init.v}.`);
   const credentials = new RustCredentialStore();
   const models = buildModels(credentials, init.providers ?? []);
+  // Debug builds' test hook only (Rust never sets it in a release build).
+  if (init.settings.fakeOAuth?.baseUrl) addFakeOAuth(models, init.settings.fakeOAuth.baseUrl);
   setModels(models);
   setCurrentModel(init.model);
   const { registry, modelTools: initialTools, modelToolsFor } = buildRegistry(init);
@@ -193,6 +196,9 @@ export async function host(init: Init, input: AsyncIterator<Record<string, unkno
     onView(v.entries, v.live, false);
   });
 
+  /** The sign-in in progress (one at a time): `auth.cancel` or shutdown ends it. */
+  let login: AbortController | undefined;
+
   /** Set by `shutdown`: input that lands after it waits for the next sidecar. */
   let closing = false;
   const closingError = () => new CmdError("closing", "desk-buddy's agent is closing.");
@@ -244,11 +250,44 @@ export async function host(init: Init, input: AsyncIterator<Record<string, unkno
         const v = await conv.context(ctx);
         return { entries: v.entries, status: JSON.parse(lastStatus || "{}") };
       }
+      case "auth.login": {
+        const providerId = typeof cmd.providerId === "string" ? cmd.providerId : "";
+        if (!providerId) throw new CmdError("bad_request", "auth.login needs a providerId.");
+        if (closing) throw closingError();
+        login?.abort();
+        const mine = new AbortController();
+        login = mine;
+        let refused: Error | undefined;
+        try {
+          await models.login(
+            providerId,
+            "oauth",
+            rustInteraction(mine.signal, (e) => {
+              refused ??= e;
+              mine.abort();
+            }),
+          );
+        } catch (e) {
+          if (refused) throw new CmdError("auth", refused.message);
+          // the window's Cancel can reach us as its prompt's "cancelled" reply before auth.cancel
+          const cancelled = isCancelled(e, mine.signal);
+          // pi-ai's message names the failure (invalid_grant, cancelled); it never holds a token.
+          throw new CmdError(cancelled ? "cancelled" : "auth", e instanceof Error ? e.message : String(e));
+        } finally {
+          if (login === mine) login = undefined;
+        }
+        credentials.changed(providerId);
+        return { providerId, ok: true };
+      }
+      case "auth.cancel":
+        login?.abort();
+        return {};
       case "credentials_changed":
         credentials.changed(typeof cmd.providerId === "string" ? cmd.providerId : undefined);
         return {};
       case "shutdown":
         closing = true;
+        login?.abort();
         return {};
       default: {
         const fn = command(cmd.op);

@@ -88,7 +88,9 @@
   }
 
   function reminder(b, m) {
-    b.append(meta(pill("⏰ reminder", "teal"), close("dismiss")));
+    // "set N min ago" only when the app knows (reminders stored before p4 don't say)
+    const ago = typeof m.setMinAgo === "number" ? (m.setMinAgo < 1 ? " · set just now" : " · set " + m.setMinAgo + " min ago") : "";
+    b.append(meta(pill("⏰ reminder" + ago, "teal"), close("dismiss")));
     b.append(el("div", "text", m.text || ""));
     const row = el("div", "row");
     row.append(
@@ -102,7 +104,7 @@
     const e = m.error || {};
     const signIn = e.action === "sign_in";
     b.append(meta(pill("couldn't answer", "rose"), close()));
-    b.append(el("div", "text", signIn ? "I can't answer without a model key." : "The model didn't respond."));
+    b.append(el("div", "text", e.reason === "keychain" ? "I can't read my keychain, so I can't reach a model." : signIn ? "I can't answer until you sign in to a model." : "The model didn't respond."));
     b.append(el("div", "note err", (e.reason || "error") + ": " + (e.message || "")));
     const row = el("div", "row");
     row.append(

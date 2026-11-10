@@ -35,9 +35,15 @@ and talks through speech bubbles, powered by an LLM.
   `BUDDY_VERBOSE=1`, `BUDDY_SENSES=0|1` (sensors; off under `BUDDY_EVENTS` unless `=1`),
   `BUDDY_SENSES_LOG=1` (sense changes to stderr). Talk (p3): the speech bubble (`src/bubble/`,
   page `web/bubble/index.html`, `?mock=<state>` in a plain browser) and `harness.rs` (host API at
-  `BUDDY_HOME/host.json`, policy, agent "main"); dev credential `BUDDY_FAKE_MODEL=<url>` or the app's
-  own `ANTHROPIC_API_KEY` (memory only); debug builds only: `BUDDY_PROMPT=<text>`,
-  `BUDDY_ANSWER=allow|deny`. SIGTERM/SIGINT quit like the tray's Quit (host.json removed).
+  `BUDDY_HOME/host.json`, policy, agent "main"); dev credential `BUDDY_FAKE_MODEL=<url>` (debug builds only).
+  Accounts (p4): tray **Sign in…** opens `src/signin/` (page `web/signin/index.html`, `?mock=<state>`);
+  keys and OAuth tokens live only in the macOS keychain (service `desk-buddy`) and Rust memory, never
+  in the sidecar's or a command's env. Unprompted sense turns (`unprompted.rs`): 4 an hour, tray line
+  "Unprompted N/4 this hour". A second launch on the same `BUDDY_HOME` (lock: `BUDDY_HOME/app.lock`) logs
+  `[buddy] already running (pid N)` and exits 0. Debug builds only: `ANTHROPIC_API_KEY` (session-only, never stored),
+  `BUDDY_CRED_STORE=memory|fail` (no real keychain), `BUDDY_FAKE_OAUTH=1`, `BUDDY_PROMPT=<text>`,
+  `BUDDY_ANSWER=allow|deny`. Real keychain test (prompts): `BUDDY_KEYCHAIN_TEST=1 cargo test -p bridge keychain`.
+  SIGTERM/SIGINT quit like the tray's Quit (host.json removed).
   A bad pack or art dir exits 1 with `[buddy] cannot load mascot …`. Art comes
   from `experiments/mascot/out/bear3d/` via `mascots/bear/pack.json`, so re-rendering changes it.
   Always `export CARGO_TARGET_DIR=/Users/chantran/orca/desk-buddy/target` (one shared target;

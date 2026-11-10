@@ -4,4 +4,4 @@
 pub mod model;
 pub mod window;
 
-pub use model::{Bubble, Out};
+pub use model::{Bubble, Mode, Out};

@@ -15,9 +15,10 @@
     card: { mode: "card", card },
     "card-queued": { mode: "card", card: { ...card, callId: "c3", title: "Read a file", detail: "", command: "notes.txt", index: 2, total: 3 } },
     "card-tainted": { mode: "card", card: { callId: "c2", title: "Send data out", detail: "", command: "buddy browser type e7 \"my order number…\"", canAlways: false, index: 1, total: 1, taintNote: "This chat read a web page, so “Always” is off until you clear it (tray → Clear web taint)." } },
-    reminder: { mode: "reminder", id: "r_1", text: "Stretch and refill your water." },
+    reminder: { mode: "reminder", id: "r_1", text: "Stretch and refill your water.", setMinAgo: 20 },
+    "reminder-old": { mode: "reminder", id: "r_0", text: "Stretch and refill your water." },
     error: { mode: "error", error: { reason: "model_error", message: "529 overloaded. Nothing ran.", action: "retry" } },
-    "error-no-model": { mode: "error", error: { reason: "no_model", message: "There's no model key yet.", action: "sign_in" } },
+    "error-no-model": { mode: "error", error: { reason: "no_model", message: "There's no model to talk to yet. Sign in to one first.", action: "sign_in" } },
     html: { mode: "speech", streaming: false, text: "<img src=x onerror=alert(1)><b>not bold</b>" },
   };
   const listeners = {};

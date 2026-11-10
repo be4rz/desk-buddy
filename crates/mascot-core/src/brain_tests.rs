@@ -446,7 +446,7 @@ fn events_map_to_intents() {
         (MascotEvent::Say { text: "hi".into(), emotion: Some(Emotion::Happy) }, Intent::Talk),
         (MascotEvent::Emote { name: EmoteName::Wave }, Intent::Wave),
         (MascotEvent::Emote { name: EmoteName::Spin }, Intent::Spin),
-        (MascotEvent::Reminder { id: "r".into(), text: "tea".into() }, Intent::Remind),
+        (MascotEvent::Reminder { id: "r".into(), text: "tea".into(), set_at_ms: None }, Intent::Remind),
     ];
     for (ev, want) in cases {
         let mut b = brain_with(p.clone(), 3);
@@ -992,7 +992,7 @@ fn r2_cues_queue_instead_of_overwriting_a_follow_up() {
     let mut b = brain_with(bear(), 2);
     b.event(&MascotEvent::Say { text: "hi".into(), emotion: Some(Emotion::Happy) }, 1000);
     b.event(&MascotEvent::Emote { name: EmoteName::Wave }, 1100);
-    b.event(&MascotEvent::Reminder { id: "r1".into(), text: "stand up".into() }, 1200);
+    b.event(&MascotEvent::Reminder { id: "r1".into(), text: "stand up".into(), set_at_ms: None }, 1200);
     let shows = run_until(&mut b, 1000, 30_000);
     let mut seq: Vec<Intent> = shows.iter().map(|(_, s)| s.intent).collect();
     seq.dedup();
@@ -1077,7 +1077,7 @@ fn review_settled_cuts_the_old_mouth_but_the_next_say_still_talks() {
 fn p2_settled_does_not_cut_a_reminder_that_is_showing() {
     let mut b = brain_with(bear(), 5);
     b.tick(0);
-    b.event(&MascotEvent::Reminder { id: "r".into(), text: "stand up".into() }, 0);
+    b.event(&MascotEvent::Reminder { id: "r".into(), text: "stand up".into(), set_at_ms: None }, 0);
     b.event(&MascotEvent::Say { text: "hello there, friend".into(), emotion: None }, 10);
     assert_eq!(b.cue.len(), 2);
     b.event(&MascotEvent::Settled, 20);
@@ -1090,7 +1090,7 @@ fn p2_a_full_queue_of_timed_cues_drops_an_incoming_emote_not_a_reminder() {
     let mut b = brain_with(bear(), 7);
     b.tick(0);
     for (i, r) in ["one", "two", "three", "four"].iter().enumerate() {
-        b.event(&MascotEvent::Reminder { id: (*r).into(), text: (*r).into() }, i as u64);
+        b.event(&MascotEvent::Reminder { id: (*r).into(), text: (*r).into(), set_at_ms: None }, i as u64);
     }
     assert_eq!(b.cue.len(), CUE_CAP);
     let before = b.cue.clone();
@@ -1106,7 +1106,7 @@ fn review_hidden_drops_one_shots_so_a_reminder_is_not_blocked() {
     assert_eq!(b.tick(1).visibility, Visibility::Hidden);
     b.event(&MascotEvent::Emote { name: EmoteName::Wave }, 10);
     assert!(b.cue.is_empty(), "no emote queued while hidden");
-    b.event(&MascotEvent::Reminder { id: "r".into(), text: "drink water".into() }, 20);
+    b.event(&MascotEvent::Reminder { id: "r".into(), text: "drink water".into(), set_at_ms: None }, 20);
     assert!(matches!(b.cue.front(), Some(Cue::Timed { until: Some(_), .. })), "its clock runs at once");
     b.tick(60_000); // hidden arms no timer: the next wake (any inbox message) catches up
     assert!(b.cue.is_empty(), "the reminder ran out while hidden instead of waiting: {:?}", b.cue);
@@ -1117,7 +1117,7 @@ fn review_a_full_queue_evicts_an_emote_before_a_reminder() {
     let mut b = brain_with(bear(), 7);
     b.tick(0);
     b.event(&MascotEvent::Emote { name: EmoteName::Wave }, 0);
-    b.event(&MascotEvent::Reminder { id: "r".into(), text: "stretch".into() }, 1);
+    b.event(&MascotEvent::Reminder { id: "r".into(), text: "stretch".into(), set_at_ms: None }, 1);
     b.event(&MascotEvent::Emote { name: EmoteName::Nod }, 2);
     b.event(&MascotEvent::Emote { name: EmoteName::Jump }, 3);
     b.event(&MascotEvent::Emote { name: EmoteName::Spin }, 4);

@@ -17,7 +17,8 @@ export const REMINDER_KIND = "buddy.reminder";
 export const MAX_REMINDERS = 50;
 const ID = /^r_[0-9a-f]{12}$/;
 
-export type ReminderInput = { id: string; atMs: number; text: string };
+/** `setAtMs` (when it was set, for the bubble's "set N min ago" chip) is newer: older stored reminders lack it. */
+export type ReminderInput = { id: string; atMs: number; text: string; setAtMs?: number };
 type Phase = { phase: "wait" } | { phase: "deliver" };
 
 export const ReminderTask = defineTask<ReminderInput, Phase, null>({
@@ -31,10 +32,10 @@ export const ReminderTask = defineTask<ReminderInput, Phase, null>({
     deliver: async (task, runtime, context) => {
       const root = await runtime.conversation(runtime.conversationId, context);
       if (!root) throw new Error("the reminder's conversation is gone");
-      const { id, text, atMs } = task.input;
+      const { id, text, atMs, setAtMs } = task.input;
       await runtime.commit(async (tx) => {
         // The admission comes first: it must precede the commit's table writes.
-        await root.submit(tx, { type: "write", entry: { kind: EVENT_KIND, data: { type: "reminder_fired", id, text, atMs, at: runtime.now() } } });
+        await root.submit(tx, { type: "write", entry: { kind: EVENT_KIND, data: { type: "reminder_fired", id, text, atMs, ...(typeof setAtMs === "number" ? { setAtMs } : {}), at: runtime.now() } } });
         return { status: "terminal", outcome: { status: "completed", result: null } };
       }, context);
     },
@@ -84,7 +85,7 @@ export function bindJobs(harness: Harness, root: Conversation) {
         cursor = page.items.length < 200 ? undefined : page.next;
       } while (cursor !== undefined);
       if (liveCount >= MAX_REMINDERS) throw new CmdError("too_many", `There are already ${MAX_REMINDERS} reminders; cancel one first.`);
-      await tx.createTask(ReminderTask, { id, atMs, text }, { ownership: { kind: "conversation" }, background: true });
+      await tx.createTask(ReminderTask, { id, atMs, text, setAtMs: Date.now() }, { ownership: { kind: "conversation" }, background: true });
       return { id, atMs, text };
     }, ctx);
   });

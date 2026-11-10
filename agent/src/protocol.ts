@@ -76,6 +76,8 @@ export type Settings = {
   subagents?: { max?: number };
   /** Test hooks for the web tools: a local DuckDuckGo-HTML fixture and loopback fetches. Never set by the app. */
   web?: { searchUrl?: string; allowLoopback?: boolean };
+  /** Test hook: the scripted `fake-oauth` provider, its model served at `baseUrl`. Only debug builds set it. */
+  fakeOAuth?: { baseUrl: string };
   [k: string]: unknown;
 };
 
@@ -121,13 +123,13 @@ export type Out =
   | { t: "ready"; v: number; pid: number; conversationId: string }
   | { t: "fatal"; code: string; message: string };
 
-/** The only accepted request id forms: a chat message, a Continue, a Retry. */
-const REQUEST_ID = /^(u:[0-9a-f-]{36}|continue:[A-Za-z0-9_.:-]+|retry:[A-Za-z0-9_.:-]+)$/;
+/** The only accepted request id forms: a chat message, a sense-triggered turn, a Continue, a Retry. */
+const REQUEST_ID = /^([us]:[0-9a-f-]{36}|continue:[A-Za-z0-9_.:-]+|retry:[A-Za-z0-9_.:-]+)$/;
 
 export function requestSource(requestId: string): string | undefined {
   if (!REQUEST_ID.test(requestId)) return undefined;
   const prefix = requestId.slice(0, requestId.indexOf(":"));
-  return prefix === "u" ? "chat" : prefix;
+  return prefix === "u" ? "chat" : prefix === "s" ? "sense" : prefix;
 }
 
 export class CmdError extends Error {

@@ -1,12 +1,17 @@
-//! The agent harness inside the app (design `## talk`, §2): the host API (`BUDDY_HOME/host.json`),
-//! the policy gate, the in-memory credentials and one agent, "main", whose sidecar runs with the
-//! §3.1 folders. Its mascot events and host commands go to the main thread through the `Inbox`.
+//! The agent harness inside the app (design `## talk`, `## accounts`, §2): the host API
+//! (`BUDDY_HOME/host.json`), the policy gate, the credentials and one agent, "main", whose sidecar
+//! runs with the §3.1 folders. Its mascot events and host commands go to the main thread through
+//! the `Inbox`.
 //!
-//! Credentials (dev, until sign-in in p4): `BUDDY_FAKE_MODEL=<url>` (the scripted fake provider,
-//! as s2-harness) or the app's own `ANTHROPIC_API_KEY`, read once into `Credentials`. The key
-//! never reaches the sidecar's or a command's environment (bridge passes a fixed allowlist).
-//! Debug builds only: `BUDDY_PROMPT=<text>` submits one prompt once the agent is ready, and
-//! `BUDDY_ANSWER=allow|deny` answers every approval card.
+//! Credentials live in the OS keychain (`KeychainStore`, service `desk-buddy`) and in Rust memory;
+//! the keychain is read once at start, and a read error means no sidecar ("can't read keychain").
+//! No key ever reaches the sidecar's or a command's environment (bridge passes a fixed allowlist).
+//! The sidecar starts even with no credential (sign-in needs it), with model `null`.
+//! Debug builds only: `BUDDY_FAKE_MODEL=<url>` (the scripted fake provider, a session-only key),
+//! the app's own `ANTHROPIC_API_KEY` (session-only, never stored), `BUDDY_CRED_STORE=memory|fail`
+//! (no real keychain; `fail` denies every read), `BUDDY_FAKE_OAUTH=1` (the sidecar's scripted
+//! `fake-oauth` sign-in, its model at `BUDDY_FAKE_MODEL`), `BUDDY_PROMPT=<text>` (one prompt once
+//! the agent is ready) and `BUDDY_ANSWER=allow|deny` (answers every approval card).
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
@@ -14,6 +19,7 @@ use std::time::{Duration, Instant};
 
 use bridge::bridge::sidecar_bin;
 use bridge::credentials::Credentials;
+use bridge::store::{CredentialStore, KeychainStore};
 use bridge::protocol::{ModelRef, ProviderDef, ProviderModel};
 use bridge::{Agent, AgentEvent, AgentSpec, BridgeError, Res};
 use host::{Action, Caller, Host, HostEvent, Refusal, RemindOp};
@@ -23,6 +29,7 @@ use serde_json::{json, Value};
 
 use crate::driver::{post, Inbox};
 use crate::settings;
+use crate::signin::{self, Provider};
 
 /// The one agent of p3.
 pub const AGENT_ID: &str = "main";
@@ -33,7 +40,10 @@ const RESTART_WINDOW: Duration = Duration::from_secs(60);
 /// What the tray's agent line shows.
 #[derive(Clone, Debug, PartialEq)]
 pub enum AgentState {
-    NoKey,
+    /// Running with no model: nothing is signed in.
+    SignedOut,
+    /// The keychain couldn't be read: no sidecar.
+    Keychain(String),
     Starting,
     Running { model: String },
     Stopped,
@@ -43,7 +53,8 @@ pub enum AgentState {
 impl AgentState {
     pub fn line(&self) -> String {
         match self {
-            AgentState::NoKey => "⚠ Agent: no key (sign in arrives in p4)".into(),
+            AgentState::SignedOut => "⚠ Agent: not signed in".into(),
+            AgentState::Keychain(why) => format!("⚠ Agent: can't read keychain · {why}"),
             AgentState::Starting => "Agent: starting…".into(),
             AgentState::Running { model } => format!("Agent: running · {model}"),
             AgentState::Stopped => "Agent: stopped".into(),
@@ -52,35 +63,77 @@ impl AgentState {
     }
 }
 
-/// The model the agent uses and the credential that goes with it (in memory only).
-#[derive(Clone, PartialEq)]
-pub struct ModelChoice {
-    pub model: ModelRef,
+/// Where credentials come from (the keychain, plus session-only dev keys) and the dev hooks.
+pub struct Config {
+    pub store: Box<dyn CredentialStore>,
+    /// Session-only api keys `(provider, key)`: in memory, never stored.
+    pub session: Vec<(String, String)>,
+    /// Endpoints pi-ai lacks (the fake provider).
     pub providers: Vec<ProviderDef>,
-    pub provider_id: String,
-    pub key: String,
+    /// The fake provider's model wins over every sign-in.
+    pub fake: bool,
+    /// Debug builds' scripted `fake-oauth` sign-in: its model's base URL.
+    pub fake_oauth: Option<String>,
 }
 
-/// Never prints the key.
-impl std::fmt::Debug for ModelChoice {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ModelChoice").field("model", &self.model).field("provider_id", &self.provider_id).field("key", &"<redacted>").finish_non_exhaustive()
+/// The fake provider at `url` (no `/v1`).
+fn fake_def(url: &str) -> ProviderDef {
+    let m = ProviderModel { id: "fake-1".into(), name: "Fake 1".into(), context_window: 128000, max_tokens: 4096, reasoning: false, input: vec!["text".into()], compat: None };
+    ProviderDef { id: "fake".into(), name: "Fake".into(), api: "openai-completions".into(), base_url: format!("{}/v1", url.trim_end_matches('/')), models: vec![m] }
+}
+
+impl Config {
+    /// From the environment (see the module doc).
+    pub fn from_env() -> Config {
+        // the scripted fake model is a dev credential: release builds never read it
+        #[cfg(debug_assertions)]
+        let fake_url = std::env::var("BUDDY_FAKE_MODEL").ok().filter(|u| !u.trim().is_empty());
+        #[cfg(not(debug_assertions))]
+        let fake_url: Option<String> = None;
+        let mut c = Config { store: Box::new(KeychainStore::new()), session: vec![], providers: vec![], fake: false, fake_oauth: None };
+        #[cfg(debug_assertions)]
+        {
+            match std::env::var("BUDDY_CRED_STORE").ok().as_deref() {
+                Some("memory") => c.store = Box::new(bridge::store::MemoryStore::new()),
+                Some("fail") => c.store = Box::new(bridge::store::MemoryStore::failing()),
+                _ => {}
+            }
+            // read once: the key lives in `Credentials` from here on, never in any child's env
+            if let Some(k) = std::env::var("ANTHROPIC_API_KEY").ok().filter(|k| !k.trim().is_empty()) {
+                c.session.push(("anthropic".into(), k));
+            }
+            if std::env::var("BUDDY_FAKE_OAUTH").ok().as_deref() == Some("1") {
+                c.fake_oauth = Some(format!("{}/v1", fake_url.as_deref().unwrap_or("http://127.0.0.1:9").trim_end_matches('/')));
+            }
+        }
+        if let Some(url) = fake_url {
+            c.providers.push(fake_def(&url));
+            // under the fake sign-in, the fake model comes only from signing in
+            if c.fake_oauth.is_none() {
+                c.fake = true;
+                c.session.push(("fake".into(), "sk-fake-buddy".into()));
+            }
+        }
+        c
+    }
+
+    /// Tests: an in-memory store and no dev hooks.
+    #[cfg(test)]
+    pub fn memory(store: bridge::store::MemoryStore) -> Config {
+        Config { store: Box::new(store), session: vec![], providers: vec![], fake: false, fake_oauth: None }
     }
 }
 
-/// The dev credential: the fake provider wins over a real key; none means no agent.
-pub fn choose_model(fake: Option<&str>, anthropic_key: Option<&str>, wanted: &settings::Model) -> Option<ModelChoice> {
-    if let Some(url) = fake.filter(|u| !u.trim().is_empty()) {
-        let m = ProviderModel { id: "fake-1".into(), name: "Fake 1".into(), context_window: 128000, max_tokens: 4096, reasoning: false, input: vec!["text".into()], compat: None };
-        let def = ProviderDef { id: "fake".into(), name: "Fake".into(), api: "openai-completions".into(), base_url: format!("{}/v1", url.trim_end_matches('/')), models: vec![m] };
-        return Some(ModelChoice { model: ModelRef { provider: "fake".into(), model: "fake-1".into() }, providers: vec![def], provider_id: "fake".into(), key: "sk-fake-buddy".into() });
+/// The model to run: the fake one; else `settings.model` when its provider has a credential;
+/// else the first provider of the sign-in list that has one (with its default model); else none.
+pub fn choose_model(wanted: &settings::Model, fake: bool, catalog: &[Provider], has: impl Fn(&str) -> bool) -> Option<ModelRef> {
+    if fake {
+        return Some(ModelRef { provider: "fake".into(), model: "fake-1".into() });
     }
-    let key = anthropic_key.filter(|k| !k.trim().is_empty())?;
-    // p3 has only the Anthropic key: another provider in settings needs sign-in (p4).
-    if wanted.provider != "anthropic" {
-        return None;
+    if !wanted.provider.is_empty() && has(&wanted.provider) {
+        return Some(ModelRef { provider: wanted.provider.clone(), model: wanted.model.clone() });
     }
-    Some(ModelChoice { model: ModelRef { provider: "anthropic".into(), model: wanted.model.clone() }, providers: vec![], provider_id: "anthropic".into(), key: key.to_string() })
+    catalog.iter().find(|p| has(&p.id)).map(|p| ModelRef { provider: p.id.clone(), model: p.model.clone() })
 }
 
 /// The agent's folders under `BUDDY_HOME` (§3.1).
@@ -94,7 +147,11 @@ pub struct Harness {
     host_file: PathBuf,
     agent: Arc<Agent>,
     policy: Arc<Production>,
-    model: Option<String>,
+    creds: Arc<Credentials>,
+    /// `settings.model` (the sign-in may set it)
+    wanted: Mutex<settings::Model>,
+    catalog: Vec<Provider>,
+    fake: bool,
     state: Mutex<AgentState>,
     crashes: Mutex<Vec<Instant>>,
     closing: std::sync::atomic::AtomicBool,
@@ -165,22 +222,18 @@ fn on_host(e: HostEvent, agent: Option<Arc<Agent>>) -> host::Reply {
 }
 
 impl Harness {
-    /// Start the host API, the policy and (when there is a credential) the agent, in the background.
-    /// Its state changes, mascot events and policy views arrive in the inbox.
+    /// Start the host API, the policy, the credentials and (unless the keychain can't be read)
+    /// the agent, in the background. Its state changes, mascot events and policy views arrive in
+    /// the inbox. An `Err` is the host API's (the caller shows it in the tray).
     pub fn start(home: &Path, wanted: &settings::Model) -> std::io::Result<Arc<Harness>> {
-        let fake = std::env::var("BUDDY_FAKE_MODEL").ok();
-        // read once: the key lives in `Credentials` from here on, never in any child's env
-        let key = std::env::var("ANTHROPIC_API_KEY").ok();
-        let choice = choose_model(fake.as_deref(), key.as_deref(), wanted);
-        drop(key);
-        let h = Harness::build(home, choice, sidecar_bin())?;
+        let h = Harness::build(home, wanted, Config::from_env(), sidecar_bin())?;
         let _ = HARNESS.set(h.clone());
         h.clone().launch();
         Ok(h)
     }
 
-    /// Everything but starting the sidecar (tests use this with no credential and no sidecar).
-    pub fn build(home: &Path, choice: Option<ModelChoice>, program: Option<PathBuf>) -> std::io::Result<Arc<Harness>> {
+    /// Everything but starting the sidecar (tests use this with a `MemoryStore` and no sidecar).
+    pub fn build(home: &Path, wanted: &settings::Model, config: Config, program: Option<PathBuf>) -> std::io::Result<Arc<Harness>> {
         std::fs::create_dir_all(home)?;
         let slot: Arc<OnceLock<Weak<Agent>>> = Arc::default();
         let slot2 = slot.clone();
@@ -189,7 +242,21 @@ impl Harness {
         let policy = Arc::new(Production::new(|_, view| {
             post(Inbox::Call(Box::new(move |a| a.policy_changed(&view))));
         }));
-        let creds = Arc::new(Credentials::new());
+        let Config { store, session, providers, fake, fake_oauth } = config;
+        let creds = Arc::new(Credentials::with_store(store));
+        for (p, k) in &session {
+            creds.set_api_key(p, k);
+        }
+        // once, at start: a read error is the tray's keychain line and no sidecar
+        let keychain = match creds.load() {
+            Ok(n) => {
+                eprintln!("[buddy] credentials: {n} stored");
+                None
+            }
+            Err(e) => Some(e.message),
+        };
+        let catalog = signin::catalog(fake_oauth.is_some());
+        let model_ref = if keychain.is_none() { choose_model(wanted, fake, &catalog, |p| creds.has(p)) } else { None };
         let (state_dir, work_dir, agent_home) = agent_dirs(home);
         let _ = std::fs::create_dir_all(&agent_home);
         // the person's `buddy`, built beside the app (`cargo build -p host --bin buddy`)
@@ -197,14 +264,14 @@ impl Harness {
         if buddy_dir.is_empty() {
             eprintln!("[buddy] no `buddy` beside the app: the agent can't speak or set reminders (cargo build -p host --bin buddy)");
         }
-        let model = choice.as_ref().map(|c| c.model.model.clone());
-        let (model_ref, providers) = match &choice {
-            Some(c) => {
-                creds.set_api_key(&c.provider_id, &c.key);
-                (Some(c.model.clone()), c.providers.clone())
-            }
-            None => (None, vec![]),
+        #[cfg(debug_assertions)]
+        let agent_settings = match &fake_oauth {
+            Some(url) => json!({ "fakeOAuth": { "baseUrl": url } }),
+            None => json!({}),
         };
+        // release builds never turn the scripted sign-in on (lead condition b)
+        #[cfg(not(debug_assertions))]
+        let agent_settings = json!({});
         let repo_skills = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../agent/skills");
         let spec = AgentSpec {
             agent_id: AGENT_ID.into(),
@@ -216,12 +283,12 @@ impl Harness {
             path_dirs: buddy_dir,
             model: model_ref,
             providers,
-            settings: json!({}),
+            settings: agent_settings,
         };
         let answer = auto_answer();
         let me: Arc<OnceLock<Weak<Harness>>> = Arc::default();
         let me2 = me.clone();
-        let agent = Agent::new(spec, policy.clone(), host.clone(), creds, move |e| match e {
+        let agent = Agent::new(spec, policy.clone(), host.clone(), creds.clone(), move |e| match e {
             AgentEvent::Mascot(m) => {
                 let auto = match (answer, &m) {
                     (Some(ans), MascotEvent::AwaitingPermission { call_id, .. }) => Some((ans, call_id.clone())),
@@ -250,8 +317,24 @@ impl Harness {
             }
         });
         let _ = slot.set(Arc::downgrade(&agent));
-        let state = if choice.is_none() { AgentState::NoKey } else if program.is_none() { AgentState::Error("no sidecar".into()) } else { AgentState::Starting };
-        let h = Arc::new(Harness { host: Mutex::new(Some(host)), host_file, agent, policy, model, state: Mutex::new(state), crashes: Mutex::new(vec![]), closing: Default::default() });
+        let state = match (keychain, &program) {
+            (Some(why), _) => AgentState::Keychain(why),
+            (None, None) => AgentState::Error("no sidecar".into()),
+            (None, Some(_)) => AgentState::Starting,
+        };
+        let h = Arc::new(Harness {
+            host: Mutex::new(Some(host)),
+            host_file,
+            agent,
+            policy,
+            creds,
+            wanted: Mutex::new(wanted.clone()),
+            catalog,
+            fake,
+            state: Mutex::new(state),
+            crashes: Mutex::new(vec![]),
+            closing: Default::default(),
+        });
         let _ = me.set(Arc::downgrade(&h));
         Ok(h)
     }
@@ -270,11 +353,13 @@ impl Harness {
     fn launch(self: Arc<Self>) {
         let st = self.state();
         if st != AgentState::Starting {
-            if let AgentState::Error(_) = st {
-                eprintln!("[buddy] no sidecar: build it with `cd agent && bun run build` (or set BUDDY_AGENT_BIN in debug builds)");
+            match &st {
+                AgentState::Error(_) => eprintln!("[buddy] no sidecar: build it with `cd agent && bun run build` (or set BUDDY_AGENT_BIN in debug builds)"),
+                AgentState::Keychain(_) => eprintln!("[buddy] the agent doesn't start without the keychain; desk-buddy needs “Always Allow” for its keychain items"),
+                _ => {}
             }
             self.set_state(st);
-            self.launch_prompt(); // with no key: the bubble shows the no_model error
+            self.launch_prompt(); // with no agent: the bubble shows the error
             return;
         }
         self.set_state(AgentState::Starting);
@@ -299,12 +384,12 @@ impl Harness {
     fn start_agent(&self) -> bool {
         match self.agent.start() {
             Ok(_) => {
-                self.set_state(AgentState::Running { model: self.model.clone().unwrap_or_default() });
+                self.set_state(self.running_state());
                 true
             }
             Err(e) => {
                 eprintln!("[buddy] the agent didn't start: {e}");
-                self.set_state(AgentState::Error(e.code.to_string()));
+                self.set_state(AgentState::Error(format!("{} ({})", e.code, e.message)));
                 false
             }
         }
@@ -336,16 +421,127 @@ impl Harness {
         });
     }
 
+    fn running_state(&self) -> AgentState {
+        match self.agent.model() {
+            Some(m) => AgentState::Running { model: m.model },
+            None => AgentState::SignedOut,
+        }
+    }
+
     pub fn has_model(&self) -> bool {
-        self.model.is_some()
+        self.agent.model().is_some()
+    }
+
+    /// A model is chosen and the sidecar is up: an unprompted turn could run now.
+    pub fn can_turn(&self) -> bool {
+        self.has_model() && self.agent.is_running()
+    }
+
+    pub fn model(&self) -> Option<ModelRef> {
+        self.agent.model()
+    }
+
+    fn no_model(&self) -> BridgeError {
+        match self.state() {
+            AgentState::Keychain(why) => BridgeError::new("keychain", format!("Can't read the keychain: {why}.")),
+            _ => BridgeError::new("no_model", NO_MODEL),
+        }
     }
 
     /// The person's message; returns its request id. Blocks for the sidecar's ack (call off the main thread).
     pub fn prompt(&self, text: &str) -> Res<String> {
         if !self.has_model() {
-            return Err(BridgeError::new("no_model", NO_MODEL));
+            return Err(self.no_model());
         }
         self.agent.prompt(text)
+    }
+
+    /// A sense-triggered turn the attention budget allowed (`source: "sense"`, an `s:` id).
+    /// `summary` is coarse: the rule and the time of day, never an app or window name.
+    pub fn prompt_sense(&self, summary: &str) -> Res<String> {
+        if !self.has_model() {
+            return Err(self.no_model());
+        }
+        self.agent.prompt_sense(summary)
+    }
+
+    // --- sign-in (the Sign in… window) ------------------------------------------------------
+
+    pub fn creds(&self) -> &Arc<Credentials> {
+        &self.creds
+    }
+
+    pub fn catalog(&self) -> &[Provider] {
+        &self.catalog
+    }
+
+    /// Whether the sidecar is up for an OAuth sign-in.
+    pub fn can_oauth(&self) -> bool {
+        self.agent.is_running()
+    }
+
+    /// A pasted API key, straight to the keychain (never to the sidecar). Errors name the
+    /// store's reason only, never the key.
+    pub fn save_api_key(&self, provider_id: &str, key: &str) -> Result<(), String> {
+        let key = key.trim();
+        if key.is_empty() {
+            return Err("Paste a key first.".into());
+        }
+        // no sidecar started and the stored sign-ins never loaded: a save here couldn't be used
+        if let AgentState::Keychain(why) = self.state() {
+            return Err(format!("Can't read the keychain: {why}. Allow desk-buddy's keychain access, then quit and reopen it."));
+        }
+        self.creds.put(provider_id, json!({ "type": "api_key", "key": key })).map_err(|e| format!("Couldn't save the key: {e}."))?;
+        self.credentials_changed(provider_id);
+        Ok(())
+    }
+
+    /// pi-ai's OAuth sign-in through the sidecar; blocks until it ends (call off the main thread).
+    /// The credential arrives through `cred.modify`, so it is in the keychain when this returns.
+    pub fn oauth_login(&self, provider_id: &str) -> Result<(), BridgeError> {
+        self.agent.auth_login(provider_id)?;
+        self.credentials_changed(provider_id);
+        Ok(())
+    }
+
+    pub fn cancel_login(&self) {
+        let _ = self.agent.auth_cancel();
+    }
+
+    /// Sign out / Remove: the keychain item goes, then `credentials_changed`.
+    pub fn sign_out(&self, provider_id: &str) -> Result<(), String> {
+        self.creds.remove(provider_id).map_err(|e| format!("Couldn't remove it from the keychain: {e}."))?;
+        self.credentials_changed(provider_id);
+        Ok(())
+    }
+
+    /// A credential came or went: the sidecar drops its cache, and the model follows. A sign-in
+    /// to a provider other than `settings.model`'s, while that one has no credential, makes it the
+    /// new `settings.model` (with the provider's default model).
+    fn credentials_changed(&self, provider_id: &str) {
+        if self.agent.is_running() {
+            if let Err(e) = self.agent.cmd("credentials_changed", json!({ "providerId": provider_id })) {
+                eprintln!("[buddy] credentials_changed: {e}");
+            }
+        }
+        let wanted = self.wanted.lock().unwrap().clone();
+        let current = self.agent.model();
+        let next = choose_model(&wanted, self.fake, &self.catalog, |p| self.creds.has(p));
+        if next == current {
+            return;
+        }
+        if let Some(m) = next.as_ref().filter(|m| m.provider == provider_id && m.provider != wanted.provider) {
+            let saved = settings::Model { provider: m.provider.clone(), model: m.model.clone(), ..wanted.clone() };
+            *self.wanted.lock().unwrap() = saved.clone();
+            post(Inbox::Call(Box::new(move |a| a.model_chosen(saved))));
+        }
+        eprintln!("[buddy] model: {}", next.as_ref().map_or("none".to_string(), |m| format!("{}/{}", m.provider, m.model)));
+        if let Err(e) = self.agent.set_model(next) {
+            eprintln!("[buddy] set_model: {e}");
+        }
+        if self.agent.is_running() {
+            self.set_state(self.running_state());
+        }
     }
 
     /// An approval card's answer (`allow`, `allow_always`, `deny`) to the policy gate.
@@ -385,45 +581,88 @@ impl Harness {
     }
 }
 
-pub const NO_MODEL: &str = "There's no model key yet. Sign-in arrives in a later version; for now start desk-buddy with ANTHROPIC_API_KEY set.";
+pub const NO_MODEL: &str = "There's no model to talk to yet. Sign in to one first.";
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bridge::store::MemoryStore;
 
     fn wanted() -> settings::Model {
         settings::Model { provider: "anthropic".into(), model: "claude-sonnet-5-5".into(), ..Default::default() }
     }
 
-    #[test]
-    fn the_fake_model_wins_and_no_key_means_no_agent() {
-        let c = choose_model(Some("http://127.0.0.1:9/"), Some("sk-real"), &wanted()).unwrap();
-        assert_eq!(c.model, ModelRef { provider: "fake".into(), model: "fake-1".into() });
-        assert_eq!(c.providers[0].base_url, "http://127.0.0.1:9/v1");
-        let c = choose_model(None, Some("sk-real"), &wanted()).unwrap();
-        assert_eq!((c.provider_id.as_str(), c.key.as_str(), c.model.model.as_str()), ("anthropic", "sk-real", "claude-sonnet-5-5"));
-        assert!(c.providers.is_empty());
-        assert_eq!(choose_model(None, None, &wanted()), None);
-        assert_eq!(choose_model(Some(" "), Some(""), &wanted()), None);
-        let other = settings::Model { provider: "openai".into(), ..wanted() };
-        assert_eq!(choose_model(None, Some("sk"), &other), None, "only the Anthropic key exists before p4");
+    fn home(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("buddy-harness-{name}-{}-{}", std::process::id(), host::random_hex(3)))
     }
 
     #[test]
-    fn no_key_means_no_agent_and_a_no_model_prompt_and_quit_removes_host_json() {
-        let home = std::env::temp_dir().join(format!("buddy-harness-{}-{}", std::process::id(), host::random_hex(3)));
-        let h = Harness::build(&home, None, None).unwrap();
-        assert_eq!(h.state(), AgentState::NoKey);
-        assert_eq!(h.state().line(), "⚠ Agent: no key (sign in arrives in p4)");
+    fn the_model_is_the_fake_then_settings_then_the_first_signed_in_provider() {
+        let cat = signin::catalog(false);
+        let has = |set: &'static [&'static str]| move |p: &str| set.contains(&p);
+        assert_eq!(choose_model(&wanted(), true, &cat, has(&[])), Some(ModelRef { provider: "fake".into(), model: "fake-1".into() }));
+        assert_eq!(choose_model(&wanted(), false, &cat, has(&["anthropic", "openai"])), Some(ModelRef { provider: "anthropic".into(), model: "claude-sonnet-5-5".into() }));
+        // settings.model's provider has nothing: the first signed-in one, with its default model
+        assert_eq!(choose_model(&wanted(), false, &cat, has(&["openrouter", "xai"])), Some(ModelRef { provider: "openrouter".into(), model: "anthropic/claude-sonnet-5.5".into() }));
+        assert_eq!(choose_model(&wanted(), false, &cat, has(&[])), None);
+    }
+
+    #[test]
+    fn no_credential_means_signed_out_a_no_model_prompt_and_quit_removes_host_json() {
+        let home = home("none");
+        let h = Harness::build(&home, &wanted(), Config::memory(MemoryStore::new()), None).unwrap();
+        assert!(!h.has_model());
+        assert_eq!(AgentState::SignedOut.line(), "⚠ Agent: not signed in");
         assert!(home.join("host.json").is_file(), "the host API is up for `buddy say`");
         let e = h.prompt("hi").unwrap_err();
         assert_eq!(e.code, "no_model");
+        assert_eq!(h.prompt_sense("back from idle · morning").unwrap_err().code, "no_model");
         assert!(!h.agent().is_running());
         assert_eq!(h.policy_view()["mode"], "allowlist");
         // a reminder with no agent: 503 no_agent, as `buddy remind` reports it
         assert_eq!(h.snooze("x", 10).unwrap_err().code, "no_agent");
         h.shutdown();
         assert!(!home.join("host.json").exists(), "quitting removes host.json");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_keychain_read_error_is_the_tray_line_and_no_sidecar_start() {
+        let home = home("fail");
+        // a sidecar program is set: only the keychain error keeps it from starting
+        let h = Harness::build(&home, &wanted(), Config::memory(MemoryStore::failing()), Some(PathBuf::from("/nonexistent/buddy-agent"))).unwrap();
+        assert_eq!(h.state(), AgentState::Keychain("access denied".into()));
+        assert_eq!(h.state().line(), "⚠ Agent: can't read keychain · access denied");
+        h.clone().launch();
+        assert!(!h.agent().is_running());
+        assert_eq!(h.agent().gen(), 0, "no start was even tried");
+        let e = h.prompt("hi").unwrap_err();
+        assert_eq!(e.code, "keychain");
+        // a pasted key isn't saved where it couldn't be used, and the error never echoes it
+        let e = h.save_api_key("openrouter", "sk-or-pasted-in-keychain-error").unwrap_err();
+        assert!(e.starts_with("Can't read the keychain: access denied."), "{e}");
+        assert!(!e.contains("sk-or-pasted"));
+        assert!(!h.has_model() && !h.can_turn());
+        assert_eq!(h.prompt("hi").unwrap_err().code, "keychain");
+        h.shutdown();
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_stored_key_is_loaded_and_chosen_and_saving_never_echoes_the_key() {
+        let home = home("stored");
+        let store = MemoryStore::new();
+        store.put("openrouter", &json!({ "type": "api_key", "key": "sk-or-stored-1" })).unwrap();
+        let h = Harness::build(&home, &wanted(), Config::memory(store), None).unwrap();
+        assert_eq!(h.model(), Some(ModelRef { provider: "openrouter".into(), model: "anthropic/claude-sonnet-5.5".into() }));
+        assert_eq!(h.save_api_key("mistral", "   ").unwrap_err(), "Paste a key first.");
+        h.save_api_key("anthropic", " sk-ant-pasted-2 ").unwrap();
+        assert!(h.creds().has("anthropic"));
+        // settings.model's provider now has a key: it wins
+        assert_eq!(h.model().unwrap().provider, "anthropic");
+        h.sign_out("anthropic").unwrap();
+        assert_eq!(h.model().unwrap().provider, "openrouter");
+        h.shutdown();
         let _ = std::fs::remove_dir_all(&home);
     }
 

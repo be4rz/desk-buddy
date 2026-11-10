@@ -65,11 +65,14 @@ pub struct BubbleModel {
     pub error: Option<ErrorModel>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// The reminder chip's "set N min ago" (additive, p4); none for reminders stored before p4.
+    #[serde(rename = "setMinAgo", skip_serializing_if = "Option::is_none")]
+    pub set_min_ago: Option<u64>,
 }
 
 impl BubbleModel {
     fn new(mode: Mode) -> BubbleModel {
-        BubbleModel { mode, text: None, streaming: None, emotion: None, card: None, error: None, id: None }
+        BubbleModel { mode, text: None, streaming: None, emotion: None, card: None, error: None, id: None, set_min_ago: None }
     }
 
     pub fn speech(text: String, streaming: bool, emotion: Option<String>) -> BubbleModel {
@@ -81,7 +84,8 @@ impl BubbleModel {
     }
 
     pub fn error(reason: &str, message: &str) -> BubbleModel {
-        let action = if reason == "no_model" { "sign_in" } else { "retry" };
+        // no model, or a keychain that can't be read: retrying can't help, the Sign in… window can
+        let action = if matches!(reason, "no_model" | "keychain") { "sign_in" } else { "retry" };
         BubbleModel { error: Some(ErrorModel { reason: reason.into(), message: message.into(), action: Some(action.into()) }), ..BubbleModel::new(Mode::Error) }
     }
 
@@ -130,6 +134,8 @@ pub struct Bubble {
     deferred: VecDeque<BubbleModel>,
     /// Reminder id → text, while shown.
     reminder: Option<(String, String)>,
+    /// Wall clock (epoch ms) for the reminder chip, set by the caller before `event`.
+    pub wall_ms: u64,
 }
 
 impl Bubble {
@@ -237,8 +243,37 @@ impl Bubble {
         self.show(BubbleModel::prompt())
     }
 
+    /// A turn is running (the bubble's view).
+    pub fn running(&self) -> bool {
+        self.run
+    }
+
+    /// R-midturn: a new prompt replaces a running turn. The old turn's remaining events stay
+    /// quiet (as after ■) until `unstop`, which the caller posts once the old turn is idle.
+    pub fn supersede(&mut self, text: &str) -> Out {
+        let out = self.submitted(text);
+        self.stopped = true;
+        out
+    }
+
+    /// The old turn is over (or the wait gave up): the new turn's events show again.
+    pub fn unstop(&mut self) -> Out {
+        if !self.stopped && self.run {
+            return Out::Keep;
+        }
+        self.stopped = false;
+        self.run = true;
+        if self.holding() {
+            return Out::Keep;
+        }
+        self.streaming()
+    }
+
     /// The person sent a prompt: the bubble waits for the answer.
     pub fn submitted(&mut self, text: &str) -> Out {
+        // an error held back while the prompt was open belongs to before this question: its
+        // Try again would re-ask this one
+        self.deferred.retain(|m| m.mode != Mode::Error);
         self.last_prompt = Some(text.to_string());
         self.run = true;
         self.stopped = false;
@@ -250,8 +285,18 @@ impl Bubble {
     /// The prompt couldn't be sent (no model, the agent stopped, …).
     pub fn failed(&mut self, reason: &str, message: &str) -> Out {
         self.run = false;
+        self.stopped = false;
+        self.error(BubbleModel::error(reason, message))
+    }
+
+    /// An error never covers the open prompt or a reminder (R-error-prompt): it waits behind them.
+    fn error(&mut self, m: BubbleModel) -> Out {
+        if matches!(self.mode(), Some(Mode::Prompt | Mode::Reminder)) {
+            self.deferred.push_back(m);
+            return Out::Keep;
+        }
         self.hide_at = None;
-        self.show(BubbleModel::error(reason, message))
+        self.show(m)
     }
 
     /// `buddy.event approval_asked`: the card's details (it may arrive before or after the event).
@@ -392,7 +437,6 @@ impl Bubble {
             MascotEvent::Error { reason, message } => {
                 self.run = false;
                 self.answered = None;
-                self.hide_at = None;
                 // the run is over, as at Idle: its cards are withdrawn
                 self.approvals.clear();
                 self.cards.clear();
@@ -400,10 +444,12 @@ impl Bubble {
                 if std::mem::replace(&mut self.stopped, false) {
                     return Out::Keep; // the stop the person asked for
                 }
-                self.show(BubbleModel::error(reason, message))
+                self.error(BubbleModel::error(reason, message))
             }
-            MascotEvent::Reminder { id, text } => {
-                let m = BubbleModel { text: Some(text.clone()), id: Some(id.clone()), ..BubbleModel::new(Mode::Reminder) };
+            MascotEvent::Reminder { id, text, set_at_ms } => {
+                // a reminder stored before p4 has no setAtMs: no chip (condition f)
+                let set_min_ago = set_at_ms.map(|t| self.wall_ms.saturating_sub(t) / 60_000);
+                let m = BubbleModel { text: Some(text.clone()), id: Some(id.clone()), set_min_ago, ..BubbleModel::new(Mode::Reminder) };
                 if self.holding() {
                     self.deferred.push_back(m);
                     return Out::Keep;
@@ -594,7 +640,7 @@ mod tests {
         assert_eq!(b.hide_at(), Some(40 + HIDE_MS), "a line that waited gets its 6 s once shown");
         b.event(&MascotEvent::AwaitingPermission { call_id: "c9".into(), title: "Run x?".into() }, 1);
         assert_eq!(b.open_prompt(), Out::Keep, "a card needs its answer first");
-        assert_eq!(b.event(&MascotEvent::Reminder { id: "r_1".into(), text: "stretch".into() }, 2), Out::Keep);
+        assert_eq!(b.event(&MascotEvent::Reminder { id: "r_1".into(), text: "stretch".into(), set_at_ms: None }, 2), Out::Keep);
         assert_eq!(b.say("later", None, false, 3), Out::Keep, "queued behind the reminder, not over it");
         assert!(matches!(b.answered("c9", 50), Out::Show(m) if m.mode == Mode::Reminder && m.id.as_deref() == Some("r_1")));
         assert_eq!(b.reminder(), Some(&("r_1".to_string(), "stretch".to_string())), "Snooze finds a reminder that waited");
@@ -607,7 +653,7 @@ mod tests {
     #[test]
     fn a_reminder_on_screen_comes_back_after_the_prompt_and_isnt_replaced_by_a_turn() {
         let mut b = Bubble::new();
-        b.event(&MascotEvent::Reminder { id: "r_2".into(), text: "water".into() }, 0);
+        b.event(&MascotEvent::Reminder { id: "r_2".into(), text: "water".into(), set_at_ms: None }, 0);
         assert_eq!(labels(&[b.open_prompt()]), ["prompt"]);
         assert_eq!(b.reminder(), None);
         assert!(matches!(b.dismiss(1), Out::Show(m) if m.id.as_deref() == Some("r_2")), "Esc on the prompt: the reminder again");
@@ -679,7 +725,7 @@ mod tests {
     #[test]
     fn a_reminder_shows_with_its_id_until_done() {
         let mut b = Bubble::new();
-        let Out::Show(m) = b.event(&MascotEvent::Reminder { id: "r_ab".into(), text: "stretch".into() }, 0) else { panic!() };
+        let Out::Show(m) = b.event(&MascotEvent::Reminder { id: "r_ab".into(), text: "stretch".into(), set_at_ms: None }, 0) else { panic!() };
         assert_eq!(serde_json::to_value(&m).unwrap(), json!({ "mode": "reminder", "text": "stretch", "id": "r_ab" }));
         assert_eq!(b.reminder(), Some(&("r_ab".to_string(), "stretch".to_string())));
         assert_eq!(b.tick(60_000, false), Out::Keep, "a reminder waits for Done or Snooze");
@@ -710,5 +756,75 @@ mod tests {
         let e = serde_json::to_value(BubbleModel::error("model_error", "x")).unwrap();
         assert_eq!(e, json!({ "mode": "error", "error": { "reason": "model_error", "message": "x", "action": "retry" } }));
         assert_eq!(serde_json::to_value(BubbleModel::speech("a".into(), true, None)).unwrap(), json!({ "mode": "speech", "text": "a", "streaming": true }));
+    }
+
+    #[test]
+    fn r_error_prompt_an_error_waits_behind_the_open_prompt_and_a_reminder() {
+        let mut b = Bubble::new();
+        b.open_prompt();
+        // a sense turn (or a resumed run) fails while the person types: the prompt stays
+        assert_eq!(b.event(&MascotEvent::Error { reason: "model_error".into(), message: "529".into() }, 1), Out::Keep);
+        assert_eq!(b.failed("no_model", "Sign in first."), Out::Keep);
+        assert_eq!(b.shown().map(|m| m.mode), Some(Mode::Prompt));
+        // Esc: the errors, in order
+        assert!(matches!(b.dismiss(2), Out::Show(m) if m.error.as_ref().unwrap().reason == "model_error"));
+        assert!(matches!(b.dismiss(3), Out::Show(m) if m.error.as_ref().unwrap().reason == "no_model"));
+        // behind a reminder too
+        b.event(&MascotEvent::Reminder { id: "r".into(), text: "tea".into(), set_at_ms: None }, 4);
+        assert_eq!(b.event(&MascotEvent::Error { reason: "interrupted".into(), message: "x".into() }, 5), Out::Keep);
+        assert!(matches!(b.dismiss(6), Out::Show(m) if m.mode == Mode::Error));
+        // submitting moves on: an error held back behind the prompt never pops up after the answer
+        let mut b = Bubble::new();
+        b.open_prompt();
+        assert_eq!(b.event(&MascotEvent::Error { reason: "model_error".into(), message: "529".into() }, 1), Out::Keep);
+        b.submitted("hi");
+        b.event(&speaking("hello"), 2);
+        b.event(&MascotEvent::Idle, 3);
+        assert!(!matches!(b.dismiss(4), Out::Show(m) if m.mode == Mode::Error));
+        // a keychain error offers the Sign in… window (which shows why), not a Try again loop
+        assert_eq!(BubbleModel::error("keychain", "Can't read the keychain: access denied.").error.unwrap().action.as_deref(), Some("sign_in"));
+    }
+
+    #[test]
+    fn r_midturn_the_old_turns_late_text_never_lands_in_the_new_turn() {
+        let mut b = Bubble::new();
+        b.submitted("tell me a long story");
+        b.event(&speaking("Once upon a"), 1);
+        assert!(b.running());
+        // a new prompt mid-turn: the bubble waits for the new answer…
+        assert_eq!(labels(&[b.supersede("actually, a haiku")]), ["speech streaming"]);
+        assert_eq!(b.last_prompt(), Some("actually, a haiku"));
+        // …and the old turn's tail (after the abort) stays quiet
+        assert_eq!(b.event(&speaking("Once upon a time there"), 2), Out::Keep);
+        assert_eq!(b.event(&MascotEvent::Idle, 3), Out::Keep);
+        assert_eq!(b.shown().unwrap().text.as_deref(), Some(""));
+        // the old turn is idle: unstop, then the new turn's events show
+        assert!(matches!(b.unstop(), Out::Keep | Out::Show(_)));
+        assert!(b.running());
+        assert_eq!(b.event(&MascotEvent::Thinking, 4), Out::Keep, "same streaming bubble");
+        let Out::Show(m) = b.event(&speaking("Leaves fall"), 5) else { panic!() };
+        assert_eq!(m.text.as_deref(), Some("Leaves fall"));
+        let Out::Show(m) = b.event(&MascotEvent::Idle, 6) else { panic!() };
+        assert_eq!((m.text.as_deref(), m.streaming), (Some("Leaves fall"), Some(false)));
+        // ■ on the new turn still works afterwards
+        b.submitted("again");
+        assert!(b.dismiss_stops());
+    }
+
+    #[test]
+    fn r_chip_set_min_ago_comes_from_set_at_ms_and_an_old_reminder_has_no_chip() {
+        let mut b = Bubble::new();
+        b.wall_ms = 1_700_000_000_000 + 20 * 60_000 + 30_000;
+        let Out::Show(m) = b.event(&MascotEvent::Reminder { id: "r_1".into(), text: "stretch".into(), set_at_ms: Some(1_700_000_000_000) }, 0) else { panic!() };
+        assert_eq!(m.set_min_ago, Some(20));
+        assert_eq!(serde_json::to_value(&m).unwrap()["setMinAgo"], 20);
+        b.dismiss(1);
+        // condition f: stored before p4 (no setAtMs) — it still shows, without the chip
+        let Out::Show(m) = b.event(&MascotEvent::Reminder { id: "r_0".into(), text: "old".into(), set_at_ms: None }, 2) else { panic!() };
+        assert_eq!(serde_json::to_value(&m).unwrap(), json!({ "mode": "reminder", "text": "old", "id": "r_0" }));
+        // a clock that went backwards never shows a negative age
+        b.dismiss(3);
+        let Out::Show(m) = b.event(&MascotEvent::Reminder { id: "r_2".into(), text: "x".into(), set_at_ms: Some(b.wall_ms + 60_000) }, 4) else { panic!() };
+        assert_eq!(m.set_min_ago, Some(0));
     }
 }

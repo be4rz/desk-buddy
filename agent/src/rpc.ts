@@ -9,6 +9,11 @@ export class RpcError extends Error {
   }
 }
 
+/** Whether `e` ended a wait because it was stopped: our own abort, or Rust's "cancelled" reply. */
+export function isCancelled(e: unknown, signal?: AbortSignal): boolean {
+  return !!signal?.aborted || (e instanceof RpcError && e.code === "cancelled");
+}
+
 type Waiter = { resolve: (v: unknown) => void; reject: (e: unknown) => void };
 
 const waiting = new Map<string, Waiter>();

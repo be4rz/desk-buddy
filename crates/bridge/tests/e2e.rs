@@ -113,6 +113,7 @@ fn script() -> Value {
         { "match": "gated hi", "reply": { "toolCalls": [{ "name": "bash", "args": { "command": "make greet && buddy say Hi there" } }] } },
         { "match": "/declined/i", "reply": { "text": "Okay, I won’t." } },
         { "match": "say hi", "reply": { "toolCalls": [{ "name": "bash", "args": { "command": "buddy say Hi there --emotion happy" } }] } },
+        { "match": "print env", "reply": { "toolCalls": [{ "name": "bash", "args": { "command": "env > env.txt" } }] } },
         { "match": "break", "reply": { "error": { "status": 400, "body": { "error": { "message": "the fake refused" } } } } },
         { "match": "slow", "times": 1, "reply": { "toolCalls": [{ "name": "bash", "args": { "command": "echo $$ > cmd.pid; sleep 30" } }] } },
         // The resumed run, told its call was cut off, speaks.
@@ -420,7 +421,7 @@ fn a_start_that_dies_before_ready_keeps_the_last_exit() {
 
 /// The `Reminder` events at index ≥ `from`.
 fn reminders(fx: &Fx, from: usize) -> Vec<(String, String)> {
-    fx.mascot(from).into_iter().filter_map(|e| if let MascotEvent::Reminder { id, text } = e { Some((id, text)) } else { None }).collect()
+    fx.mascot(from).into_iter().filter_map(|e| if let MascotEvent::Reminder { id, text, .. } = e { Some((id, text)) } else { None }).collect()
 }
 
 #[cfg(unix)]
@@ -450,7 +451,7 @@ fn a_reminder_survives_kill_9_and_fires_once() {
     let restart = fx.len();
     fx.agent.start().unwrap();
     let (_, got) = fx.wait(restart, "the reminder", |e| match e {
-        AgentEvent::Mascot(MascotEvent::Reminder { id, text }) => Some((id.clone(), text.clone())),
+        AgentEvent::Mascot(MascotEvent::Reminder { id, text, .. }) => Some((id.clone(), text.clone())),
         _ => None,
     });
     assert_eq!(got, (id.clone(), "stretch".to_string()));
@@ -504,4 +505,98 @@ fn a_web_search_marks_the_agent_and_its_next_card_offers_no_always() {
     assert!(fx.records().iter().any(|r| r["kind"] == "entry" && r["entry"]["data"]["type"] == "taint_set"));
     fx.agent.policy_ui(&json!({ "op": "approval_answer", "callId": call, "answer": "deny" })).unwrap();
     assert_eq!(fx.run_end(from), MascotEvent::Idle);
+}
+
+// --- accounts (p4) ---------------------------------------------------------------------------
+
+/// `ps eww <pid>`: the process's command line and environment.
+fn ps_env(pid: u32) -> String {
+    let out = Command::new("/bin/ps").args(["eww", "-o", "command=", "-p", &pid.to_string()]).output().unwrap();
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+#[test]
+fn no_key_is_in_the_sidecars_env_nor_a_commands_env() {
+    let secrets = [KEY, "ANTHROPIC_API_KEY", "_API_KEY="];
+    let fx = fixture("envhyg");
+    let env = ps_env(fx.agent.pid().expect("running"));
+    assert!(env.contains("buddy-agent"), "ps saw the sidecar: {env:?}");
+    for bad in secrets {
+        assert!(!env.contains(bad), "{bad} in the sidecar's env");
+    }
+    // a command the agent runs (`env` isn't allowlisted: answer its card)
+    let from = fx.len();
+    fx.agent.prompt("print env").unwrap();
+    let call = fx.asked(from);
+    fx.agent.policy_ui(&json!({ "op": "approval_answer", "callId": call, "answer": "allow" })).unwrap();
+    assert_eq!(fx.run_end(from), MascotEvent::Idle);
+    let out = std::fs::read_to_string(fx.root.join("work").join("env.txt")).expect("the command ran");
+    assert!(out.contains("PATH="), "{out}");
+    for bad in secrets {
+        assert!(!out.contains(bad), "{bad} in a command's env:\n{out}");
+    }
+}
+
+/// The sign-in window, scripted: records what the sidecar asked and answers each code prompt.
+struct ScriptedUi {
+    code: String,
+    seen: Mutex<Vec<String>>,
+}
+
+impl bridge::agent::AuthUi for ScriptedUi {
+    fn open_url(&self, url: &str, _instructions: Option<&str>) {
+        self.seen.lock().unwrap().push(format!("open_url {url}"));
+    }
+    fn device_code(&self, user_code: &str, _verification_uri: &str) {
+        self.seen.lock().unwrap().push(format!("device_code {user_code}"));
+    }
+    fn progress(&self, message: &str) {
+        self.seen.lock().unwrap().push(format!("progress {message}"));
+    }
+    fn prompt(&self, message: &str, _placeholder: Option<&str>, _cancelled: &std::sync::atomic::AtomicBool) -> Result<String, String> {
+        self.seen.lock().unwrap().push(format!("prompt {message}"));
+        Ok(self.code.clone())
+    }
+    fn select(&self, _message: &str, options: &[(String, String)], _cancelled: &std::sync::atomic::AtomicBool) -> Result<String, String> {
+        Ok(options.first().map(|o| o.0.clone()).unwrap_or_default())
+    }
+}
+
+#[test]
+fn a_fake_oauth_sign_in_stores_the_credential_and_a_wrong_code_is_invalid_grant() {
+    let fake_oauth = json!({ "fakeOAuth": { "baseUrl": "http://127.0.0.1:9/v1" } });
+    let fx = fixture_with("oauth", fake_oauth.clone());
+    let ui = Arc::new(ScriptedUi { code: "good".into(), seen: Mutex::default() });
+    fx.agent.set_auth_ui(ui.clone());
+    fx.agent.auth_login("fake-oauth").expect("signed in");
+    let seen = ui.seen.lock().unwrap().clone();
+    // open_url and the prompt are separate requests, handled on their own threads: either order
+    for want in ["open_url http://127.0.0.1:1/fake-oauth/authorize", "prompt Paste the code"] {
+        assert!(seen.iter().any(|s| s == want), "{want} in {seen:?}");
+    }
+    assert!(fx.agent.creds().kinds().iter().any(|(id, kind)| id == "fake-oauth" && kind == "oauth"), "{:?}", fx.agent.creds().kinds());
+
+    // a wrong code: pi-ai's invalid_grant, nothing stored
+    let fx2 = fixture_with("oauth-bad", fake_oauth.clone());
+    fx2.agent.set_auth_ui(Arc::new(ScriptedUi { code: "abc123#state".into(), seen: Mutex::default() }));
+    let e = fx2.agent.auth_login("fake-oauth").unwrap_err();
+    assert_eq!(e.code, "auth", "{e}");
+    assert!(e.message.contains("invalid_grant"), "{e}");
+    assert!(!fx2.agent.creds().kinds().iter().any(|(id, _)| id == "fake-oauth"));
+
+    // no window: the sign-in fails at once instead of hanging
+    let fx3 = fixture_with("oauth-noui", fake_oauth);
+    assert!(fx3.agent.auth_login("fake-oauth").is_err());
+}
+
+#[test]
+fn a_sense_prompt_runs_with_an_s_id() {
+    let fx = fixture("sense");
+    let from = fx.len();
+    let id = fx.agent.prompt_sense("[unprompted · back_from_idle · afternoon] said hi").unwrap();
+    assert!(id.starts_with("s:"), "{id}");
+    fx.run_end(from);
+    let input = fx.snapshot().into_iter().find(|e| e["kind"] == "buddy.input").expect("the turn's input");
+    assert_eq!(input["data"]["source"], "sense", "{input}");
+    assert_eq!(input["data"]["requestId"], id.as_str());
 }

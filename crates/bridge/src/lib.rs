@@ -7,6 +7,7 @@ pub mod bridge;
 pub mod credentials;
 pub mod mascot;
 pub mod protocol;
+pub mod store;
 
 use std::fmt;
 

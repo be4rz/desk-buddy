@@ -216,16 +216,24 @@ pub fn place(f: CGRect, vf: CGRect, w: f64, h: f64) -> (f64, f64, &'static str) 
 
 // ---------- the page's commands (§4.8): each posts into the inbox ----------
 
+/// The bubble window only (`caller`): the Sign in… page can't submit prompts or answer cards.
+fn mine(win: &WebviewWindow, cmd: &str) -> bool {
+    crate::caller::is(win.label(), LABEL, cmd)
+}
+
 #[tauri::command]
-pub fn prompt_submit(text: String) {
-    if text.trim().is_empty() {
+pub fn prompt_submit(win: WebviewWindow, text: String) {
+    if !mine(&win, "prompt_submit") || text.trim().is_empty() {
         return;
     }
     post(Inbox::Call(Box::new(move |a| a.submit(text))));
 }
 
 #[tauri::command]
-pub fn card_answer(call_id: String, answer: String) -> Result<(), String> {
+pub fn card_answer(win: WebviewWindow, call_id: String, answer: String) -> Result<(), String> {
+    if !mine(&win, "card_answer") {
+        return Err("not from the bubble".into());
+    }
     if !matches!(answer.as_str(), "allow" | "allow_always" | "deny") {
         return Err(format!("unknown answer {answer:?}"));
     }
@@ -234,23 +242,31 @@ pub fn card_answer(call_id: String, answer: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn bubble_dismiss() {
-    post(Inbox::Call(Box::new(|a| a.bubble_dismiss())));
+pub fn bubble_dismiss(win: WebviewWindow) {
+    if mine(&win, "bubble_dismiss") {
+        post(Inbox::Call(Box::new(|a| a.bubble_dismiss())));
+    }
 }
 
 #[tauri::command]
-pub fn bubble_size(w: f64, h: f64) {
-    post(Inbox::Call(Box::new(move |a| a.bubble_sized(w, h))));
+pub fn bubble_size(win: WebviewWindow, w: f64, h: f64) {
+    if mine(&win, "bubble_size") {
+        post(Inbox::Call(Box::new(move |a| a.bubble_sized(w, h))));
+    }
 }
 
 #[tauri::command]
-pub fn bubble_retry() {
-    post(Inbox::Call(Box::new(|a| a.bubble_retry())));
+pub fn bubble_retry(win: WebviewWindow) {
+    if mine(&win, "bubble_retry") {
+        post(Inbox::Call(Box::new(|a| a.bubble_retry())));
+    }
 }
 
 #[tauri::command]
-pub fn reminder_snooze(id: String, minutes: u32) {
-    post(Inbox::Call(Box::new(move |a| a.reminder_snooze(id, minutes.clamp(1, 24 * 60)))));
+pub fn reminder_snooze(win: WebviewWindow, id: String, minutes: u32) {
+    if mine(&win, "reminder_snooze") {
+        post(Inbox::Call(Box::new(move |a| a.reminder_snooze(id, minutes.clamp(1, 24 * 60)))));
+    }
 }
 
 #[cfg(test)]

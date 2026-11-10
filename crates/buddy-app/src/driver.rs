@@ -8,9 +8,10 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::ptr::NonNull;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use block2::RcBlock;
 use mascot_core::replay::SensesPatch;
@@ -21,12 +22,16 @@ use objc2::rc::Retained;
 use objc2_foundation::{NSRunLoop, NSRunLoopCommonModes, NSTimer};
 
 use crate::bubble::window::BubbleWin;
-use crate::bubble::{Bubble, Out};
+use crate::bubble::{Bubble, Mode, Out};
 use crate::harness::{self, AgentState};
 use crate::panel::Panel;
 use crate::senses::{self, Ring};
 use crate::settings::{self, DndAct, Settings};
 use crate::stats::Stats;
+use crate::unprompted::{self, Unprompted};
+
+/// R-midturn: how long a new prompt waits for the turn it replaced to end.
+const SUPERSEDE_WAIT: Duration = Duration::from_secs(5);
 
 /// Everything that reaches the brain or the app from elsewhere (frozen for later phases).
 #[allow(dead_code)] // Settings and inbox() are the frozen entry points for p2+
@@ -147,6 +152,16 @@ pub struct App {
     /// `BUDDY_STATS=1`: the mouth while talking
     mouth_log: bool,
     last_mouth: Option<MouthState>,
+    /// sense-triggered model turns and their budget (p4)
+    unprompted: Unprompted,
+    /// the tray's budget line, on change
+    budget_line: String,
+    pub on_budget: Option<Box<dyn Fn(&str)>>,
+    /// the tray's Ask… item: disabled while the brain hides the bear
+    pub on_ask: Option<Box<dyn Fn(bool)>>,
+    /// R-midturn: a prompt waiting for the turn it replaced to end (the flag is set on that
+    /// turn's Idle or Error); a later prompt meanwhile replaces the text
+    superseded: Option<(Arc<AtomicBool>, String)>,
 }
 
 pub struct Init {
@@ -209,6 +224,11 @@ pub fn start(init: Init, handle: tauri::AppHandle) {
         brain_hidden: false,
         mouth_log: std::env::var_os("BUDDY_STATS").is_some(),
         last_mouth: None,
+        unprompted: Unprompted::default(),
+        budget_line: Unprompted::default().line(0, None),
+        on_budget: None,
+        on_ask: None,
+        superseded: None,
     };
     APP.with(|a| *a.borrow_mut() = Some(app));
     forward(rx, handle);
@@ -238,7 +258,13 @@ impl App {
         match m {
             Inbox::Event(ev) => {
                 eprintln!("[buddy] event {}", serde_json::to_string(&ev).unwrap_or_default());
+                if matches!(ev, MascotEvent::Idle | MascotEvent::Error { .. }) {
+                    if let Some((done, _)) = &self.superseded {
+                        done.store(true, Ordering::SeqCst);
+                    }
+                }
                 self.brain.event(&ev, now);
+                self.bubble.wall_ms = policy::now_ms();
                 let out = self.bubble.event(&ev, now);
                 self.apply(out);
             }
@@ -251,6 +277,7 @@ impl App {
                 patch.apply(&mut self.raw);
                 self.ring.push(now, patch);
                 self.regate(now);
+                self.sense_turn(now);
             }
             Inbox::Poke(p) => {
                 if p == Poke::DragEnd {
@@ -331,6 +358,45 @@ impl App {
                 f(st);
             }
         }
+        self.refresh_budget(now);
+    }
+
+    /// A sense sample may start an unprompted model turn (budgeted, off the main thread).
+    fn sense_turn(&mut self, now: u64) {
+        let busy = self.bubble.running() || matches!(self.bubble.shown().map(|m| m.mode), Some(Mode::Prompt | Mode::Card | Mode::Reminder));
+        let h = harness::get();
+        let ready = unprompted::Ready { busy, can_turn: h.as_ref().is_some_and(|h| h.can_turn()) };
+        if let (Some(summary), Some(h)) = (self.unprompted.sample(&self.senses, now, self.brain.unprompted_allowed(), ready), h) {
+            std::thread::spawn(move || {
+                if let Err(e) = h.prompt_sense(&summary) {
+                    eprintln!("[buddy] unprompted turn: {e}");
+                }
+            });
+        }
+        self.refresh_budget(now);
+    }
+
+    /// The tray's "Unprompted N/4 this hour" / "Unprompted paused (…)", on change.
+    fn refresh_budget(&mut self, now: u64) {
+        let paused = (!self.brain.unprompted_allowed()).then(|| unprompted::paused(&self.senses).unwrap_or("do not disturb"));
+        let line = self.unprompted.line(now, paused);
+        if line != self.budget_line {
+            self.budget_line = line;
+            if let Some(f) = &self.on_budget {
+                f(&self.budget_line);
+            }
+        }
+    }
+
+    pub fn budget_line(&self) -> &str {
+        &self.budget_line
+    }
+
+    /// A sign-in picked the model (its provider had no credential before): it's the setting now.
+    pub fn model_chosen(&mut self, m: settings::Model) {
+        eprintln!("[buddy] model {}/{}", m.provider, m.model);
+        self.settings.model = m;
+        self.save_settings();
     }
 
     /// Tray "Do not disturb" (session only).
@@ -399,6 +465,9 @@ impl App {
         let brain_hidden = show.visibility == Visibility::Hidden;
         if brain_hidden != self.brain_hidden {
             self.brain_hidden = brain_hidden;
+            if let Some(f) = &self.on_ask {
+                f(brain_hidden);
+            }
             match brain_hidden {
                 true => eprintln!("[buddy] hide: {}", hide_reason(&self.senses)),
                 false => eprintln!("[buddy] hide: none (shown again)"),
@@ -534,28 +603,60 @@ impl App {
         self.apply(out);
     }
 
-    /// Click on the bear or tray → Ask…
+    /// Click on the bear or tray → Ask… A bear the person hid comes back first (R-ask-hidden):
+    /// the bubble hangs off it.
     pub fn open_prompt(&mut self) {
+        if self.user_hidden {
+            self.set_user_hidden(false);
+        }
         let out = self.bubble.open_prompt();
         self.apply(out);
     }
 
-    /// The person sent a prompt: to the agent, off the main thread.
+    /// The person sent a prompt: to the agent, off the main thread. Mid-turn (R-midturn), the
+    /// running turn is aborted first and the prompt goes once it has ended (≤ 5 s), so none of
+    /// its late text lands in the new answer.
     pub fn submit(&mut self, text: String) {
-        let out = self.bubble.submitted(&text);
+        let midturn = self.bubble.running();
+        // still waiting for a replaced turn (also after ■ on it): its late text stays quiet
+        let out = if midturn || self.superseded.is_some() { self.bubble.supersede(&text) } else { self.bubble.submitted(&text) };
         self.apply(out);
         if let Some(w) = &self.bubble_win {
             w.give_keyboard_back();
         }
-        eprintln!("[buddy] prompt {}", serde_json::to_string(&text).unwrap_or_default());
+        eprintln!("[buddy] prompt {}{}", serde_json::to_string(&text).unwrap_or_default(), if midturn { " (replaces the running turn)" } else { "" });
+        // already waiting for a replaced turn to end (it may have ended, its send not yet run):
+        // this text goes instead, once
+        if let Some((_, pending)) = &mut self.superseded {
+            *pending = text;
+            return;
+        }
+        if !midturn {
+            return send_prompt(text);
+        }
+        let done = Arc::new(AtomicBool::new(false));
+        self.superseded = Some((done.clone(), text));
         std::thread::spawn(move || {
-            let r = match harness::get() {
-                Some(h) => h.prompt(&text).map(|_| ()),
-                None => Err(bridge::BridgeError::new("no_agent", "The agent isn't set up.")),
-            };
-            if let Err(e) = r {
-                post(Inbox::Call(Box::new(move |a| a.bubble_failed(&e))));
+            if let Some(h) = harness::get() {
+                if let Err(e) = h.abort() {
+                    eprintln!("[buddy] stop: {e}");
+                }
             }
+            let t = Instant::now();
+            while !done.load(Ordering::SeqCst) && t.elapsed() < SUPERSEDE_WAIT {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            if !done.load(Ordering::SeqCst) {
+                eprintln!("[buddy] the replaced turn didn't end in {} s; sending anyway", SUPERSEDE_WAIT.as_secs());
+            }
+            // on the main thread (FIFO inbox: the unstop lands before any event of the new
+            // turn), so the latest text is the one sent
+            post(Inbox::Call(Box::new(|a| {
+                let Some((_, text)) = a.superseded.take() else { return };
+                let out = a.bubble.unstop();
+                a.apply(out);
+                send_prompt(text);
+            })));
         });
     }
 
@@ -618,11 +719,11 @@ impl App {
         win.sized(w, h, &self.panel.panel);
     }
 
-    /// Try again (error bubble): the last prompt once more. "Sign in…" waits for p4.
+    /// Try again (error bubble): the last prompt once more. With no model: "Sign in…".
     pub fn bubble_retry(&mut self) {
-        let no_model = self.bubble.shown().and_then(|m| m.error.as_ref()).is_some_and(|e| e.reason == "no_model");
+        let no_model = self.bubble.shown().and_then(|m| m.error.as_ref()).is_some_and(|e| e.action.as_deref() == Some("sign_in"));
         if no_model {
-            eprintln!("[buddy] sign-in arrives in p4");
+            crate::signin::window::open();
             return self.bubble_dismiss();
         }
         match self.bubble.last_prompt().map(str::to_string) {
@@ -681,6 +782,19 @@ impl App {
             f(s);
         }
     }
+}
+
+/// One prompt to the agent, off the main thread; a failure comes back as the error bubble.
+fn send_prompt(text: String) {
+    std::thread::spawn(move || {
+        let r = match harness::get() {
+            Some(h) => h.prompt(&text).map(|_| ()),
+            None => Err(bridge::BridgeError::new("no_agent", "The agent isn't set up.")),
+        };
+        if let Err(e) = r {
+            post(Inbox::Call(Box::new(move |a| a.bubble_failed(&e))));
+        }
+    });
 }
 
 pub fn dnd_action(a: DndAct) -> DndAction {

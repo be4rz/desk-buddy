@@ -20,9 +20,9 @@ use crate::{BridgeError as RtError, Res};
 /// Request threads per sidecar, for the quick requests.
 const WORKERS: usize = 4;
 /// Requests that can take minutes (an approval wait) or block on another's lease
-/// (a sign-in refresh) run on a thread of their own, so they never hold up
-/// credential reads or policy checks.
-const LONG: [&str; 2] = ["policy.wait", "cred.modify_begin"];
+/// (a sign-in refresh), and sign-in questions the person answers in the window,
+/// run on a thread of their own, so they never hold up credential reads or policy checks.
+const LONG: [&str; 4] = ["policy.wait", "cred.modify_begin", "auth.prompt", "auth.select"];
 
 /// What a sidecar's records reach.
 pub trait Handler: Send + Sync + 'static {
@@ -275,6 +275,9 @@ fn code_of(code: &str) -> &'static str {
         "unknown_op" => "unknown_op",
         "unsupported" => "unsupported",
         "too_many" => "too_many",
+        // a sign-in (`auth.login`) that failed, or that was cancelled (p4)
+        "auth" => "auth",
+        "cancelled" => "cancelled",
         // Shutting down: the command is for the next sidecar.
         "closing" => "not_running",
         _ => "agent_error",

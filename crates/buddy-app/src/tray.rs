@@ -4,7 +4,10 @@
 //! "Do not disturb" (session only), "Quiet hours HH:MM–HH:MM" (writes
 //! `quiet_hours.enabled`) and "When busy ▸ Hide / Hold still" (writes `dnd.action`).
 //! p3 (talk): "Ask…" (opens the bubble's prompt), the agent line ("Agent: running · <model>",
-//! stopped, error, no key) and "Clear web taint" while the chat is tainted.
+//! stopped, error, not signed in, can't read keychain) and "Clear web taint" while the chat is
+//! tainted. p4 (accounts): the budget line ("Unprompted N/4 this hour" / "Unprompted paused
+//! (…)", `#tray-budget`), "Sign in…" (the sign-in window), and Ask… reads "Ask… (bear hidden)",
+//! disabled, while DND or quiet hours hide the bear (a bear the person hid comes back on Ask…).
 
 use mascot_core::{Dir, EyeState, Intent, MouthState, Show, Visibility};
 use mascot_render::{Art, View};
@@ -113,6 +116,9 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
     let hide = MenuItem::with_id(app, "hide", "Hide bear", true, None::<&str>)?;
     let next = MenuItem::with_id(app, "nextdisplay", "Move to next display", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit desk-buddy", true, None::<&str>)?;
+    let budget = MenuItem::with_id(app, "budget", "Unprompted 0/4 this hour", false, None::<&str>)?;
+    let signin = MenuItem::with_id(app, "signin", "Sign in…", true, None::<&str>)?;
+    let sep5 = PredefinedMenuItem::separator(app)?;
     let status = MenuItem::with_id(app, "status", "", false, None::<&str>)?;
     let dnd = CheckMenuItem::with_id(app, "dnd", "Do not disturb", true, false, None::<&str>)?;
     let quiet = CheckMenuItem::with_id(app, "quiet", format!("Quiet hours {}", t.quiet_span), true, t.quiet_enabled, None::<&str>)?;
@@ -132,16 +138,25 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
     items.extend([&sep1 as &dyn IsMenuItem<Wry>, &ask, &agent]);
     // "Clear web taint" goes in under the agent line while tainted
     let taint_at = items.len();
-    items.extend([&sep4 as &dyn IsMenuItem<Wry>, &zs[0], &zs[1], &zs[2], &hide, &next, &sep2, &dnd, &quiet, &busy, &sep3, &quit]);
+    items.extend([&sep4 as &dyn IsMenuItem<Wry>, &zs[0], &zs[1], &zs[2], &hide, &next, &sep2, &dnd, &quiet, &busy, &sep5, &budget, &signin, &sep3, &quit]);
     let menu = Menu::with_items(app, &items)?;
 
     let hide2 = hide.clone();
+    let ask2 = ask.clone();
     let (menu2, status2) = (menu.clone(), status.clone());
     let (menu3, taint2) = (menu.clone(), taint.clone());
     let (dnd2, quiet2, bh2, bs2, busy2) = (dnd.clone(), quiet.clone(), busy_hide.clone(), busy_still.clone(), busy.clone());
     with_app(move |a| {
         a.on_agent = Some(Box::new(move |s| {
             let _ = agent.set_text(s.line());
+        }));
+        let _ = budget.set_text(a.budget_line());
+        a.on_budget = Some(Box::new(move |line| {
+            let _ = budget.set_text(line);
+        }));
+        a.on_ask = Some(Box::new(move |brain_hidden| {
+            let _ = ask2.set_text(if brain_hidden { "Ask… (bear hidden)" } else { "Ask…" });
+            let _ = ask2.set_enabled(!brain_hidden);
         }));
         a.on_taint = Some(Box::new(move |t| {
             let shown = menu3.get("taint").is_some();
@@ -190,6 +205,7 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
             match id {
                 "quit" => app.exit(0),
                 "ask" => with_app(|a| a.open_prompt()),
+                "signin" => crate::signin::window::open(),
                 "taint" => {
                     std::thread::spawn(|| {
                         if let Some(h) = harness::get() {

@@ -26,7 +26,7 @@ html[data-side="below"] .bubble::after { bottom: auto; top: -10px; border: 0; bo
 .bubble .x { border: 0; background: none; font: 14px var(--sans); color: var(--fur-4); cursor: pointer; padding: 0 2px; }
 .caret { display: inline-block; width: 7px; height: 14px; background: var(--ink); vertical-align: -2px; animation: blink 1s steps(1) infinite; }
 .bubble textarea { width: 100%; resize: none; border: 1.5px solid var(--fur-3); border-radius: 8px; padding: 7px 9px; font: 14px var(--sans); color: var(--ink); background: #fff; min-height: 58px; -webkit-user-select: text; user-select: text; }
-.bubble textarea:focus { outline: 2px solid var(--hat-l); border-color: var(--hat); }
+.bubble textarea:focus { outline: 2px solid var(--hat); border-color: var(--hat); }
 .row { display: flex; gap: 6px; align-items: center; justify-content: flex-end; margin-top: 8px; flex-wrap: wrap; }
 .hint { font-size: 11px; color: var(--fur-4); margin-right: auto; }
 .btn { font: 600 13px var(--sans); border-radius: 7px; border: 1.5px solid var(--ink); background: var(--paper); color: var(--ink); padding: 5px 11px; cursor: pointer; box-shadow: 0 2px 0 var(--ink); }

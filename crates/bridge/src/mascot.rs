@@ -68,7 +68,8 @@ impl Mapper {
                 let e = &rec["entry"];
                 if e["kind"] == "buddy.event" && e["data"]["type"] == "reminder_fired" {
                     let (id, text) = (e["data"]["id"].as_str().unwrap_or(""), e["data"]["text"].as_str().unwrap_or(""));
-                    return (!text.is_empty()).then(|| MascotEvent::Reminder { id: id.into(), text: text.into() });
+                    let set_at_ms = e["data"]["setAtMs"].as_u64();
+                    return (!text.is_empty()).then(|| MascotEvent::Reminder { id: id.into(), text: text.into(), set_at_ms });
                 }
                 if e["kind"] == "buddy.event" && e["data"]["type"] == "approval_asked" {
                     if let (Some(id), Some(title)) = (e["data"]["callId"].as_str(), e["data"]["title"].as_str()) {
@@ -198,8 +199,12 @@ mod tests {
         let mut m = Mapper::new();
         assert_eq!(m.on_record(&status(json!({ "busy": false, "phase": "idle", "tools": [], "asking": [] }))), Some(MascotEvent::Idle));
         let fired = |id: &str| json!({ "t": "ev", "kind": "entry", "entry": { "kind": "buddy.event", "data": { "type": "reminder_fired", "id": id, "text": "stretch", "atMs": 1 } } });
-        assert_eq!(m.on_record(&fired("r_1")), Some(MascotEvent::Reminder { id: "r_1".into(), text: "stretch".into() }));
-        assert_eq!(m.on_record(&fired("r_2")), Some(MascotEvent::Reminder { id: "r_2".into(), text: "stretch".into() }));
+        assert_eq!(m.on_record(&fired("r_1")), Some(MascotEvent::Reminder { id: "r_1".into(), text: "stretch".into(), set_at_ms: None }));
+        assert_eq!(m.on_record(&fired("r_2")), Some(MascotEvent::Reminder { id: "r_2".into(), text: "stretch".into(), set_at_ms: None }));
+        // p4: when it was set rides along; a reminder stored before p4 has none
+        let mut with = fired("r_3");
+        with["entry"]["data"]["setAtMs"] = json!(1_700_000_000_000u64);
+        assert_eq!(m.on_record(&with), Some(MascotEvent::Reminder { id: "r_3".into(), text: "stretch".into(), set_at_ms: Some(1_700_000_000_000) }));
         // Still idle as far as the dedupe knows.
         assert_eq!(m.on_record(&status(json!({ "busy": false, "phase": "idle", "tools": [], "asking": [] }))), None);
         // Other buddy events map to nothing.

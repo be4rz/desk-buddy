@@ -3,7 +3,9 @@
 //! on exit), tells the host API the running turn, maps its records to
 //! `MascotEvent`s, and remembers how it ended for the next start's `lastExit`.
 //! It also marks the agent when it reads the web (`policy.taint`) and keeps
-//! the person's reminders in the sidecar (`remind.*`, design §4.6/§4.7).
+//! the person's reminders in the sidecar (`remind.*`, design §4.6/§4.7), runs
+//! pi-ai sign-ins (`auth.login` → `auth.*` requests → the app's `AuthUi`) and sends
+//! sense-triggered turns (`s:` request ids).
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -20,12 +22,52 @@ use serde_json::{json, Value};
 use crate::bridge::{Bridge, Handler, Spawn};
 use crate::credentials::Credentials;
 use crate::mascot::Mapper;
-use crate::protocol::{new_request_id, platform, HostApi, Init, ModelRef, ProviderDef, V};
+use crate::protocol::{new_request_id, new_sense_id, platform, HostApi, Init, ModelRef, ProviderDef, V};
 use crate::{BridgeError, Res};
 
 /// How long a start may take to send `ready`.
 const READY_WAIT: Duration = Duration::from_secs(20);
 const CMD_WAIT: Duration = Duration::from_secs(15);
+/// A sign-in waits for the person (a browser, a pasted code).
+const LOGIN_WAIT: Duration = Duration::from_secs(600);
+
+/// The app's side of a sign-in (design §4.7, pi-ai's login callbacks 1:1). Called on
+/// bridge threads; `prompt`/`select` block until the person answers, `Err` = cancelled.
+/// `cancelled` turns true when the sidecar gives up on the question.
+pub trait AuthUi: Send + Sync {
+    /// Open `url` in the browser (it passed `safe_auth_url`) and show it.
+    fn open_url(&self, url: &str, instructions: Option<&str>);
+    fn device_code(&self, user_code: &str, verification_uri: &str);
+    fn progress(&self, message: &str);
+    fn prompt(&self, message: &str, placeholder: Option<&str>, cancelled: &AtomicBool) -> Result<String, String>;
+    /// Returns the chosen option's id.
+    fn select(&self, message: &str, options: &[(String, String)], cancelled: &AtomicBool) -> Result<String, String>;
+}
+
+/// A sign-in page the sidecar may open: `https:`, or `http:` on a loopback host only.
+/// No userinfo, whitespace or control characters; anything else (`file:`,
+/// `javascript:`, custom schemes) is refused.
+pub fn safe_auth_url(url: &str) -> bool {
+    if url.len() > 8192 || url.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return false;
+    }
+    let lower = url.to_ascii_lowercase();
+    let (https, rest) = match (lower.strip_prefix("https://"), lower.strip_prefix("http://")) {
+        (Some(r), _) => (true, r),
+        (None, Some(r)) => (false, r),
+        _ => return false,
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if authority.is_empty() || authority.contains('@') || authority.contains('\\') {
+        return false;
+    }
+    if https {
+        return true;
+    }
+    // the host without its port; `[::1]:8080` keeps its brackets
+    let host = if authority.starts_with('[') { authority.split(']').next().map(|h| format!("{h}]")).unwrap_or_default() } else { authority.split(':').next().unwrap_or("").to_string() };
+    matches!(host.as_str(), "127.0.0.1" | "localhost" | "[::1]")
+}
 
 pub struct AgentSpec {
     pub agent_id: String,
@@ -79,6 +121,9 @@ pub struct Agent {
     readied: AtomicU64,
     mapper: Mutex<Mapper>,
     ready: Mutex<Option<mpsc::Sender<Value>>>,
+    auth: Mutex<Option<Arc<dyn AuthUi>>>,
+    /// The model the next start uses; `set_model` changes it (after a sign-in).
+    model: Mutex<Option<ModelRef>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -87,11 +132,21 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 impl Agent {
     pub fn new(spec: AgentSpec, policy: Arc<Production>, host: Arc<Host>, creds: Arc<Credentials>, sink: impl Fn(AgentEvent) + Send + Sync + 'static) -> Arc<Agent> {
-        Arc::new(Agent { spec, policy, host, creds, sink: Box::new(sink), run: Mutex::new(None), gen: AtomicU64::new(0), exited: AtomicU64::new(0), readied: AtomicU64::new(0), mapper: Mutex::new(Mapper::new()), ready: Mutex::new(None) })
+        let spec_model = spec.model.clone();
+        Arc::new(Agent { spec, policy, host, creds, sink: Box::new(sink), run: Mutex::new(None), gen: AtomicU64::new(0), exited: AtomicU64::new(0), readied: AtomicU64::new(0), mapper: Mutex::new(Mapper::new()), ready: Mutex::new(None), auth: Mutex::new(None), model: Mutex::new(spec_model) })
     }
 
     pub fn id(&self) -> &str {
         &self.spec.agent_id
+    }
+
+    /// Where the sidecar's sign-in questions go (the sign-in window).
+    pub fn set_auth_ui(&self, ui: Arc<dyn AuthUi>) {
+        *lock(&self.auth) = Some(ui);
+    }
+
+    pub fn creds(&self) -> &Arc<Credentials> {
+        &self.creds
     }
 
     pub fn gen(&self) -> u64 {
@@ -172,7 +227,7 @@ impl Agent {
             work_dir: self.spec.work_dir.display().to_string(),
             storage_path: self.spec.state_dir.join("agent.sqlite").display().to_string(),
             skills_dir: self.spec.skills_dir.display().to_string(),
-            model: self.spec.model.clone(),
+            model: lock(&self.model).clone(),
             providers: self.spec.providers.clone(),
             shell_env: self.shell_env(),
             shell_path: "/bin/bash".into(),
@@ -224,11 +279,42 @@ impl Agent {
         self.bridge()?.cmd(op, args, CMD_WAIT)
     }
 
+    /// The model of this and every later start; a running sidecar switches now.
+    pub fn set_model(&self, model: Option<ModelRef>) -> Res<Value> {
+        *lock(&self.model) = model.clone();
+        if !self.is_running() {
+            return Ok(json!({}));
+        }
+        self.cmd("set_model", json!({ "model": model }))
+    }
+
+    pub fn model(&self) -> Option<ModelRef> {
+        lock(&self.model).clone()
+    }
+
     /// Send the person's message; returns its request id.
     pub fn prompt(&self, text: &str) -> Res<String> {
         let id = new_request_id();
         self.cmd("prompt", json!({ "requestId": id, "text": text, "source": "chat" }))?;
         Ok(id)
+    }
+
+    /// A sense-triggered turn (the attention budget allowed it); returns its `s:` request id.
+    pub fn prompt_sense(&self, summary: &str) -> Res<String> {
+        let id = new_sense_id();
+        self.cmd("prompt", json!({ "requestId": id, "text": summary, "source": "sense" }))?;
+        Ok(id)
+    }
+
+    /// Run pi-ai's OAuth sign-in for `provider_id` (§4.7 `auth.login`); blocks until it
+    /// ends (up to 10 min). The credential arrives through `cred.modify`.
+    pub fn auth_login(&self, provider_id: &str) -> Res<Value> {
+        self.bridge()?.cmd("auth.login", json!({ "providerId": provider_id }), LOGIN_WAIT)
+    }
+
+    /// End the sign-in in progress (its `auth_login` returns `cancelled`).
+    pub fn auth_cancel(&self) -> Res<Value> {
+        self.bridge()?.cmd("auth.cancel", json!({}), Duration::from_secs(5))
     }
 
     /// A `buddy remind` op for the host's sink: the reminder lives in the
@@ -288,6 +374,11 @@ impl Agent {
 
     pub fn is_running(&self) -> bool {
         self.bridge().is_ok()
+    }
+
+    /// The running sidecar's pid (its process group).
+    pub fn pid(&self) -> Option<u32> {
+        self.bridge().ok().map(|b| b.pid)
     }
 
     fn mascot(&self, e: Option<MascotEvent>) {
@@ -366,6 +457,40 @@ impl Agent {
                 }
                 Ok(json!({ "newly": self.policy.taint(&at, source, req["detail"].as_str().unwrap_or("")) }))
             }
+            o if o.starts_with("auth.") => self.on_auth(o, req, cancelled),
+            _ => Err(("unknown_op".into(), format!("Unknown request: {op}"))),
+        }
+    }
+
+    /// A sign-in question from pi-ai's login flow, for the window.
+    fn on_auth(&self, op: &str, req: &Value, cancelled: &AtomicBool) -> Result<Value, (String, String)> {
+        let Some(ui) = lock(&self.auth).clone() else {
+            return Err(("no_ui".into(), "Sign in from desk-buddy’s Sign in… window.".into()));
+        };
+        let s = |k: &str| req[k].as_str().unwrap_or("");
+        let opt = |k: &str| req[k].as_str().filter(|v| !v.is_empty());
+        match op {
+            "auth.open_url" => {
+                let url = s("url");
+                if !safe_auth_url(url) {
+                    return Err(("auth".into(), "That sign-in page isn’t an https address.".into()));
+                }
+                ui.open_url(url, opt("instructions"));
+                Ok(json!({}))
+            }
+            "auth.device_code" => {
+                ui.device_code(s("userCode"), s("verificationUri"));
+                Ok(json!({}))
+            }
+            "auth.progress" => {
+                ui.progress(s("message"));
+                Ok(json!({}))
+            }
+            "auth.prompt" => ui.prompt(s("message"), opt("placeholder"), cancelled).map(|v| json!({ "value": v })).map_err(|e| ("cancelled".into(), e)),
+            "auth.select" => {
+                let options: Vec<(String, String)> = req["options"].as_array().into_iter().flatten().filter_map(|o| Some((o["id"].as_str()?.to_string(), o["label"].as_str().unwrap_or("").to_string()))).collect();
+                ui.select(s("message"), &options, cancelled).map(|id| json!({ "id": id })).map_err(|e| ("cancelled".into(), e))
+            }
             _ => Err(("unknown_op".into(), format!("Unknown request: {op}"))),
         }
     }
@@ -435,6 +560,35 @@ impl Handler for Hooks {
     fn exited(&self, gen: u64, code: Option<i32>, by_app: bool) {
         if let Some(a) = self.0.upgrade() {
             a.on_exited(gen, code, by_app);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::safe_auth_url;
+
+    #[test]
+    fn sign_in_pages_are_https_or_loopback_http_only() {
+        for ok in ["https://claude.ai/oauth/authorize?x=1", "HTTPS://github.com/login/device", "http://127.0.0.1:1455/auth", "http://localhost/cb", "http://[::1]:8080/x"] {
+            assert!(safe_auth_url(ok), "{ok}");
+        }
+        for bad in [
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "vscode://x",
+            "x-apple.systempreferences:",
+            "http://example.com/login",
+            "http://127.0.0.1.evil.com/",
+            "http://localhost@evil.com/",
+            "https://user@claude.ai/",
+            "https://",
+            "https:// claude.ai",
+            "https://claude.ai/\nx",
+            "",
+            "-a Calculator",
+        ] {
+            assert!(!safe_auth_url(bad), "{bad}");
         }
     }
 }

@@ -54,8 +54,14 @@ pub enum MascotEvent {
     Say { text: String, emotion: Option<Emotion> },
     /// `buddy mascot emote`.
     Emote { name: EmoteName },
-    /// A durable reminder fired (P2b).
-    Reminder { id: String, text: String },
+    /// A durable reminder fired (P2b). `setAtMs` (additive, p4): when it was set, epoch ms;
+    /// reminders stored before p4 have none.
+    Reminder {
+        id: String,
+        text: String,
+        #[serde(rename = "setAtMs", default, skip_serializing_if = "Option::is_none")]
+        set_at_ms: Option<u64>,
+    },
     /// The person answered or dismissed what the bubble showed (clears ask/talk holds).
     Settled,
 }
@@ -133,7 +139,8 @@ mod tests {
         let cases = [
             (MascotEvent::Say { text: "hi".into(), emotion: Some(Emotion::Happy) }, serde_json::json!({ "type": "say", "text": "hi", "emotion": "happy" })),
             (MascotEvent::Emote { name: EmoteName::Wave }, serde_json::json!({ "type": "emote", "name": "wave" })),
-            (MascotEvent::Reminder { id: "r1".into(), text: "tea".into() }, serde_json::json!({ "type": "reminder", "id": "r1", "text": "tea" })),
+            (MascotEvent::Reminder { id: "r1".into(), text: "tea".into(), set_at_ms: None }, serde_json::json!({ "type": "reminder", "id": "r1", "text": "tea" })),
+            (MascotEvent::Reminder { id: "r2".into(), text: "tea".into(), set_at_ms: Some(5) }, serde_json::json!({ "type": "reminder", "id": "r2", "text": "tea", "setAtMs": 5 })),
             (MascotEvent::Settled, serde_json::json!({ "type": "settled" })),
         ];
         for (e, j) in cases {

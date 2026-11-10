@@ -1,0 +1,9 @@
+[
+  { "id": "anthropic", "name": "Anthropic", "detail": "Claude account (OAuth) or API key", "methods": ["oauth", "api_key"], "model": "claude-sonnet-5-5" },
+  { "id": "openai", "name": "OpenAI / ChatGPT", "detail": "ChatGPT account (OAuth) or API key", "methods": ["oauth", "api_key"], "model": "gpt-5.5" },
+  { "id": "github-copilot", "name": "GitHub Copilot", "detail": "device code", "methods": ["oauth"], "model": "claude-sonnet-5.5" },
+  { "id": "openrouter", "name": "OpenRouter", "detail": "API key", "methods": ["api_key"], "model": "anthropic/claude-sonnet-5.5" },
+  { "id": "google", "name": "Google Gemini", "detail": "API key", "methods": ["api_key"], "model": "gemini-3.5-flash" },
+  { "id": "xai", "name": "xAI", "detail": "Grok subscription (OAuth) or API key", "methods": ["oauth", "api_key"], "model": "grok-4.7" },
+  { "id": "mistral", "name": "Mistral", "detail": "API key", "methods": ["api_key"], "model": "mistral-large-latest" }
+]
