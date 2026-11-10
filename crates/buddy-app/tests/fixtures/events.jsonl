@@ -1,0 +1,9 @@
+// QA timeline for BUDDY_EVENTS: replay Items, at_ms after launch.
+{"at_ms": 3000, "event": {"type": "thinking"}}
+{"at_ms": 6000, "event": {"type": "working", "kind": "files", "tool": "read"}}
+{"at_ms": 9000, "event": {"type": "speaking", "text": "Hi"}}
+{"at_ms": 9500, "event": {"type": "speaking", "text": "Hi there"}}
+{"at_ms": 12000, "event": {"type": "idle"}}
+{"at_ms": 15000, "poke": "click"}
+{"at_ms": 20000, "event": {"type": "error", "reason": "boom", "message": "the tool failed"}}
+{"at_ms": 24000, "event": {"type": "idle"}}

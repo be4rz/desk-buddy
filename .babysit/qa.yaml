@@ -1,37 +1,45 @@
 version: 1
 # desk-buddy is a native macOS desktop app (Tauri 2 + NSPanel), not a web app:
-# there is no localhost URL. Runnable targets: spike S1 (window) and spike S2
-# (agent harness, a CLI driver).
+# there is no localhost URL. The runnable target is crates/buddy-app (menu-bar
+# accessory, the bear on the desktop driven by mascot-core's brain).
 # Visual review of the mascot is done on the real desktop by the user; agents
-# verify through the checks below plus S1's stderr stats.
-target: native macOS app (spikes/s1-window), no HTTP endpoint
-cwd: spikes/s1-window
-start: S1_STATS=1 cargo run        # menu-bar accessory; mascot panel on screen 0, prints "[s1] … fps" every 10 s
-check: cargo check && cargo test   # no unit tests yet (0 tests)
+# verify through the checks below, BUDDY_STATS stderr and BUDDY_DUMP canvas PNGs
+# (our own buffer, never a desktop screenshot).
+# Every cargo command uses the one shared target dir (design §6.1):
+#   export CARGO_TARGET_DIR=/Users/chantran/orca/desk-buddy/target
+# and Tauri builds first check `df -k /` for >= 3 GB free.
+target: native macOS app (crates/buddy-app), no HTTP endpoint
+cwd: .
+start: BUDDY_STATS=1 cargo run -p buddy-app   # prints "[buddy] fps … cpu …%" every 10 s
+check: cargo test -p mascot-render -p buddy-app
 services:
-  s1-window:
-    cwd: spikes/s1-window
-    start: S1_STATS=1 cargo run
-    check: cargo check && cargo test
-  agent-sidecar:
-    cwd: agent
-    # needs bun; builds dist/buddy-agent (~68 MB) and runs it against the scripted fake model
-    check: bun run typecheck && bun test
+  buddy-app:
+    cwd: .
+    start: BUDDY_STATS=1 cargo run -p buddy-app
+    check: cargo test -p mascot-render -p buddy-app
   harness:
     cwd: .
-    # root Cargo workspace: crates/{mascot-protocol,policy,host,bridge} + spikes/s2-harness; bridge's e2e needs bun
+    # root Cargo workspace (crates/* + spikes/s2-harness); bridge's e2e needs bun
     check: cargo test --workspace
     # one prompt through the harness against the fake: start the fake first
     # (bun agent/test/support/fake.ts --port <p> --script <file.json>), then:
     start: cargo build -p host --bin buddy && S2_HOME=<tmp> cargo run -p s2-harness -- --yes --fake http://127.0.0.1:<p> "<prompt>"
+  agent-sidecar:
+    cwd: agent
+    # needs bun; builds dist/buddy-agent (~68 MB) and runs it against the scripted fake model
+    check: bun run typecheck && bun test
   mascot-pipeline:
     cwd: experiments/mascot/bear3d
     # full rebuilds need Blender (BLENDER=/Applications/Blender.app/Contents/MacOS/Blender): sh run.sh / run_anim.sh / run_b.sh
-    check: python3 verify_b.py      # Stage B hand-off frames must be pixel-identical; exit 1 on mismatch
+    # verify_face.py arrives with the art round (p2)
+    check: python3 verify_b.py && { [ ! -f verify_face.py ] || python3 verify_face.py; }
 flows: >-
-  primary: mascot panel appears, idles/walks at 12 fps, idle CPU < 1% (S1_STATS output);
-  tray menu zoom x1-x3 and 64/100 px size switch; S1_OPEN_WEBVIEW=1 opens the webview in the same process (s1_info shows the same pid);
-  error: S1_ANIM_DIR=/nonexistent cargo run exits 1 with "[s1] cannot load mascot assets";
+  primary: BUDDY_STATS=1 BUDDY_EVENTS=crates/buddy-app/tests/fixtures/events.jsonl BUDDY_DUMP=$TMPDIR/dump cargo run -p buddy-app
+  for 60 s: the bear appears (menu-bar accessory, no Dock icon), stderr logs "[buddy] intent …" for the brain's
+  intents from the events, idle CPU < 1% in the stats lines, dumps show more than one behavior (Pillow contact sheet);
+  tray: Zoom ×1/×2/×3 (persisted to BUDDY_HOME/settings.json), Hide/Show bear, Move to next display, Quit desk-buddy;
+  error: BUDDY_PACK=/nonexistent cargo run -p buddy-app exits 1 with "[buddy] cannot load mascot pack";
+  error: a corrupt BUDDY_HOME/settings.json → defaults, settings.json.bad kept, tray shows "⚠ Settings reset (see settings.json.bad)";
   pipeline: verify_b.py PASS after any change to experiments/mascot/out/bear3d/anim_b;
   harness: s2-harness prints mascot events thinking → awaiting_permission → working(buddy) → speaking → idle and a host "say" whose turn is the prompt's request id;
   harness error: a denied card never reaches the host; a model error ends in an "error" event and exit 1; kill -9 mid-tool restarts with an "interrupted" entry

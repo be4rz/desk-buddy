@@ -1,14 +1,19 @@
-//! The native mascot window: a non-activating, borderless, transparent NSPanel
-//! whose content is a layer-hosting view. A CPU-composited buffer at sprite
-//! resolution is handed to the CALayer as a CGImage and scaled up by a whole
-//! number with nearest filtering.
+//! The native mascot window (moved from spike S1): a non-activating, borderless,
+//! transparent NSPanel whose content is a layer-hosting view. A CPU-composited canvas at
+//! sprite resolution is handed to the CALayer through an IOSurface and scaled up by a
+//! whole number with nearest filtering. Per-pixel click-through, the near-cursor hit
+//! poll, occlusion / screen / backing / Space observers and the fullscreen level are
+//! S1's code paths; the behavior loop and compositor moved to the brain and
+//! `mascot-render`, and the frame timer to `driver.rs`.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::ptr::NonNull;
 use std::rc::Rc;
 use std::time::Instant;
 
 use block2::RcBlock;
+use mascot_core::Poke;
+use mascot_render::Canvas;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2::{define_class, msg_send, MainThreadMarker, MainThreadOnly};
@@ -19,12 +24,8 @@ use objc2_app_kit::{
     NSWindowOcclusionState, NSWindowStyleMask, NSWorkspace,
     NSWorkspaceActiveSpaceDidChangeNotification, NSWorkspaceDidActivateApplicationNotification,
 };
-use objc2_core_foundation::{CFRetained, CGPoint, CGRect, CGSize};
-use objc2_core_graphics::{
-    kCGColorSpaceSRGB, CGBitmapContextCreate, CGBitmapContextCreateImage,
-    CGBitmapContextGetBytesPerRow, CGBitmapContextGetData, CGColorSpace, CGContext,
-    CGWindowListCopyWindowInfo, CGWindowListOption,
-};
+use objc2_core_foundation::{CFRetained, CFUUID, CGPoint, CGRect, CGSize};
+use objc2_core_graphics::{CGWindowListCopyWindowInfo, CGWindowListOption};
 use objc2_foundation::{
     ns_string, NSArray, NSDictionary, NSNotification, NSNotificationCenter, NSNumber, NSObject,
     NSObjectProtocol, NSOperationQueue, NSRunLoop, NSRunLoopCommonModes, NSTimer,
@@ -35,9 +36,8 @@ use objc2_io_surface::{
 };
 use objc2_quartz_core::{kCAFilterNearest, CALayer, CATransaction};
 
-use crate::assets::Library;
-use crate::behaviour::{Behaviour, Size};
-use crate::render::Canvas;
+use crate::driver::{post, Inbox};
+use crate::settings::Position;
 
 /// kCGFloatingWindowLevel = 3; "just above floating".
 pub const LEVEL_NORMAL: isize = 3 + 1;
@@ -46,12 +46,24 @@ pub const LEVEL_FULLSCREEN: isize = 25 + 1;
 const POLL_HZ: f64 = 30.0;
 /// The 30 Hz cursor poll only runs while the cursor is this close (points).
 const POLL_NEAR_PT: f64 = 160.0;
+/// input watch (drag end, cursor approaching) while shown, whatever the animation does
+const WATCH_HZ: f64 = 4.0;
+/// A press that moves less than this (points) and lasts less than CLICK_MS is a click.
+const CLICK_PT: f64 = 4.0;
+const CLICK_MS: u128 = 350;
+
+thread_local! {
+    /// mouse-down point and time while a press on the bear is in progress
+    static PRESS: Cell<Option<(CGPoint, Instant)>> = const { Cell::new(None) };
+    /// a window drag started from the bear and has not ended yet
+    static DRAGGING: Cell<bool> = const { Cell::new(false) };
+}
 
 define_class!(
     // SAFETY: NSView has no subclassing requirements; no Drop impl.
     #[unsafe(super(NSView, NSResponder, NSObject))]
     #[thread_kind = MainThreadOnly]
-    #[name = "S1MascotView"]
+    #[name = "BuddyMascotView"]
     struct MascotView;
 
     impl MascotView {
@@ -60,12 +72,39 @@ define_class!(
             true
         }
 
-        // Only reached while the cursor is over opaque bear pixels (the poller
-        // turns ignoresMouseEvents off there), so any press here is a drag.
+        // Only reached while the cursor is over opaque bear pixels (the poller turns
+        // ignoresMouseEvents off there). A press is a click until it moves 4 pt.
         #[unsafe(method(mouseDown:))]
-        fn mouse_down(&self, event: &NSEvent) {
+        fn mouse_down(&self, _event: &NSEvent) {
+            PRESS.set(Some((NSEvent::mouseLocation(), Instant::now())));
+        }
+
+        #[unsafe(method(mouseDragged:))]
+        fn mouse_dragged(&self, event: &NSEvent) {
+            let Some((p0, _)) = PRESS.get() else { return };
+            if DRAGGING.get() {
+                return;
+            }
+            let p = NSEvent::mouseLocation();
+            if (p.x - p0.x).hypot(p.y - p0.y) < CLICK_PT {
+                return;
+            }
+            DRAGGING.set(true);
+            post(Inbox::Poke(Poke::DragStart));
             if let Some(w) = self.window() {
                 w.performWindowDragWithEvent(event);
+            }
+        }
+
+        #[unsafe(method(mouseUp:))]
+        fn mouse_up(&self, _event: &NSEvent) {
+            let Some((p0, t0)) = PRESS.take() else { return };
+            if DRAGGING.get() {
+                return; // the poll / input watch ends the drag
+            }
+            let p = NSEvent::mouseLocation();
+            if (p.x - p0.x).hypot(p.y - p0.y) < CLICK_PT && t0.elapsed().as_millis() < CLICK_MS {
+                post(Inbox::Poke(Poke::Click));
             }
         }
     }
@@ -79,74 +118,30 @@ impl MascotView {
 }
 
 struct State {
-    beh: Behaviour,
-    canvas: Canvas,
-    /// follow camera: world position of the bear (screen px), float
-    cam: [f32; 2],
+    /// canvas size in sprite px
+    w: usize,
+    h: usize,
     zoom: u32,
-    size: Size,
-    present: Present,
+    surfaces: [CFRetained<IOSurfaceRef>; 2],
+    next: usize,
+    /// opaque art pixels of what is shown: the hit-test mask
+    hit: Vec<bool>,
     ignoring: bool,
     fullscreen: bool,
-    user_visible: bool,
-    occluded: bool,
-    anim_timer: Option<Retained<NSTimer>>,
+    shown: bool,
     poll_timer: Option<Retained<NSTimer>>,
-    /// (frame content id, camera) of what the layer currently shows
-    shown: Option<(u64, [i32; 2])>,
-    frames: u64,
-    skipped: u64,
+    /// WATCH_HZ input watch while shown: independent of the animation's wakes
+    watch_timer: Option<Retained<NSTimer>>,
     polls: u64,
-    stats_t0: Instant,
 }
 
-pub struct Mascot {
+pub struct Panel {
     mtm: MainThreadMarker,
     pub panel: Retained<NSPanel>,
     layer: Retained<CALayer>,
-    lib: Library,
     st: RefCell<State>,
     observers: RefCell<Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>>,
-}
-
-fn canvas_for(size: Size, lib: &Library) -> Canvas {
-    // canvas in sprite px; the view is a soft-edged window onto the world
-    let (w, h, tile, clip) = match size {
-        Size::S100 => (200usize, 160usize, 32, "idle"),
-        Size::S64 => (128, 102, 20, "walk_64"),
-    };
-    // centre the bear's opaque bbox (frame 0, S) in the canvas
-    let c = &lib.clips[clip];
-    let (frames, _) = &c.dirs["S"];
-    let (mut y0, mut y1) = (c.h, 0);
-    for y in 0..c.h {
-        for x in 0..c.w {
-            if frames[0].px[(y * c.w + x) * 4 + 3] > 0 {
-                y0 = y0.min(y);
-                y1 = y1.max(y);
-            }
-        }
-    }
-    let bbox_mid = (y0 + y1) as i32 / 2;
-    let anchor_y = h as i32 / 2 + (c.anchor[1] - bbox_mid);
-    Canvas::new(w, h, [w as i32 / 2, anchor_y], tile)
-}
-
-/// How a finished buffer reaches the CALayer.
-enum Present {
-    /// Two IOSurfaces, alternated; CA shares them with the render server
-    /// without copying (default).
-    Surface { s: [CFRetained<IOSurfaceRef>; 2], next: usize },
-    /// CGBitmapContext -> CGImage per frame (`S1_PRESENT=cgimage`): CA copies
-    /// it into shared memory on every commit.
-    Image(CFRetained<CGContext>),
-}
-
-fn make_present(w: usize, h: usize) -> Present {
-    if std::env::var("S1_PRESENT").as_deref() == Ok("cgimage") {
-        return Present::Image(make_ctx(w, h));
-    }
-    Present::Surface { s: [make_surface(w, h), make_surface(w, h)], next: 0 }
+    verbose: bool,
 }
 
 fn make_surface(w: usize, h: usize) -> CFRetained<IOSurfaceRef> {
@@ -163,36 +158,39 @@ fn make_surface(w: usize, h: usize) -> CFRetained<IOSurfaceRef> {
             key(kIOSurfaceBytesPerElement),
             key(kIOSurfacePixelFormat),
         ];
-        let vals: [Retained<AnyObject>; 4] =
-            [n(w).into(), n(h).into(), n(4).into(), bgra.into()];
+        let vals: [Retained<AnyObject>; 4] = [n(w).into(), n(h).into(), n(4).into(), bgra.into()];
         let kr: Vec<&objc2_foundation::NSString> = keys.iter().map(|k| &**k).collect();
         let vr: Vec<&AnyObject> = vals.iter().map(|v| &**v).collect();
         let dict = NSDictionary::from_slices(&kr, &vr);
         let cf = &*(Retained::as_ptr(&dict) as *const objc2_core_foundation::CFDictionary);
         let surf = IOSurfaceRef::new(cf).expect("IOSurfaceCreate");
         // our pixels are sRGB; tag the surface so CA colour-matches correctly
-        let cs: &objc2_core_foundation::CFType = kCGColorSpaceSRGB;
+        let cs: &objc2_core_foundation::CFType = objc2_core_graphics::kCGColorSpaceSRGB;
         surf.set_value(kIOSurfaceColorSpace, cs);
         surf
     }
 }
 
-fn make_ctx(w: usize, h: usize) -> CFRetained<CGContext> {
-    let cs = CGColorSpace::with_name(Some(unsafe { kCGColorSpaceSRGB })).expect("sRGB");
-    // kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little = BGRA in memory
-    let info = 2u32 | (2u32 << 12);
-    unsafe { CGBitmapContextCreate(std::ptr::null_mut(), w, h, 8, 0, Some(&cs), info) }
-        .expect("CGBitmapContextCreate")
+#[link(name = "ColorSync", kind = "framework")]
+extern "C" {
+    fn CGDisplayCreateUUIDFromDisplayID(display: u32) -> Option<NonNull<CFUUID>>;
 }
 
-impl Mascot {
-    pub fn new(mtm: MainThreadMarker, lib: Library) -> Rc<Self> {
-        let size = Size::S100;
-        let zoom = std::env::var("S1_ZOOM").ok().and_then(|z| z.parse().ok()).unwrap_or(1u32).clamp(1, 3);
-        let canvas = canvas_for(size, &lib);
-        let present = make_present(canvas.w, canvas.h);
+/// The CGDisplay UUID of a screen, as a string (settings `position.display`).
+fn screen_uuid(s: &NSScreen) -> Option<String> {
+    let desc = s.deviceDescription();
+    let n = desc.objectForKey(ns_string!("NSScreenNumber"))?.downcast::<NSNumber>().ok()?;
+    // SAFETY: returns a +1 CFUUID or null.
+    let uuid = unsafe { CGDisplayCreateUUIDFromDisplayID(n.unsignedIntValue()) }?;
+    let uuid = unsafe { CFRetained::from_raw(uuid) };
+    CFUUID::new_string(None, Some(&uuid)).map(|s| s.to_string())
+}
 
-        let rect = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(canvas.w as f64, canvas.h as f64));
+impl Panel {
+    /// A panel for a `w x h` sprite-px canvas, placed at `pos` when that display is
+    /// still attached (else S1's initial placement), shown front.
+    pub fn new(mtm: MainThreadMarker, w: usize, h: usize, zoom: u32, pos: Option<&Position>) -> Rc<Self> {
+        let rect = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(w as f64, h as f64));
         let style = NSWindowStyleMask::Borderless | NSWindowStyleMask::NonactivatingPanel;
         let panel = NSPanel::initWithContentRect_styleMask_backing_defer(
             NSPanel::alloc(mtm),
@@ -212,11 +210,9 @@ impl Mascot {
             NSWindowCollectionBehavior::CanJoinAllSpaces | NSWindowCollectionBehavior::FullScreenAuxiliary,
         );
         panel.setIgnoresMouseEvents(true);
-        if std::env::var_os("S1_NO_SRGB_WINDOW").is_none() {
-            // our pixels are sRGB: let the window server colour-match on the GPU
-            // instead of CoreAnimation converting every frame on the CPU
-            panel.setColorSpace(Some(&objc2_app_kit::NSColorSpace::sRGBColorSpace()));
-        }
+        // our pixels are sRGB: let the window server colour-match on the GPU
+        // instead of CoreAnimation converting every frame on the CPU
+        panel.setColorSpace(Some(&objc2_app_kit::NSColorSpace::sRGBColorSpace()));
 
         let view = MascotView::new(mtm, rect);
         let layer = CALayer::new();
@@ -227,45 +223,36 @@ impl Mascot {
         view.setWantsLayer(true);
         panel.setContentView(Some(&view));
 
-        let beh = Behaviour::new(size);
-        let m = Rc::new(Mascot {
+        let p = Rc::new(Panel {
             mtm,
             panel,
             layer,
-            lib,
             st: RefCell::new(State {
-                beh,
-                canvas,
-                cam: [0.0, 0.0],
-                zoom,
-                size,
-                present,
+                w,
+                h,
+                zoom: zoom.clamp(1, 3),
+                surfaces: [make_surface(w, h), make_surface(w, h)],
+                next: 0,
+                hit: vec![false; w * h],
                 ignoring: true,
                 fullscreen: false,
-                user_visible: true,
-                occluded: false,
-                anim_timer: None,
+                shown: true,
                 poll_timer: None,
-                shown: None,
-                frames: 0,
-                skipped: 0,
+                watch_timer: None,
                 polls: 0,
-                stats_t0: Instant::now(),
             }),
             observers: RefCell::new(vec![]),
+            verbose: std::env::var_os("BUDDY_VERBOSE").is_some(),
         });
-        m.place_initially();
-        if std::env::var("S1_SIZE").as_deref() == Ok("64") {
-            m.set_size(Size::S64);
+        if !pos.is_some_and(|pos| p.place_at(pos)) {
+            p.place_initially();
         }
-        m.render();
-        m.panel.orderFrontRegardless();
-        m.install_observers();
-        m.check_fullscreen("startup");
-        m.start_timers();
-        m.report("startup");
-        m.debug_hop();
-        m
+        p.panel.orderFrontRegardless();
+        p.start_watch();
+        p.install_observers();
+        p.check_fullscreen("startup");
+        p.report("startup");
+        p
     }
 
     // ---------- geometry ----------
@@ -279,16 +266,18 @@ impl Mascot {
         (k, k / backing)
     }
 
+    fn size_pt(&self) -> (f64, f64) {
+        let (_, pt) = self.sprite_pt();
+        let st = self.st.borrow();
+        (st.w as f64 * pt, st.h as f64 * pt)
+    }
+
     fn place_initially(&self) {
         let screens = NSScreen::screens(self.mtm);
-        let idx = std::env::var("S1_SCREEN").ok().and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+        let idx = std::env::var("BUDDY_SCREEN").ok().and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
         let scr = if idx < screens.count() { screens.objectAtIndex(idx) } else { screens.objectAtIndex(0) };
         let vf = scr.visibleFrame();
-        let (_, pt) = self.sprite_pt();
-        let (w, h) = {
-            let st = self.st.borrow();
-            (st.canvas.w as f64 * pt, st.canvas.h as f64 * pt)
-        };
+        let (w, h) = self.size_pt();
         let x = (vf.origin.x + vf.size.width - w - 80.0).round();
         let y = (vf.origin.y + 60.0).round();
         self.panel.setFrame_display(CGRect::new(CGPoint::new(x, y), CGSize::new(w, h)), true);
@@ -296,13 +285,36 @@ impl Mascot {
         self.apply_geometry();
     }
 
+    /// Restore a saved position if its display is attached and the panel would
+    /// overlap that display's visible frame.
+    fn place_at(&self, pos: &Position) -> bool {
+        let screens = NSScreen::screens(self.mtm);
+        let Some(scr) = screens.iter().find(|s| screen_uuid(s).as_deref() == Some(pos.display.as_str())) else {
+            return false;
+        };
+        let vf = scr.visibleFrame();
+        let (w, h) = self.size_pt();
+        let (x, y) = (pos.x as f64, pos.y as f64);
+        let overlaps = x < vf.origin.x + vf.size.width && x + w > vf.origin.x && y < vf.origin.y + vf.size.height && y + h > vf.origin.y;
+        if !overlaps {
+            return false;
+        }
+        // position = the window origin (kept fixed, unlike zoom which keeps the centre)
+        self.panel.setFrame_display(CGRect::new(CGPoint::new(x, y), CGSize::new(w, h)), true);
+        self.set_layer_frame();
+        true
+    }
+
+    /// Where the panel is now, for settings.
+    pub fn position(&self) -> Option<Position> {
+        let f = self.panel.frame();
+        let display = self.panel.screen().and_then(|s| screen_uuid(&s))?;
+        Some(Position { display, x: f.origin.x.round() as i32, y: f.origin.y.round() as i32, extra: Default::default() })
+    }
+
     /// Resize around the current centre and snap the origin to whole points.
     fn apply_geometry(&self) {
-        let (_, pt) = self.sprite_pt();
-        let (w, h) = {
-            let st = self.st.borrow();
-            (st.canvas.w as f64 * pt, st.canvas.h as f64 * pt)
-        };
+        let (w, h) = self.size_pt();
         let f = self.panel.frame();
         let cx = f.origin.x + f.size.width / 2.0;
         let cy = f.origin.y + f.size.height / 2.0;
@@ -310,7 +322,11 @@ impl Mascot {
         if r != f {
             self.panel.setFrame_display(r, true);
         }
-        let b = self.panel.contentView().map(|v| v.bounds()).unwrap_or(r);
+        self.set_layer_frame();
+    }
+
+    fn set_layer_frame(&self) {
+        let b = self.panel.contentView().map(|v| v.bounds()).unwrap_or(self.panel.frame());
         CATransaction::begin();
         CATransaction::setDisableActions(true);
         self.layer.setFrame(b);
@@ -325,87 +341,80 @@ impl Mascot {
         }
     }
 
-    // ---------- rendering ----------
+    // ---------- presenting ----------
 
-    fn render(&self) {
+    /// Show a composited canvas (premultiplied BGRA at sprite resolution).
+    pub fn present(&self, c: &Canvas) {
         let mut st = self.st.borrow_mut();
         let st = &mut *st;
-        let clip = &self.lib.clips[&st.beh.clip];
-        let (frames, _) = &clip.dirs[st.beh.dir];
-        let cam = [
-            st.cam[0].round() as i32 - st.canvas.anchor[0],
-            st.cam[1].round() as i32 - st.canvas.anchor[1],
-        ];
-        let frame = &frames[st.beh.frame];
-        if st.shown == Some((frame.id, cam)) {
-            st.skipped += 1;
-            return;
-        }
-        st.shown = Some((frame.id, cam));
-        st.canvas.compose(cam, frame, clip.w, clip.h, clip.anchor);
-        let row = st.canvas.w * 4;
-        let h = st.canvas.h;
-        let copy_rows = |dst: *mut u8, bpr: usize, src: &[u8]| {
-            for y in 0..h {
-                unsafe { std::ptr::copy_nonoverlapping(src[y * row..].as_ptr(), dst.add(y * bpr), row) };
-            }
-        };
+        assert_eq!((c.w, c.h), (st.w, st.h), "canvas size is fixed per pack");
+        mascot_render::hit_mask(c, &mut st.hit);
+        let row = c.w * 4;
+        let surf = &st.surfaces[st.next];
+        st.next ^= 1;
         CATransaction::begin();
         CATransaction::setDisableActions(true);
-        match &mut st.present {
-            Present::Surface { s, next } => {
-                let surf = &s[*next];
-                *next ^= 1;
-                unsafe {
-                    surf.lock(IOSurfaceLockOptions::empty(), std::ptr::null_mut());
-                    copy_rows(surf.base_address().as_ptr() as *mut u8, surf.bytes_per_row(), &st.canvas.out);
-                    surf.unlock(IOSurfaceLockOptions::empty(), std::ptr::null_mut());
-                    let obj: &AnyObject = &*(CFRetained::as_ptr(surf).as_ptr() as *const AnyObject);
-                    self.layer.setContents(Some(obj));
-                }
+        unsafe {
+            surf.lock(IOSurfaceLockOptions::empty(), std::ptr::null_mut());
+            let dst = surf.base_address().as_ptr() as *mut u8;
+            let bpr = surf.bytes_per_row();
+            for y in 0..c.h {
+                std::ptr::copy_nonoverlapping(c.px[y * row..].as_ptr(), dst.add(y * bpr), row);
             }
-            Present::Image(ctx) => {
-                let data = CGBitmapContextGetData(Some(ctx)) as *mut u8;
-                copy_rows(data, CGBitmapContextGetBytesPerRow(Some(ctx)), &st.canvas.out);
-                let img = CGBitmapContextCreateImage(Some(ctx)).expect("CGImage");
-                let obj: &AnyObject = unsafe { &*(CFRetained::as_ptr(&img).as_ptr() as *const AnyObject) };
-                unsafe { self.layer.setContents(Some(obj)) };
-            }
+            surf.unlock(IOSurfaceLockOptions::empty(), std::ptr::null_mut());
+            let obj: &AnyObject = &*(CFRetained::as_ptr(surf).as_ptr() as *const AnyObject);
+            self.layer.setContents(Some(obj));
         }
         CATransaction::commit();
-        st.frames += 1;
-        if let Ok(p) = std::env::var("S1_DUMP") {
-            dump_png(&p, st.canvas.w, st.canvas.h, &st.canvas.out);
-        }
     }
 
-    /// Show the current frame, then apply its root motion and advance.
-    fn anim_tick(self: &Rc<Self>) {
-        self.render();
-        {
-            let mut st = self.st.borrow_mut();
-            let st = &mut *st;
-            let clip = &self.lib.clips[&st.beh.clip];
-            let d = clip.dirs[st.beh.dir].1[st.beh.frame];
-            if std::env::var_os("S1_FREEZE").is_none() {
-                st.cam[0] += d[0];
-                st.cam[1] += d[1];
-                st.beh.advance(&self.lib);
-            }
-        }
-        if NSEvent::pressedMouseButtons() == 0 {
-            self.snap_origin();
-        }
+    /// After each presented frame (driver) and on every input-watch tick (the brain may
+    /// sleep for seconds, or for good on a still pose): end a finished drag, snap to
+    /// whole points, and start the cursor poll when the cursor comes near.
+    pub fn after_frame(self: &Rc<Self>) {
+        self.end_drag_if_released();
         if self.st.borrow().poll_timer.is_none() && self.cursor_near() {
             self.start_poll();
         }
-        self.maybe_stats();
+    }
+
+    /// `performWindowDragWithEvent` swallows the mouse-up: a drag ends when no button
+    /// is down any more.
+    fn end_drag_if_released(&self) {
+        if NSEvent::pressedMouseButtons() == 0 {
+            if DRAGGING.replace(false) {
+                PRESS.set(None);
+                post(Inbox::Poke(Poke::DragEnd));
+            }
+            self.snap_origin();
+        }
+    }
+
+    fn start_watch(self: &Rc<Self>) {
+        if self.st.borrow().watch_timer.is_some() {
+            return;
+        }
+        let weak = Rc::downgrade(self);
+        let tick = RcBlock::new(move |_t: NonNull<NSTimer>| {
+            if let Some(m) = weak.upgrade() {
+                m.after_frame();
+            }
+        });
+        unsafe {
+            let t = NSTimer::timerWithTimeInterval_repeats_block(1.0 / WATCH_HZ, true, &tick);
+            t.setTolerance(0.05);
+            NSRunLoop::mainRunLoop().addTimer_forMode(&t, NSRunLoopCommonModes);
+            self.st.borrow_mut().watch_timer = Some(t);
+        }
+    }
+
+    fn stop_watch(&self) {
+        if let Some(t) = self.st.borrow_mut().watch_timer.take() {
+            t.invalidate();
+        }
     }
 
     fn cursor_near(&self) -> bool {
-        if std::env::var_os("S1_POLL_ALWAYS").is_some() {
-            return true; // measuring aid: worst case, cursor parked next to the bear
-        }
         let m = NSEvent::mouseLocation();
         let f = self.panel.frame();
         m.x >= f.origin.x - POLL_NEAR_PT
@@ -429,7 +438,7 @@ impl Mascot {
         let hit = inside && {
             let sx = ((m.x - f.origin.x) / pt).floor() as usize;
             let sy = ((f.origin.y + f.size.height - m.y) / pt).floor() as usize;
-            sx < st.canvas.w && sy < st.canvas.h && st.canvas.hit[sy * st.canvas.w + sx]
+            sx < st.w && sy < st.h && st.hit[sy * st.w + sx]
         };
         // keep accepting while a drag that started on the bear is in progress
         let dragging = !st.ignoring && NSEvent::pressedMouseButtons() != 0;
@@ -439,43 +448,20 @@ impl Mascot {
             st.ignoring = want_ignore;
             drop(st);
             self.panel.setIgnoresMouseEvents(want_ignore);
-            if std::env::var_os("S1_VERBOSE").is_some() {
-                eprintln!("[s1] ignoresMouseEvents = {want_ignore}");
+            if self.verbose {
+                eprintln!("[buddy] ignoresMouseEvents = {want_ignore}");
             }
             return;
         }
         drop(st);
-        // cursor wandered off: stop the fast poll, the 12 fps tick restarts it
+        if DRAGGING.get() {
+            self.end_drag_if_released();
+        }
+        // cursor wandered off: stop the fast poll, the input watch restarts it
         if idle_far && !self.cursor_near() {
             if let Some(t) = self.st.borrow_mut().poll_timer.take() {
                 t.invalidate();
             }
-        }
-    }
-
-    // ---------- timers: 12 fps anim + 30 Hz cursor poll, none when hidden ----------
-
-    fn start_timers(self: &Rc<Self>) {
-        let mut st = self.st.borrow_mut();
-        if st.anim_timer.is_some() || !st.user_visible || st.occluded {
-            return;
-        }
-        let fps = 1000.0 / self.lib.clips["idle"].durs_ms[0] as f64; // 12 fps
-        let weak = Rc::downgrade(self);
-        let anim = RcBlock::new(move |_t: NonNull<NSTimer>| {
-            if let Some(m) = weak.upgrade() {
-                m.anim_tick();
-            }
-        });
-        unsafe {
-            let a = NSTimer::timerWithTimeInterval_repeats_block(1.0 / fps, true, &anim);
-            a.setTolerance(0.004);
-            NSRunLoop::mainRunLoop().addTimer_forMode(&a, NSRunLoopCommonModes);
-            st.anim_timer = Some(a);
-        }
-        drop(st);
-        if self.cursor_near() {
-            self.start_poll();
         }
     }
 
@@ -494,11 +480,8 @@ impl Mascot {
         }
     }
 
-    fn stop_timers(&self) {
+    fn stop_poll(&self) {
         let mut st = self.st.borrow_mut();
-        if let Some(t) = st.anim_timer.take() {
-            t.invalidate();
-        }
         if let Some(t) = st.poll_timer.take() {
             t.invalidate();
         }
@@ -508,26 +491,9 @@ impl Mascot {
         }
     }
 
-    fn maybe_stats(&self) {
-        if std::env::var_os("S1_STATS").is_none() {
-            return;
-        }
-        let mut st = self.st.borrow_mut();
-        let dt = st.stats_t0.elapsed().as_secs_f64();
-        if dt >= 10.0 {
-            eprintln!(
-                "[s1] {:.1} fps uploaded (+{:.1} identical skipped), {:.1} Hz poll, clip {} {}",
-                st.frames as f64 / dt,
-                st.skipped as f64 / dt,
-                st.polls as f64 / dt,
-                st.beh.clip,
-                st.beh.dir
-            );
-            st.frames = 0;
-            st.skipped = 0;
-            st.polls = 0;
-            st.stats_t0 = Instant::now();
-        }
+    /// Polls handled since the last call (stats).
+    pub fn take_polls(&self) -> u64 {
+        std::mem::take(&mut self.st.borrow_mut().polls)
     }
 
     // ---------- notifications: occlusion, screen/backing, spaces ----------
@@ -537,7 +503,7 @@ impl Mascot {
         center: &NSNotificationCenter,
         name: &objc2_foundation::NSNotificationName,
         obj: Option<&AnyObject>,
-        f: impl Fn(&Rc<Mascot>) + 'static,
+        f: impl Fn(&Rc<Panel>) + 'static,
     ) {
         let weak = Rc::downgrade(self);
         let block = RcBlock::new(move |_n: NonNull<NSNotification>| {
@@ -546,12 +512,7 @@ impl Mascot {
             }
         });
         let token = unsafe {
-            center.addObserverForName_object_queue_usingBlock(
-                Some(name),
-                obj,
-                Some(&NSOperationQueue::mainQueue()),
-                &block,
-            )
+            center.addObserverForName_object_queue_usingBlock(Some(name), obj, Some(&NSOperationQueue::mainQueue()), &block)
         };
         self.observers.borrow_mut().push(token);
     }
@@ -562,13 +523,16 @@ impl Mascot {
         unsafe {
             self.observe(&dc, NSWindowDidChangeOcclusionStateNotification, Some(me), |m| {
                 let vis = m.panel.occlusionState().contains(NSWindowOcclusionState::Visible);
-                m.st.borrow_mut().occluded = !vis;
-                eprintln!("[s1] occlusion: visible={vis}");
-                if vis {
-                    m.start_timers();
-                } else {
-                    m.stop_timers();
+                eprintln!("[buddy] occlusion: visible={vis}");
+                // covered: no cursor poll and no input watch either (the watch would
+                // restart the poll against a stale mask); uncovered: the watch resumes
+                if !vis {
+                    m.stop_poll();
+                    m.stop_watch();
+                } else if m.st.borrow().shown {
+                    m.start_watch();
                 }
+                post(Inbox::Call(Box::new(move |app| app.set_occluded(!vis))));
             });
             self.observe(&dc, NSWindowDidChangeBackingPropertiesNotification, Some(me), |m| {
                 m.apply_geometry();
@@ -617,7 +581,7 @@ impl Mascot {
             self.panel.setLevel(want);
         }
         if changed || why == "startup" {
-            eprintln!("[s1] fullscreen front app = {fs} ({why}) -> level {}", self.panel.level());
+            eprintln!("[buddy] fullscreen front app = {fs} ({why}) -> level {}", self.panel.level());
         }
     }
 
@@ -629,12 +593,12 @@ impl Mascot {
         let cb = self.panel.collectionBehavior();
         let scr = self.panel.screen().map(|s| s.localizedName().to_string()).unwrap_or_default();
         eprintln!(
-            "[s1] {why}: screen '{scr}' backing {b} zoom x{} -> {k} device px per sprite px ({pt} pt); \
+            "[buddy] {why}: screen '{scr}' backing {b} zoom x{} -> {k} device px per sprite px ({pt} pt); \
              canvas {}x{} sprite px; frame ({}, {}) {}x{} pt; level {}; collectionBehavior {:#x} \
              (canJoinAllSpaces={}, fullScreenAuxiliary={}); windowNumber {}",
             st.zoom,
-            st.canvas.w,
-            st.canvas.h,
+            st.w,
+            st.h,
             f.origin.x,
             f.origin.y,
             f.size.width,
@@ -650,45 +614,28 @@ impl Mascot {
     // ---------- menu actions ----------
 
     pub fn set_zoom(&self, z: u32) {
-        self.st.borrow_mut().zoom = z;
+        self.st.borrow_mut().zoom = z.clamp(1, 3);
         self.apply_geometry();
         self.report("zoom");
     }
 
-    pub fn set_size(&self, size: Size) {
-        {
-            let mut st = self.st.borrow_mut();
-            if st.size == size {
-                return;
-            }
-            st.size = size;
-            st.canvas = canvas_for(size, &self.lib);
-            st.present = make_present(st.canvas.w, st.canvas.h);
-            st.beh.reset(size);
-            st.shown = None;
+    /// Order the panel in or out. Hidden → no cursor poll, no input watch, no frame timer.
+    pub fn set_shown(self: &Rc<Self>, v: bool) {
+        if self.st.borrow().shown == v {
+            return;
         }
-        self.apply_geometry();
-        self.render();
-        self.report("size");
-    }
-
-    pub fn set_visible(self: &Rc<Self>, v: bool) {
-        self.st.borrow_mut().user_visible = v;
+        self.st.borrow_mut().shown = v;
         if v {
             self.panel.orderFrontRegardless();
-            self.start_timers();
+            self.start_watch();
         } else {
-            self.stop_timers();
+            self.stop_poll();
+            self.stop_watch();
             self.panel.orderOut(None);
         }
-        eprintln!("[s1] mascot visible={v}");
     }
 
-    pub fn is_visible(&self) -> bool {
-        self.st.borrow().user_visible
-    }
-
-    /// Debug aid for the mixed-DPI check: jump to the next display.
+    /// Jump to the next display (mixed-DPI check), S1's placement there.
     pub fn next_display(&self) {
         let screens = NSScreen::screens(self.mtm);
         let n = screens.count();
@@ -708,67 +655,6 @@ impl Mascot {
         let y = (vf.origin.y + 60.0).round();
         self.panel.setFrameOrigin(CGPoint::new(x, y));
         self.apply_geometry();
-    }
-
-    /// `S1_HOP_SECS=n`: hop to the next display every n seconds (self-test
-    /// for the mixed-DPI check without dragging).
-    fn debug_hop(self: &Rc<Self>) {
-        if let Some(secs) = std::env::var("S1_HIDE_AFTER").ok().and_then(|s| s.parse::<f64>().ok()) {
-            let weak = Rc::downgrade(self);
-            let block = RcBlock::new(move |_t: NonNull<NSTimer>| {
-                if let Some(m) = weak.upgrade() {
-                    m.set_visible(false);
-                }
-            });
-            unsafe {
-                let t = NSTimer::timerWithTimeInterval_repeats_block(secs, false, &block);
-                NSRunLoop::mainRunLoop().addTimer_forMode(&t, NSRunLoopCommonModes);
-            }
-        }
-        let Some(secs) = std::env::var("S1_HOP_SECS").ok().and_then(|s| s.parse::<f64>().ok()) else {
-            return;
-        };
-        let weak = Rc::downgrade(self);
-        let block = RcBlock::new(move |_t: NonNull<NSTimer>| {
-            if let Some(m) = weak.upgrade() {
-                m.next_display();
-                m.report("hop");
-            }
-        });
-        unsafe {
-            let t = NSTimer::timerWithTimeInterval_repeats_block(secs, true, &block);
-            NSRunLoop::mainRunLoop().addTimer_forMode(&t, NSRunLoopCommonModes);
-        }
-    }
-
-    /// Make the bear walk now (from the test webview).
-    pub fn poke(&self) {
-        let mut st = self.st.borrow_mut();
-        if st.size == Size::S100 && st.beh.clip == "idle" {
-            st.beh.frame = self.lib.clips["idle"].len() - 1;
-            st.beh.force_leave_idle();
-        }
-    }
-}
-
-/// Debug: write the composited (premultiplied BGRA) buffer as straight RGBA PNG.
-fn dump_png(path: &str, w: usize, h: usize, bgra: &[u8]) {
-    let mut rgba = vec![0u8; w * h * 4];
-    for i in 0..w * h {
-        let a = bgra[i * 4 + 3] as u32;
-        let un = |c: u8| if a == 0 { 0 } else { ((c as u32 * 255 + a / 2) / a).min(255) as u8 };
-        rgba[i * 4] = un(bgra[i * 4 + 2]);
-        rgba[i * 4 + 1] = un(bgra[i * 4 + 1]);
-        rgba[i * 4 + 2] = un(bgra[i * 4]);
-        rgba[i * 4 + 3] = a as u8;
-    }
-    if let Ok(f) = std::fs::File::create(path) {
-        let mut e = png::Encoder::new(std::io::BufWriter::new(f), w as u32, h as u32);
-        e.set_color(png::ColorType::Rgba);
-        e.set_depth(png::BitDepth::Eight);
-        if let Ok(mut wr) = e.write_header() {
-            let _ = wr.write_image_data(&rgba);
-        }
     }
 }
 

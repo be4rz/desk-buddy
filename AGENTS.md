@@ -24,11 +24,18 @@ and talks through speech bubbles, powered by an LLM.
   world, shots, Blender → palette → ink-outline pipeline). Read it before any
   mascot, room or UI art change. Pipeline: `experiments/mascot/bear3d/`;
   original reference drawings: `experiments/bear-proto/ref/`.
-- **Spike S1 (macOS window):** `spikes/s1-window/` (Rust, Tauri 2 + NSPanel).
-  Run with `cargo run` there; env switches `S1_MODE=idle|walk|run`, `S1_ZOOM`,
-  `S1_SIZE=64`, `S1_STATS=1`, `S1_VERBOSE=1`. It loads sprites from
-  `experiments/mascot/out/bear3d/anim/`, so re-rendering Stage A changes what
-  it shows. Its `target/` grows to ~3 GB and the disk is tight.
+- **The app (`crates/buddy-app`):** Tauri 2 menu-bar accessory + the native NSPanel bear
+  (`panel.rs`, moved from spike S1, which is gone; its source is at `0b1f66e`), driven by
+  `mascot-core`'s `Brain` on the main thread (`driver.rs`: one `Inbox` for every other thread),
+  drawn by `crates/mascot-render` (pack PNGs → BGRA canvas, headless and unit-tested).
+  `cargo run -p buddy-app`; env `BUDDY_HOME` (default `~/.desk-buddy`, holds `settings.json`),
+  `BUDDY_PACK=<dir>`, `BUDDY_ZOOM=1|2|3`, `BUDDY_STATS=1` (fps + CPU every 10 s),
+  `BUDDY_DUMP=<dir>` (+ `BUDDY_DUMP_EVERY`, canvas PNGs), `BUDDY_EVENTS=<file.jsonl>` (replays
+  MascotEvents, e.g. `crates/buddy-app/tests/fixtures/events.jsonl`), `BUDDY_SCREEN`,
+  `BUDDY_VERBOSE=1`. A bad pack or art dir exits 1 with `[buddy] cannot load mascot …`. Art comes
+  from `experiments/mascot/out/bear3d/` via `mascots/bear/pack.json`, so re-rendering changes it.
+  Always `export CARGO_TARGET_DIR=/Users/chantran/orca/desk-buddy/target` (one shared target;
+  a Tauri build needs ~3 GB and the disk is tight).
 - **Spike S2 (agent harness):** `agent/` is the Bun-compiled pi-durable 1.5 sidecar
   (`bun run typecheck && bun test`; `bun run build` → `agent/dist/buddy-agent`, ~68 MB).
   The root Cargo workspace holds `crates/mascot-protocol` (MascotEvent), `crates/policy`
@@ -65,7 +72,7 @@ and talks through speech bubbles, powered by an LLM.
 This repo is configured for 2build autonomous runs.
 
 - Git: autopilot leaves work uncommitted; the lead commits once per phase and lands it on the base branch
-- QA harness: `.babysit/qa.yaml`. This is a native desktop app with no web target: checks are `cargo check && cargo test` in `spikes/s1-window` and `python3 verify_b.py` in `experiments/mascot/bear3d`; mascot visuals are judged by the user on the real desktop.
+- QA harness: `.babysit/qa.yaml`. This is a native desktop app with no web target: checks are `cargo test -p mascot-render -p buddy-app` (plus `cargo test --workspace` per phase) and `python3 verify_b.py` in `experiments/mascot/bear3d`; mascot visuals are judged by the user on the real desktop.
 - Browser: only for the HTML sprite previews (`experiments/mascot/out/bear3d/**/preview*.html`); invoke `/bbs:browse` (or `/bbs:qa` for a full loop). These drive a real Chromium via `agent-browser`; there is no separate browser *tool* to look for, and `WebFetch` is not a substitute. It cannot drive the Tauri/NSPanel windows. One-time: `npm install -g agent-browser cloakbrowser`.
 - Browser hygiene: automation uses its own browser (Chrome for Testing, Playwright or cloakbrowser), never the installed Chrome. End every browser run with the tool's own close (`agent-browser --session "$AGENT_BROWSER_SESSION" close`), never `kill`/`pkill`/`close --all`, and check what still uses a stale browser or profile clone before reaping it. See `/bbs:browse` § Browser hygiene.
 - Default run: `/goal "STATUS: DONE or STATUS: BLOCKED appears" /bbs:autopilot "<task>"`

@@ -1,0 +1,54 @@
+{
+  "pack_version": 1,
+  "id": "bear",
+  "name": "Polar bear",
+  "art_root": "../../experiments/mascot/out/bear3d",
+  "palettes": ["../../experiments/bear-proto/palette-bear.json",
+               "../../experiments/scene-proto/palette.json",
+               "../../experiments/mascot/bear3d/palette-ext.json"],
+  "sources": [
+    { "kind": "stage_a", "path": "anim/anim.json" },
+    { "kind": "stage_b", "path": "anim_b/anim_b.json", "props": "props/props.json" },
+    { "kind": "stage_a", "path": "anim_c/anim_c.json", "optional": true },
+    { "kind": "face",    "path": "face/face.json",     "optional": true }
+  ],
+  "capabilities": { "blink": true, "lip_sync": true, "look_at": "body" },
+  "temperament": { "energy": 0.5, "curiosity": 0.6, "shyness": 0.3, "chattiness": 0.4, "sleepiness": 0.5 },
+  "timers": {
+    "blink": { "mean_ms": 4200, "jitter": 0.4, "closed_frames": 2, "double_p": 0.15 },
+    "mouth": { "frame_ms": 167, "stall_ms": 400 }
+  },
+  "behaviors": {
+    "rest":        { "seq": [{ "clip": "idle", "loops": [1, 3] }] },
+    "look_around": { "seq": [{ "clip": "idle", "loops": [1, 1] }], "turn": "random" },
+    "wander":      { "seq": [{ "clip": "walk_start" }, { "clip": "walk", "loops": [2, 4] }, { "clip": "walk_stop" }], "turn": "random" },
+    "dash":        { "seq": [{ "clip": "run_start" }, { "clip": "run", "loops": [2, 5] }, { "clip": "run_stop" }], "turn": "random" },
+    "nap":         { "set": "bed",  "seq": [{ "clip": "get_in_bed" }, { "clip": "sleep", "loops": [4, 10] }, { "clip": "wake_up" }] },
+    "read":        { "set": "read", "seq": [{ "clip": "sit_down" }, { "clip": "read", "loops": [2, 6] }, { "clip": "stand_up" }] },
+    "think":       { "seq": [{ "clip": "think", "loops": "hold" }] },
+    "talk":        { "seq": [{ "clip": "talk",  "loops": "hold" }] },
+    "ask":         { "seq": [{ "clip": "ask",   "loops": "hold" }] },
+    "oops":        { "seq": [{ "clip": "oops" }] },
+    "happy":       { "seq": [{ "clip": "happy" }] },
+    "celebrate":   { "seq": [{ "clip": "celebrate" }] },
+    "hold":        { "seq": [{ "clip": "idle", "loops": "hold" }] }
+  },
+  "intents": {
+    "idle": ["rest"], "think": ["think", "hold"], "work": ["think", "hold"], "talk": ["talk", "hold"],
+    "ask": ["ask", "think", "hold"], "oops": ["oops", "rest"], "happy": ["happy", "rest"],
+    "celebrate": ["celebrate", "happy", "rest"], "sad": ["oops", "rest"], "surprised": ["oops", "happy", "rest"],
+    "sleepy": ["nap", "rest"], "wave": ["happy", "rest"], "nod": ["happy", "rest"], "shake": ["oops", "rest"],
+    "jump": ["celebrate", "happy", "rest"], "spin": ["dash", "rest"], "greet": ["happy", "look_around", "rest"],
+    "stretch": ["happy", "look_around", "rest"], "remind": ["ask", "look_around", "rest"],
+    "dodge": ["wander", "rest"]
+  },
+  "idle_pool": [
+    { "behavior": "rest",        "weight": 6, "cooldown_s": 0 },
+    { "behavior": "look_around", "weight": 3, "cooldown_s": 8,   "traits": { "curiosity": 1.0 } },
+    { "behavior": "wander",      "weight": 3, "cooldown_s": 20,  "traits": { "energy": 1.0 } },
+    { "behavior": "dash",        "weight": 1, "cooldown_s": 90,  "traits": { "energy": 1.5 } },
+    { "behavior": "read",        "weight": 1, "cooldown_s": 300, "traits": { "curiosity": 0.5, "energy": -0.5 } },
+    { "behavior": "nap",         "weight": 1, "cooldown_s": 900, "traits": { "sleepiness": 1.5, "energy": -1.0 } }
+  ],
+  "memory": { "recent": 3, "penalty": 0.25 }
+}

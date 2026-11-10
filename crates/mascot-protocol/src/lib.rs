@@ -3,8 +3,10 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod pack;
+
 /// Bumped on any change a consumer must know about.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 
 /// What kind of work a running tool call is, for `Working` (plan §2 mapping).
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -47,6 +49,38 @@ pub enum MascotEvent {
     Speaking { text: String },
     /// The run ended without an answer.
     Error { reason: String, message: String },
+    // v2
+    /// `buddy say` (proactive / out-of-turn line).
+    Say { text: String, emotion: Option<Emotion> },
+    /// `buddy mascot emote`.
+    Emote { name: EmoteName },
+    /// A durable reminder fired (P2b).
+    Reminder { id: String, text: String },
+    /// The person answered or dismissed what the bubble showed (clears ask/talk holds).
+    Settled,
+}
+
+/// How a `Say` line feels; the brain plays it after the line.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum Emotion {
+    Neutral,
+    Happy,
+    Sad,
+    Surprised,
+    Thinking,
+    Sleepy,
+}
+
+/// What `buddy mascot emote` can ask for.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum EmoteName {
+    Wave,
+    Nod,
+    Shake,
+    Jump,
+    Spin,
 }
 
 /// The kind of work a shell command does, from its first word(s).
@@ -92,5 +126,22 @@ mod tests {
         assert_eq!(serde_json::to_value(&e).unwrap(), serde_json::json!({ "type": "working", "kind": "buddy", "tool": "bash" }));
         let a = MascotEvent::AwaitingPermission { call_id: "c1".into(), title: "Run buddy?".into() };
         assert_eq!(serde_json::to_value(&a).unwrap()["callId"], "c1");
+    }
+
+    #[test]
+    fn v2_events_round_trip() {
+        let cases = [
+            (MascotEvent::Say { text: "hi".into(), emotion: Some(Emotion::Happy) }, serde_json::json!({ "type": "say", "text": "hi", "emotion": "happy" })),
+            (MascotEvent::Emote { name: EmoteName::Wave }, serde_json::json!({ "type": "emote", "name": "wave" })),
+            (MascotEvent::Reminder { id: "r1".into(), text: "tea".into() }, serde_json::json!({ "type": "reminder", "id": "r1", "text": "tea" })),
+            (MascotEvent::Settled, serde_json::json!({ "type": "settled" })),
+        ];
+        for (e, j) in cases {
+            assert_eq!(serde_json::to_value(&e).unwrap(), j);
+            assert_eq!(serde_json::from_value::<MascotEvent>(j).unwrap(), e);
+        }
+        let no_emotion: MascotEvent = serde_json::from_value(serde_json::json!({ "type": "say", "text": "x" })).unwrap();
+        assert_eq!(no_emotion, MascotEvent::Say { text: "x".into(), emotion: None });
+        assert_eq!(VERSION, 2);
     }
 }

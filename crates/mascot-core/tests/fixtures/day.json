@@ -1,0 +1,27 @@
+{
+  "timeline_version": 1,
+  "seed": 1,
+  "duration_ms": 1200000,
+  "start_local": "21:50",
+  "weekday": 2,
+  "items": [
+    { "at_ms": 90000,  "event": { "type": "thinking" } },
+    { "at_ms": 93000,  "event": { "type": "working", "kind": "files", "tool": "edit" } },
+    { "at_ms": 97000,  "event": { "type": "awaiting_permission", "callId": "c1", "title": "Run buddy say?" } },
+    { "at_ms": 104000, "event": { "type": "settled" } },
+    { "at_ms": 104100, "event": { "type": "working", "kind": "buddy", "tool": "bash" } },
+    { "at_ms": 108000, "event": { "type": "speaking", "text": "Done" } },
+    { "at_ms": 108300, "event": { "type": "speaking", "text": "Done, the notes are saved." } },
+    { "at_ms": 112000, "event": { "type": "idle" } },
+    { "at_ms": 200000, "event": { "type": "say", "text": "Tea time?", "emotion": "happy" } },
+    { "at_ms": 260000, "event": { "type": "emote", "name": "spin" } },
+    { "at_ms": 300000, "poke": "drag_start" },
+    { "at_ms": 302500, "poke": "drag_end" },
+    { "at_ms": 360000, "event": { "type": "reminder", "id": "r1", "text": "Stand up and stretch" } },
+    { "at_ms": 420000, "senses": { "fullscreen": true } },
+    { "at_ms": 425000, "event": { "type": "thinking" } },
+    { "at_ms": 430000, "event": { "type": "error", "reason": "model_error", "message": "The model returned an error." } },
+    { "at_ms": 480000, "senses": { "fullscreen": false } },
+    { "at_ms": 600000, "senses": { "quiet_hours": true, "local": { "minutes": 1350, "weekday": 2 } } }
+  ]
+}
