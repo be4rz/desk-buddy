@@ -1,0 +1,11 @@
+[package]
+name = "widgets"
+description = "desk-buddy widgets (design §4.9): widget.json, the loopback widget server, the manager, the JS SDK, media and browser"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+tiny_http.workspace = true

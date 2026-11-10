@@ -1134,3 +1134,46 @@ fn review_quiet_hours_starting_drops_a_queued_reflex() {
     b.senses(&Senses { quiet_hours: true, ..sense_at(22 * 60 + 30, 0) }, 10);
     assert!(!b.cue.iter().any(|c| matches!(c, Cue::Reflex(_))));
 }
+
+#[test]
+fn edges_dropping_on_a_top_edge_places_the_panel_follows_and_goes_back() {
+    let mut b = Brain::new(bear(), BrainConfig { seed: 1, temperament: None, dnd_action: DndAction::Hide }, 0);
+    let feet = [140, 150];
+    let win = WinRect { x: 100, y: 300, w: 800, h: 500, owner_pid: 42, layer: 0 };
+    let start = WinRect { x: 900, y: 900, w: 284, h: 198, owner_pid: 1, layer: 3 };
+    let dropped = WinRect { x: 250 - feet[0], y: 290 - feet[1], ..start };
+    let sense = |panel, windows: Vec<WinRect>| Senses { panel: Some(panel), windows, ..Senses::default() };
+    // off by default: a drop on the edge places nothing
+    b.senses(&sense(start, vec![win]), 10);
+    b.poke(Poke::DragStart, 20);
+    b.senses(&sense(dropped, vec![win]), 30);
+    b.poke(Poke::DragEnd, 40);
+    assert_eq!(b.tick(40).place, None);
+    assert!(!b.sitting());
+    // on
+    b.set_edges(Some(feet));
+    b.senses(&sense(start, vec![win]), 50);
+    b.poke(Poke::DragStart, 60);
+    b.senses(&sense(dropped, vec![win]), 70);
+    b.poke(Poke::DragEnd, 80);
+    let at = Placement { x: 250 - feet[0], y: 300 - feet[1], follow_pid: Some(42) };
+    assert_eq!(b.tick(80).place, Some(at));
+    assert_eq!(b.tick(90).place, None, "placed once");
+    assert!(b.sitting());
+    // the window moves: the panel follows
+    let moved = WinRect { x: 120, y: 280, ..win };
+    b.senses(&sense(Rect::at(at, start), vec![moved]), 100);
+    assert_eq!(b.tick(100).place, Some(Placement { x: at.x + 20, y: at.y - 20, ..at }));
+    // it closes: back to where the drag started
+    b.senses(&sense(start, vec![]), 110);
+    assert_eq!(b.tick(110).place, Some(Placement { x: start.x, y: start.y, follow_pid: None }));
+    assert!(!b.sitting());
+    assert!(b.trace().iter().any(|l| l.what == "edge"));
+}
+
+struct Rect;
+impl Rect {
+    fn at(p: Placement, r: WinRect) -> WinRect {
+        WinRect { x: p.x, y: p.y, ..r }
+    }
+}

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-signin-remove"
+description = "Enables the signin_remove command without any pre-configured scope."
+commands.allow = ["signin_remove"]
+
+[[permission]]
+identifier = "deny-signin-remove"
+description = "Denies the signin_remove command without any pre-configured scope."
+commands.deny = ["signin_remove"]

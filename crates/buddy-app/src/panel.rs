@@ -311,6 +311,31 @@ impl Panel {
         Some(Position { display, x: f.origin.x.round() as i32, y: f.origin.y.round() as i32, extra: Default::default() })
     }
 
+    /// The primary display's height: Cocoa (bottom-left) ↔ CG (top-left) global points.
+    fn primary_h(&self) -> Option<f64> {
+        NSScreen::screens(self.mtm).iter().next().map(|s| s.frame().size.height)
+    }
+
+    /// The panel in CG global points (top-left origin, like CGWindowList bounds), for edges.
+    pub fn rect_tl(&self) -> Option<mascot_core::WinRect> {
+        let f = self.panel.frame();
+        let top = self.primary_h()? - (f.origin.y + f.size.height);
+        Some(mascot_core::WinRect { x: f.origin.x.round() as i32, y: top.round() as i32, w: f.size.width.round() as i32, h: f.size.height.round() as i32, owner_pid: std::process::id() as i32, layer: 0 })
+    }
+
+    /// Move the panel's top-left corner to `(x, y)` CG global points (edges).
+    pub fn move_tl(&self, x: i32, y: i32) {
+        let Some(ph) = self.primary_h() else { return };
+        let f = self.panel.frame();
+        self.panel.setFrameOrigin(CGPoint::new(x as f64, (ph - y as f64 - f.size.height).round()));
+    }
+
+    /// The bear's floor anchor (canvas pixel `anchor`) inside the panel, in points.
+    pub fn feet_pt(&self, anchor: [i32; 2]) -> [i32; 2] {
+        let (_, pt) = self.sprite_pt();
+        [(anchor[0] as f64 * pt).round() as i32, (anchor[1] as f64 * pt).round() as i32]
+    }
+
     /// Resize around the current centre and snap the origin to whole points.
     fn apply_geometry(&self) {
         let (w, h) = self.size_pt();

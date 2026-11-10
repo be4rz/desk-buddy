@@ -40,6 +40,14 @@ services:
     check: cargo test -p bridge -p buddy-app -p mascot-protocol -p mascot-core && (cd agent && bun test test/scenarios/auth.test.ts)
     # debug build; no real keychain: BUDDY_CRED_STORE=memory (or =fail for the keychain-error path)
     start: BUDDY_HOME=<tmp> BUDDY_CRED_STORE=memory BUDDY_FAKE_OAUTH=1 BUDDY_FAKE_MODEL=http://127.0.0.1:<p> BUDDY_STATS=1 cargo run -p buddy-app
+  widgets:
+    cwd: .
+    # media + browser widgets, music/browser CLI, edges, taint (p5); unit + ACL tests are headless
+    check: cargo test -p widgets -p host -p policy -p mascot-core -p buddy-app && test -z "$(rg -n 'kCGWindowName' crates)"
+    # opens real widget windows (temp BUDDY_HOME, stopped with SIGTERM when the test ends):
+    #   cargo build -p host --bin buddy && cargo test -p buddy-app --test browser_widget -- --ignored
+    # fake media (debug builds only): BUDDY_MEDIA_FAKE=1; the widget server logs "[buddy] widgets at http://127.0.0.1:<wport>"
+    start: cargo build -p host --bin buddy && BUDDY_HOME=<tmp> BUDDY_SENSES=0 BUDDY_CRED_STORE=memory BUDDY_MEDIA_FAKE=1 cargo run -p buddy-app
   agent-sidecar:
     cwd: agent
     # needs bun; builds dist/buddy-agent (~68 MB) and runs it against the scripted fake model
@@ -74,4 +82,12 @@ flows: >-
   accounts error: BUDDY_CRED_STORE=fail → tray "⚠ Agent: can't read keychain · …" line and no sidecar start; a wrong OAuth code → #signin-error (invalid_grant);
   a 5th sense candidate in an hour sends no prompt and stays 4/4; no key in ps eww of the sidecar or a command's env;
   release build: no BUDDY_CRED_STORE / BUDDY_FAKE_OAUTH / fake-oauth / ANTHROPIC_API_KEY strings in target/release/buddy-app;
+  widgets: `buddy widget open browser <fixture url>` then `buddy browser snapshot|click e1|type e2 … --enter` (the ignored
+  browser_widget test); `buddy music play <query>` plays in the media widget and `buddy music status --json` reports time moving
+  while it is hidden (docs/spikes/media.md); parity: http://127.0.0.1:<wport>/media/index.html?mock=1|empty|error and
+  /browser/index.html?mock=1|clean|you against the prototype's #widget-media*, #widget-browser*; drop the bear on a window's
+  top edge (Settings edges on) and it sits there and follows the window;
+  widgets error: a bad crates/widgets/<id>/widget.json → an error naming the field; embed error 150 → opened in the browser
+  widget and the reply says so; `buddy browser click e999` exits 1 "no such element: e999"; goto the widget or host port is
+  refused; `buddy browser click|type` after a snapshot asks (taint); release build: no BUDDY_MEDIA_FAKE string;
   harness error: a denied card never reaches the host; a model error ends in an "error" event and exit 1; kill -9 mid-tool restarts with an "interrupted" entry

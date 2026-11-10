@@ -1,7 +1,8 @@
-//! Which window may call which app command. The app's commands aren't in a Tauri app manifest,
-//! so a capability can't scope them; each command checks its caller's window label instead:
-//! the bubble page can't reach the `signin_*` commands (keys, sign-in codes, sign-out) and the
-//! Sign in… page can't answer approval cards.
+//! Which window may call which app command. Tauri's ACL scopes them first (the app manifest in
+//! `build.rs`, `capabilities/*.json`, the widgets' run-time capabilities); each command also
+//! checks its caller's window label here, as a second line: the bubble page can't reach the
+//! `signin_*` commands (keys, sign-in codes, sign-out) and the Sign in… page can't answer
+//! approval cards.
 
 /// `caller` (the calling window's label) is `want`; else the call is refused and logged.
 pub fn is(caller: &str, want: &str, cmd: &str) -> bool {

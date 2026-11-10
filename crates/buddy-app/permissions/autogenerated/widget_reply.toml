@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-widget-reply"
+description = "Enables the widget_reply command without any pre-configured scope."
+commands.allow = ["widget_reply"]
+
+[[permission]]
+identifier = "deny-widget-reply"
+description = "Denies the widget_reply command without any pre-configured scope."
+commands.deny = ["widget_reply"]

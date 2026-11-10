@@ -258,3 +258,41 @@ fn next_local_is_today_or_tomorrow() {
     assert!(soon > now && soon <= now + 25 * 3600 * 1000);
     assert_eq!(local_hhmm(soon).unwrap(), format!("{:02}:{:02}", (h + 1) % 24, m));
 }
+
+#[test]
+fn widget_endpoints_reach_the_sink_as_widget_ops() {
+    let dir = std::env::temp_dir().join(format!("buddy-host-widget-{}-{}", std::process::id(), random_hex(3)));
+    let host = Host::start(&dir.join("host.json"), |e| match e.action {
+        Action::Widget(WidgetOp::Open { kind, url }) => Ok(json!({ "id": "w_1", "kind": kind, "url": url })),
+        Action::Widget(WidgetOp::List) => Ok(json!({ "widgets": [] })),
+        Action::Widget(WidgetOp::Commands) => Ok(json!({ "commands": [{ "usage": "buddy music play <query…>" }] })),
+        Action::Widget(WidgetOp::Close { id }) if id == "w_1" => Ok(json!({})),
+        Action::Widget(WidgetOp::Close { .. }) => Err(Refusal::new(404, "no_widget", "no open widget")),
+        Action::Widget(WidgetOp::Action { widget, action, args }) if action == "click" => Err(Refusal::new(404, "no_element", format!("no such element: {} ({widget})", args["ref"].as_str().unwrap_or("")))),
+        Action::Widget(WidgetOp::Action { widget, action, args }) => Ok(json!({ "widget": widget, "action": action, "args": args })),
+        _ => Ok(json!({})),
+    })
+    .unwrap();
+    let auth = format!("Bearer {}", host.user_token());
+    let h = [("Authorization", auth.as_str())];
+    let p = host.port();
+    let r = request(p, "POST", "/v1/widget/open", &h, Some(&json!({ "kind": "browser", "url": "https://example.com" }))).unwrap();
+    assert_eq!(r.body, json!({ "ok": true, "id": "w_1", "kind": "browser", "url": "https://example.com" }));
+    assert_eq!(request(p, "GET", "/v1/widget/list", &h, None).unwrap().body, json!({ "ok": true, "widgets": [] }));
+    assert_eq!(request(p, "GET", "/v1/widget/commands", &h, None).unwrap().body["commands"][0]["usage"], "buddy music play <query…>");
+    assert_eq!(request(p, "POST", "/v1/widget/close", &h, Some(&json!({ "id": "w_1" }))).unwrap().body, json!({ "ok": true }));
+    let r = request(p, "POST", "/v1/widget/close", &h, Some(&json!({ "id": "w_9" }))).unwrap();
+    assert_eq!((r.status, r.body["error"]["code"].as_str()), (404, Some("no_widget")));
+    let r = request(p, "POST", "/v1/widget/action", &h, Some(&json!({ "widget": "music", "action": "play", "args": { "query": "lofi" } }))).unwrap();
+    assert_eq!(r.body["args"]["query"], "lofi");
+    let r = request(p, "POST", "/v1/widget/action", &h, Some(&json!({ "widget": "browser", "action": "click", "args": { "ref": "e999" } }))).unwrap();
+    assert_eq!((r.status, r.body["error"]["message"].as_str()), (404, Some("no such element: e999 (browser)")));
+    // usage errors never reach the sink
+    for (path, body) in [("/v1/widget/open", json!({})), ("/v1/widget/close", json!({ "id": " " })), ("/v1/widget/action", json!({ "widget": "music" })), ("/v1/widget/action", json!({ "widget": "music", "action": "play", "args": [1] }))] {
+        let r = request(p, "POST", path, &h, Some(&body)).unwrap();
+        assert_eq!((r.status, r.body["error"]["code"].as_str()), (400, Some("usage")), "{path} {body}");
+    }
+    assert_eq!(request(p, "POST", "/v1/widget/list", &h, Some(&json!({}))).unwrap().status, 405);
+    drop(host);
+    let _ = fs::remove_dir_all(&dir);
+}

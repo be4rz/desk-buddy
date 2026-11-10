@@ -233,7 +233,7 @@ pub struct Placement {
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct TraceLine {
     pub t_ms: u64,
-    /// `event`, `start`, `pick`, `end`, `vis`, `poke`.
+    /// `event`, `start`, `pick`, `end`, `vis`, `poke`, `edge`.
     pub what: &'static str,
     pub intent: Intent,
     pub behavior: String,
@@ -325,6 +325,16 @@ pub struct Brain {
     /// `late` reflex: sleepiness + 0.2.
     late: bool,
     reflex: Reflexes,
+    /// Edges: the bear's feet in the panel (points); `None` = off (`settings.edges.enabled`).
+    edge_feet: Option<[i32; 2]>,
+    sit: Option<crate::reflex::Sit>,
+    /// Where the panel was when the current drag started.
+    drag_from: Option<Placement>,
+    /// The latest panel and windows (from `senses`).
+    panel: Option<WinRect>,
+    windows: Vec<WinRect>,
+    /// A placement for the next `tick`.
+    place: Option<Placement>,
     /// `Brain::new` time: the warm-up runs from here.
     started: u64,
     // idle scheduler memory
@@ -367,6 +377,12 @@ impl Brain {
             dnd: false,
             late: false,
             reflex: Reflexes::new(),
+            edge_feet: None,
+            sit: None,
+            drag_from: None,
+            panel: None,
+            windows: vec![],
+            place: None,
             started: now_ms,
             last_start: BTreeMap::new(),
             recent: VecDeque::new(),
@@ -479,6 +495,9 @@ impl Brain {
     pub fn senses(&mut self, s: &Senses, now_ms: u64) {
         self.advance(now_ms);
         let t = self.t;
+        self.panel = s.panel;
+        self.windows.clone_from(&s.windows);
+        self.follow_edge(t, s.fullscreen);
         self.quiet = s.quiet_hours;
         self.dnd = s.fullscreen || s.screen_share || s.dnd_toggle;
         self.apply_vis(t);
@@ -555,14 +574,63 @@ impl Brain {
             Poke::Click => {}
             Poke::DragStart => {
                 self.dragging = true;
+                self.drag_from = self.panel.map(|p| Placement { x: p.x, y: p.y, follow_pid: None });
+                if self.sit.take().is_some() {
+                    self.note(t, "edge", "off (picked up)".into());
+                }
                 if !self.play.drag {
                     self.start("hold", self.desired(), t);
                     self.play.drag = true;
                 }
             }
-            Poke::DragEnd => self.dragging = false,
+            Poke::DragEnd => {
+                self.dragging = false;
+                self.drop_on_edge(t);
+            }
         }
         self.dirty = true;
+    }
+
+    /// Edges on (with the bear's feet in the panel, in points) or off. Off stands the bear up where
+    /// it is.
+    pub fn set_edges(&mut self, feet: Option<[i32; 2]>) {
+        self.edge_feet = feet;
+        if feet.is_none() {
+            self.sit = None;
+        }
+    }
+
+    /// Sitting on a window's edge (the app polls window bounds only then).
+    pub fn sitting(&self) -> bool {
+        self.sit.is_some()
+    }
+
+    fn drop_on_edge(&mut self, t: u64) {
+        let (Some(feet), Some(panel)) = (self.edge_feet, self.panel) else { return };
+        if let Some(mut s) = crate::reflex::edge_drop(&panel, feet, &self.windows) {
+            s.back = self.drag_from;
+            self.note(t, "edge", format!("sit on pid {} at {},{}", s.pid, s.at.x, s.at.y));
+            self.place = Some(s.at);
+            self.sit = Some(s);
+        }
+    }
+
+    fn follow_edge(&mut self, t: u64, fullscreen: bool) {
+        let (Some(feet), Some(sit)) = (self.edge_feet, self.sit) else { return };
+        match crate::reflex::edge_follow(&sit, feet, &self.windows, fullscreen) {
+            crate::reflex::Follow::Stay => {}
+            crate::reflex::Follow::Move(s) => {
+                self.place = Some(s.at);
+                self.sit = Some(s);
+                self.dirty = true;
+            }
+            crate::reflex::Follow::Leave(back) => {
+                self.note(t, "edge", "off (window gone)".into());
+                self.sit = None;
+                self.place = back;
+                self.dirty = true;
+            }
+        }
     }
 
     pub fn set_temperament(&mut self, t: Temperament) {
@@ -595,7 +663,7 @@ impl Brain {
             visibility: self.vis,
             moved_px: [mx as i32, my as i32],
             cut: std::mem::take(&mut self.cut),
-            place: None,
+            place: self.place.take(),
         };
         // a repeat in the same ms has nothing new: no cut, no motion (R7)
         self.cache = Some((now_ms, Show { cut: false, moved_px: [0, 0], ..show.clone() }));

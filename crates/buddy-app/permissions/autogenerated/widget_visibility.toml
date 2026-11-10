@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-widget-visibility"
+description = "Enables the widget_visibility command without any pre-configured scope."
+commands.allow = ["widget_visibility"]
+
+[[permission]]
+identifier = "deny-widget-visibility"
+description = "Denies the widget_visibility command without any pre-configured scope."
+commands.deny = ["widget_visibility"]

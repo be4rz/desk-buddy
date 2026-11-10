@@ -1,5 +1,5 @@
 //! Screen-share heuristic over CGWindowList owner name, layer and bounds (never the
-//! window title, `kCGWindowName`, which needs the Screen Recording permission).
+//! window title, whose key needs the Screen Recording permission).
 //!
 //! While sharing, meeting apps put up chrome no meeting shows otherwise:
 //! - a **share border**: a floating (layer > 0) window owned by a meeting app that

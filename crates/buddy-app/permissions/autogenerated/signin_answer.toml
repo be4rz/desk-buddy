@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-signin-answer"
+description = "Enables the signin_answer command without any pre-configured scope."
+commands.allow = ["signin_answer"]
+
+[[permission]]
+identifier = "deny-signin-answer"
+description = "Denies the signin_answer command without any pre-configured scope."
+commands.deny = ["signin_answer"]

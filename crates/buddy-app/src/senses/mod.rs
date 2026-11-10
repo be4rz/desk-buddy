@@ -17,6 +17,7 @@ pub mod fullscreen;
 pub mod idle;
 pub mod ring;
 pub mod share;
+pub mod windows;
 
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
@@ -154,6 +155,7 @@ fn sample() -> Sample {
 
 /// Starts the sensors (main thread): the frontmost observer, then the poll thread.
 pub fn start() {
+    windows::start();
     let (nudge, rx) = channel::<()>();
     observe_frontmost(nudge);
     std::thread::Builder::new()

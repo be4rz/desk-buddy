@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-signin-start"
+description = "Enables the signin_start command without any pre-configured scope."
+commands.allow = ["signin_start"]
+
+[[permission]]
+identifier = "deny-signin-start"
+description = "Denies the signin_start command without any pre-configured scope."
+commands.deny = ["signin_start"]

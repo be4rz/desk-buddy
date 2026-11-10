@@ -232,7 +232,10 @@ pub fn start(init: Init, handle: tauri::AppHandle) {
     };
     APP.with(|a| *a.borrow_mut() = Some(app));
     forward(rx, handle);
-    with_app(|a| a.wake());
+    with_app(|a| {
+        a.edges_cfg();
+        a.wake()
+    });
 }
 
 fn forward(rx: Receiver<Inbox>, handle: tauri::AppHandle) {
@@ -255,6 +258,8 @@ impl App {
 
     pub fn handle(&mut self, m: Inbox) {
         let now = self.now_ms();
+        // the reminder chip's age is worked out against this when a bubble shows (also a deferred one)
+        self.bubble.wall_ms = policy::now_ms();
         match m {
             Inbox::Event(ev) => {
                 eprintln!("[buddy] event {}", serde_json::to_string(&ev).unwrap_or_default());
@@ -264,7 +269,6 @@ impl App {
                     }
                 }
                 self.brain.event(&ev, now);
-                self.bubble.wall_ms = policy::now_ms();
                 let out = self.bubble.event(&ev, now);
                 self.apply(out);
             }
@@ -283,6 +287,14 @@ impl App {
                 if p == Poke::DragEnd {
                     self.save_position();
                 }
+                // edges: where the panel is now and, for a drop, the windows under it (one read)
+                self.raw.panel = self.panel.rect_tl();
+                if p == Poke::DragEnd && self.settings.edges.enabled {
+                    self.raw.windows = senses::windows::read();
+                }
+                if p != Poke::Click {
+                    self.regate(now);
+                }
                 eprintln!("[buddy] poke {p:?}");
                 self.brain.poke(p, now);
                 if p == Poke::Click {
@@ -294,6 +306,7 @@ impl App {
                 self.settings = s;
                 self.save_settings();
                 self.brain.set_dnd_action(dnd_action(action), now);
+                self.edges_cfg();
                 self.regate(now);
                 if let Some(f) = &self.on_settings {
                     f(&self.settings);
@@ -320,6 +333,7 @@ impl App {
     pub fn set_zoom(&mut self, z: u32) {
         self.settings.zoom = z.clamp(1, 3);
         self.panel.set_zoom(self.settings.zoom);
+        self.edges_cfg();
         // the zoom re-centres the panel: one write with the new zoom and position
         if let Some(p) = self.panel.position() {
             self.settings.position = Some(p);
@@ -331,6 +345,13 @@ impl App {
     pub fn next_display(&mut self) {
         self.panel.next_display();
         self.save_position();
+    }
+
+    /// Edges on or off (`settings.edges.enabled`), with the bear's feet at this zoom.
+    fn edges_cfg(&mut self) {
+        let feet = self.settings.edges.enabled.then(|| self.panel.feet_pt(self.art.anchor()));
+        self.brain.set_edges(feet);
+        senses::windows::set_active(self.brain.sitting());
     }
 
     /// Gate the raw senses and hand them to the brain; update the tray status line.
@@ -458,6 +479,12 @@ impl App {
         let now = self.now_ms();
         let show = self.brain.tick(now);
         self.log(&show);
+        if let Some(p) = show.place {
+            // edges: sit on a window's top edge, follow it, or go back
+            self.panel.move_tl(p.x, p.y);
+            self.raw.panel = self.panel.rect_tl();
+        }
+        senses::windows::set_active(self.brain.sitting());
         if self.last_tick_ms.replace(now) != Some(now) {
             self.view.cam[0] += show.moved_px[0];
             self.view.cam[1] += show.moved_px[1];
@@ -719,16 +746,17 @@ impl App {
         win.sized(w, h, &self.panel.panel);
     }
 
-    /// Try again (error bubble): the last prompt once more. With no model: "Sign in…".
+    /// Try again (error bubble): the last prompt once more. With no model: "Sign in…". An
+    /// unprompted turn's error has neither (Close only), so nothing is re-sent for it.
     pub fn bubble_retry(&mut self) {
-        let no_model = self.bubble.shown().and_then(|m| m.error.as_ref()).is_some_and(|e| e.action.as_deref() == Some("sign_in"));
-        if no_model {
-            crate::signin::window::open();
-            return self.bubble_dismiss();
-        }
-        match self.bubble.last_prompt().map(str::to_string) {
-            Some(p) => self.submit(p),
-            None => self.bubble_dismiss(),
+        let action = self.bubble.shown().and_then(|m| m.error.as_ref()).and_then(|e| e.action.clone());
+        match (action.as_deref(), self.bubble.last_prompt().map(str::to_string)) {
+            (Some("sign_in"), _) => {
+                crate::signin::window::open();
+                self.bubble_dismiss()
+            }
+            (Some("retry"), Some(p)) => self.submit(p),
+            _ => self.bubble_dismiss(),
         }
     }
 

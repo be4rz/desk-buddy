@@ -44,6 +44,15 @@ and talks through speech bubbles, powered by an LLM.
   `BUDDY_CRED_STORE=memory|fail` (no real keychain), `BUDDY_FAKE_OAUTH=1`, `BUDDY_PROMPT=<text>`,
   `BUDDY_ANSWER=allow|deny`. Real keychain test (prompts): `BUDDY_KEYCHAIN_TEST=1 cargo test -p bridge keychain`.
   SIGTERM/SIGINT quit like the tray's Quit (host.json removed).
+  Widgets (p5): `crates/widgets` (manifests `crates/widgets/<id>/widget.json`, the loopback widget server on a random
+  port, logged `[buddy] widgets at http://127.0.0.1:<wport>`; pages `<id>/index.html?mock=<state>`) + `src/widgets.rs`
+  (windows, run-time capabilities: each widget page gets only its own `widget_*` commands, the browser's page none).
+  CLI `buddy widget list|open|close`, `buddy music play|pause|next|status`, `buddy browser goto|snapshot|click|type`
+  (browser reads taint the chat; click/type then ask). Music/Spotify control is AppleScript to an already-running app
+  only (`src/media_os.rs`). Edges: drop the bear on a window's top edge (`settings.edges.enabled`), `src/senses/windows.rs`
+  polls window bounds only while it sits (never window names). Debug only: `BUDDY_MEDIA_FAKE=1` (local stand-in for
+  YouTube). Real-window browser test: `cargo build -p host --bin buddy && cargo test -p buddy-app --test browser_widget -- --ignored`.
+  Spike record: `docs/spikes/media.md`.
   A bad pack or art dir exits 1 with `[buddy] cannot load mascot …`. Art comes
   from `experiments/mascot/out/bear3d/` via `mascots/bear/pack.json`, so re-rendering changes it.
   Always `export CARGO_TARGET_DIR=/Users/chantran/orca/desk-buddy/target` (one shared target;

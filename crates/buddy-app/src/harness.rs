@@ -4,7 +4,8 @@
 //! the `Inbox`.
 //!
 //! Credentials live in the OS keychain (`KeychainStore`, service `desk-buddy`) and in Rust memory;
-//! the keychain is read once at start, and a read error means no sidecar ("can't read keychain").
+//! the keychain is read once at start, off the main thread (a permission dialog can hold it; the
+//! tray says "Agent: starting…" meanwhile), and a read error means no sidecar ("can't read keychain").
 //! No key ever reaches the sidecar's or a command's environment (bridge passes a fixed allowlist).
 //! The sidecar starts even with no credential (sign-in needs it), with model `null`.
 //! Debug builds only: `BUDDY_FAKE_MODEL=<url>` (the scripted fake provider, a session-only key),
@@ -22,7 +23,7 @@ use bridge::credentials::Credentials;
 use bridge::store::{CredentialStore, KeychainStore};
 use bridge::protocol::{ModelRef, ProviderDef, ProviderModel};
 use bridge::{Agent, AgentEvent, AgentSpec, BridgeError, Res};
-use host::{Action, Caller, Host, HostEvent, Refusal, RemindOp};
+use host::{Action, Caller, Host, HostEvent, Refusal, RemindOp, WidgetOp};
 use mascot_protocol::{EmoteName, Emotion, MascotEvent};
 use policy::Production;
 use serde_json::{json, Value};
@@ -77,6 +78,20 @@ pub struct Config {
 }
 
 /// The fake provider at `url` (no `/v1`).
+/// `get()` once it is `Some`, polling for at most `max`.
+fn wait_for<T>(max: Duration, get: impl Fn() -> Option<T>) -> Option<T> {
+    let t = Instant::now();
+    loop {
+        if let Some(v) = get() {
+            return Some(v);
+        }
+        if t.elapsed() >= max {
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 fn fake_def(url: &str) -> ProviderDef {
     let m = ProviderModel { id: "fake-1".into(), name: "Fake 1".into(), context_window: 128000, max_tokens: 4096, reasoning: false, input: vec!["text".into()], compat: None };
     ProviderDef { id: "fake".into(), name: "Fake".into(), api: "openai-completions".into(), base_url: format!("{}/v1", url.trim_end_matches('/')), models: vec![m] }
@@ -152,6 +167,10 @@ pub struct Harness {
     wanted: Mutex<settings::Model>,
     catalog: Vec<Provider>,
     fake: bool,
+    /// A sidecar program was found.
+    sidecar: bool,
+    /// The launch read of the keychain finished (until then the signed-in set is partial).
+    loaded: std::sync::atomic::AtomicBool,
     state: Mutex<AgentState>,
     crashes: Mutex<Vec<Instant>>,
     closing: std::sync::atomic::AtomicBool,
@@ -188,8 +207,9 @@ fn launch_prompt() -> Option<String> {
     None
 }
 
-/// What the host's sink does with a command; `agent` holds reminders.
-fn on_host(e: HostEvent, agent: Option<Arc<Agent>>) -> host::Reply {
+/// What the host's sink does with a command; `agent` holds reminders, `policy` the conversation's
+/// web mark (a browser page the agent read sets it).
+fn on_host(e: HostEvent, agent: Option<Arc<Agent>>, policy: Option<Arc<Production>>) -> host::Reply {
     let who = match &e.caller {
         Caller::User => "user",
         Caller::Agent { .. } => "agent",
@@ -218,6 +238,39 @@ fn on_host(e: HostEvent, agent: Option<Arc<Agent>>) -> host::Reply {
             eprintln!("[buddy] host remind {who}: {op:?}");
             agent.map_or_else(|| Err(Refusal::no_agent()), |a| a.remind(&op))
         }
+        Action::Widget(op) => {
+            eprintln!("[buddy] host widget {who}: {}", widget_line(&op));
+            // the host answers before widgets::start (it needs the host's port): wait for it at launch
+            let m = wait_for(Duration::from_secs(5), crate::widgets::manager).ok_or_else(|| Refusal::new(503, "no_widgets", "Widgets aren't running."))?;
+            let refuse = |e: widgets::WidgetError| Refusal::new(e.status, e.code, e.message);
+            match op {
+                WidgetOp::Open { kind, url } => m.open(&kind, url.as_deref()).map_err(refuse),
+                WidgetOp::List => Ok(m.list()),
+                WidgetOp::Close { id } => m.close(matches!(e.caller, Caller::Agent { .. }), &id).map_err(refuse),
+                WidgetOp::Commands => Ok(m.commands()),
+                WidgetOp::Action { widget, action, args } => {
+                    let done = m.action(matches!(e.caller, Caller::Agent { .. }), &widget, &action, &args).map_err(refuse)?;
+                    // the agent read a web page: mark the conversation before it sees the text
+                    if let (Some(url), Caller::Agent { gen, .. }, Some(a), Some(p)) = (&done.taint, &e.caller, &agent, &policy) {
+                        if p.taint(&a.ctx(*gen), "browser", url) {
+                            eprintln!("[buddy] marked: the agent read {url}");
+                        }
+                    }
+                    Ok(done.value)
+                }
+            }
+        }
+    }
+}
+
+/// A widget command for the log: never the typed text or a page's address in full.
+fn widget_line(op: &WidgetOp) -> String {
+    match op {
+        WidgetOp::Open { kind, url } => format!("open {kind}{}", if url.is_some() { " <url>" } else { "" }),
+        WidgetOp::List => "list".into(),
+        WidgetOp::Close { id } => format!("close {id}"),
+        WidgetOp::Commands => "commands".into(),
+        WidgetOp::Action { widget, action, .. } => format!("{widget} {action}"),
     }
 }
 
@@ -237,26 +290,20 @@ impl Harness {
         std::fs::create_dir_all(home)?;
         let slot: Arc<OnceLock<Weak<Agent>>> = Arc::default();
         let slot2 = slot.clone();
+        let pslot: Arc<OnceLock<Weak<Production>>> = Arc::default();
+        let pslot2 = pslot.clone();
         let host_file = home.join("host.json");
-        let host = Arc::new(Host::start(&host_file, move |e| on_host(e, slot2.get().and_then(Weak::upgrade)))?);
+        let host = Arc::new(Host::start(&host_file, move |e| on_host(e, slot2.get().and_then(Weak::upgrade), pslot2.get().and_then(Weak::upgrade)))?);
         let policy = Arc::new(Production::new(|_, view| {
             post(Inbox::Call(Box::new(move |a| a.policy_changed(&view))));
         }));
+        let _ = pslot.set(Arc::downgrade(&policy));
         let Config { store, session, providers, fake, fake_oauth } = config;
         let creds = Arc::new(Credentials::with_store(store));
         for (p, k) in &session {
             creds.set_api_key(p, k);
         }
-        // once, at start: a read error is the tray's keychain line and no sidecar
-        let keychain = match creds.load() {
-            Ok(n) => {
-                eprintln!("[buddy] credentials: {n} stored");
-                None
-            }
-            Err(e) => Some(e.message),
-        };
         let catalog = signin::catalog(fake_oauth.is_some());
-        let model_ref = if keychain.is_none() { choose_model(wanted, fake, &catalog, |p| creds.has(p)) } else { None };
         let (state_dir, work_dir, agent_home) = agent_dirs(home);
         let _ = std::fs::create_dir_all(&agent_home);
         // the person's `buddy`, built beside the app (`cargo build -p host --bin buddy`)
@@ -281,7 +328,8 @@ impl Harness {
             program: program.clone().unwrap_or_default(),
             home: agent_home,
             path_dirs: buddy_dir,
-            model: model_ref,
+            // chosen once the stored credentials are read (`load`)
+            model: None,
             providers,
             settings: agent_settings,
         };
@@ -317,11 +365,6 @@ impl Harness {
             }
         });
         let _ = slot.set(Arc::downgrade(&agent));
-        let state = match (keychain, &program) {
-            (Some(why), _) => AgentState::Keychain(why),
-            (None, None) => AgentState::Error("no sidecar".into()),
-            (None, Some(_)) => AgentState::Starting,
-        };
         let h = Arc::new(Harness {
             host: Mutex::new(Some(host)),
             host_file,
@@ -331,7 +374,9 @@ impl Harness {
             wanted: Mutex::new(wanted.clone()),
             catalog,
             fake,
-            state: Mutex::new(state),
+            sidecar: program.is_some(),
+            loaded: Default::default(),
+            state: Mutex::new(AgentState::Starting),
             crashes: Mutex::new(vec![]),
             closing: Default::default(),
         });
@@ -349,28 +394,49 @@ impl Harness {
         self.state.lock().unwrap().clone()
     }
 
-    /// Start the sidecar on a background thread (it waits for `ready`), then the launch prompt.
+    /// On a background thread: read the stored credentials (a keychain dialog can hold this for as
+    /// long as it stays open; the tray says "Agent: starting…" meanwhile and the bear keeps moving),
+    /// then start the sidecar (it waits for `ready`), then the launch prompt.
     fn launch(self: Arc<Self>) {
-        let st = self.state();
-        if st != AgentState::Starting {
-            match &st {
-                AgentState::Error(_) => eprintln!("[buddy] no sidecar: build it with `cd agent && bun run build` (or set BUDDY_AGENT_BIN in debug builds)"),
-                AgentState::Keychain(_) => eprintln!("[buddy] the agent doesn't start without the keychain; desk-buddy needs “Always Allow” for its keychain items"),
-                _ => {}
-            }
-            self.set_state(st);
-            self.launch_prompt(); // with no agent: the bubble shows the error
-            return;
-        }
         self.set_state(AgentState::Starting);
         std::thread::Builder::new()
             .name("buddy-agent-start".into())
             .spawn(move || {
+                let st = self.load();
+                if st != AgentState::Starting {
+                    match &st {
+                        AgentState::Error(_) => eprintln!("[buddy] no sidecar: build it with `cd agent && bun run build` (or set BUDDY_AGENT_BIN in debug builds)"),
+                        AgentState::Keychain(_) => eprintln!("[buddy] the agent doesn't start without the keychain; desk-buddy needs “Always Allow” for its keychain items"),
+                        _ => {}
+                    }
+                    self.set_state(st);
+                    self.launch_prompt(); // with no agent: the bubble shows the error
+                    return;
+                }
                 if self.start_agent() {
                     self.launch_prompt();
                 }
             })
             .expect("spawn agent start");
+    }
+
+    /// Read the stored credentials once and choose the model: the state to go on with (`Starting`
+    /// when the sidecar should start). A read error is the tray's keychain line and no sidecar.
+    fn load(&self) -> AgentState {
+        match self.creds.load() {
+            Ok(n) => {
+                eprintln!("[buddy] credentials: {n} stored");
+                let wanted = self.wanted.lock().unwrap().clone();
+                let _ = self.agent.set_model(choose_model(&wanted, self.fake, &self.catalog, |p| self.creds.has(p)));
+                self.loaded.store(true, std::sync::atomic::Ordering::SeqCst);
+                if self.sidecar {
+                    AgentState::Starting
+                } else {
+                    AgentState::Error("no sidecar".into())
+                }
+            }
+            Err(e) => AgentState::Keychain(e.message),
+        }
     }
 
     /// `BUDDY_PROMPT` (debug builds), as if typed into the bubble.
@@ -444,6 +510,7 @@ impl Harness {
     fn no_model(&self) -> BridgeError {
         match self.state() {
             AgentState::Keychain(why) => BridgeError::new("keychain", format!("Can't read the keychain: {why}.")),
+            AgentState::Starting if !self.loaded.load(std::sync::atomic::Ordering::SeqCst) => BridgeError::new("starting", "Still reading the keychain; try again in a moment."),
             _ => BridgeError::new("no_model", NO_MODEL),
         }
     }
@@ -524,6 +591,10 @@ impl Harness {
                 eprintln!("[buddy] credentials_changed: {e}");
             }
         }
+        // mid-load the set is partial: the load picks the model once it has them all
+        if !self.loaded.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
         let wanted = self.wanted.lock().unwrap().clone();
         let current = self.agent.model();
         let next = choose_model(&wanted, self.fake, &self.catalog, |p| self.creds.has(p));
@@ -556,6 +627,11 @@ impl Harness {
 
     pub fn agent(&self) -> &Arc<Agent> {
         &self.agent
+    }
+
+    /// The host API's port (the browser widget never opens it).
+    pub fn host_port(&self) -> Option<u16> {
+        self.host.lock().unwrap().as_ref().map(|h| h.port())
     }
 
     pub fn policy_view(&self) -> Value {
@@ -596,6 +672,71 @@ mod tests {
         std::env::temp_dir().join(format!("buddy-harness-{name}-{}-{}", std::process::id(), host::random_hex(3)))
     }
 
+    /// Built, with the stored credentials read as `launch`'s thread does (no sidecar start).
+    fn built(home: &Path, config: Config, program: Option<PathBuf>) -> Arc<Harness> {
+        let h = Harness::build(home, &wanted(), config, program).unwrap();
+        let st = h.load();
+        h.set_state(st);
+        h
+    }
+
+    /// A store whose `list` waits until told (a keychain dialog nobody has answered yet).
+    struct Held(MemoryStore, Mutex<std::sync::mpsc::Receiver<()>>);
+
+    impl CredentialStore for Held {
+        fn get(&self, p: &str) -> bridge::store::StoreRes<Option<Value>> {
+            self.0.get(p)
+        }
+        fn put(&self, p: &str, c: &Value) -> bridge::store::StoreRes<()> {
+            self.0.put(p, c)
+        }
+        fn delete(&self, p: &str) -> bridge::store::StoreRes<()> {
+            self.0.delete(p)
+        }
+        fn list(&self) -> bridge::store::StoreRes<Vec<String>> {
+            let _ = self.1.lock().unwrap().recv();
+            self.0.list()
+        }
+    }
+
+    #[test]
+    fn the_keychain_is_read_off_the_calling_thread_and_the_tray_says_starting_meanwhile() {
+        let home = home("held");
+        let store = MemoryStore::new();
+        store.put("anthropic", &json!({ "type": "api_key", "key": "sk-ant-held" })).unwrap();
+        let (answer, rx) = std::sync::mpsc::channel();
+        let config = Config { store: Box::new(Held(store, Mutex::new(rx))), ..Config::memory(MemoryStore::new()) };
+        // neither returns while the dialog is open
+        let t = Instant::now();
+        let h = Harness::build(&home, &wanted(), config, None).unwrap();
+        h.clone().launch();
+        assert!(t.elapsed() < Duration::from_secs(2), "build and launch don't wait for the keychain");
+        assert_eq!(h.state().line(), "Agent: starting…");
+        assert!(!h.has_model(), "nothing read yet");
+        assert_eq!(h.prompt("hi").unwrap_err().code, "starting", "not “sign in”: the read is still running");
+        // a key saved meanwhile doesn't replace settings.model's provider, which simply hasn't loaded yet
+        h.save_api_key("openrouter", "sk-or-v1-meanwhile").unwrap();
+        answer.send(()).unwrap();
+        let t = Instant::now();
+        while h.state() == AgentState::Starting {
+            assert!(t.elapsed() < Duration::from_secs(5), "the load finished");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(h.model().unwrap().provider, "anthropic", "the stored key, read on the start thread, still preferred");
+        assert_eq!(h.state(), AgentState::Error("no sidecar".into()));
+        h.shutdown();
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_widget_call_at_launch_waits_for_the_widgets_then_gives_up() {
+        let t = Instant::now();
+        let n = std::sync::atomic::AtomicU32::new(0);
+        assert_eq!(wait_for(Duration::from_secs(2), || (n.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= 3).then_some(7)), Some(7));
+        assert!(t.elapsed() < Duration::from_secs(1));
+        assert_eq!(wait_for(Duration::from_millis(120), || None::<u8>), None);
+    }
+
     #[test]
     fn the_model_is_the_fake_then_settings_then_the_first_signed_in_provider() {
         let cat = signin::catalog(false);
@@ -610,7 +751,7 @@ mod tests {
     #[test]
     fn no_credential_means_signed_out_a_no_model_prompt_and_quit_removes_host_json() {
         let home = home("none");
-        let h = Harness::build(&home, &wanted(), Config::memory(MemoryStore::new()), None).unwrap();
+        let h = built(&home, Config::memory(MemoryStore::new()), None);
         assert!(!h.has_model());
         assert_eq!(AgentState::SignedOut.line(), "⚠ Agent: not signed in");
         assert!(home.join("host.json").is_file(), "the host API is up for `buddy say`");
@@ -630,10 +771,9 @@ mod tests {
     fn a_keychain_read_error_is_the_tray_line_and_no_sidecar_start() {
         let home = home("fail");
         // a sidecar program is set: only the keychain error keeps it from starting
-        let h = Harness::build(&home, &wanted(), Config::memory(MemoryStore::failing()), Some(PathBuf::from("/nonexistent/buddy-agent"))).unwrap();
+        let h = built(&home, Config::memory(MemoryStore::failing()), Some(PathBuf::from("/nonexistent/buddy-agent")));
         assert_eq!(h.state(), AgentState::Keychain("access denied".into()));
         assert_eq!(h.state().line(), "⚠ Agent: can't read keychain · access denied");
-        h.clone().launch();
         assert!(!h.agent().is_running());
         assert_eq!(h.agent().gen(), 0, "no start was even tried");
         let e = h.prompt("hi").unwrap_err();
@@ -653,7 +793,7 @@ mod tests {
         let home = home("stored");
         let store = MemoryStore::new();
         store.put("openrouter", &json!({ "type": "api_key", "key": "sk-or-stored-1" })).unwrap();
-        let h = Harness::build(&home, &wanted(), Config::memory(store), None).unwrap();
+        let h = built(&home, Config::memory(store), None);
         assert_eq!(h.model(), Some(ModelRef { provider: "openrouter".into(), model: "anthropic/claude-sonnet-5.5".into() }));
         assert_eq!(h.save_api_key("mistral", "   ").unwrap_err(), "Paste a key first.");
         h.save_api_key("anthropic", " sk-ant-pasted-2 ").unwrap();

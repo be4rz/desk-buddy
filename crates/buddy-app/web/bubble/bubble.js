@@ -107,10 +107,9 @@
     b.append(el("div", "text", e.reason === "keychain" ? "I can't read my keychain, so I can't reach a model." : signIn ? "I can't answer until you sign in to a model." : "The model didn't respond."));
     b.append(el("div", "note err", (e.reason || "error") + ": " + (e.message || "")));
     const row = el("div", "row");
-    row.append(
-      btn("Close", "", () => invoke("bubble_dismiss")),
-      btn(signIn ? "Sign in…" : "Try again", "primary", () => invoke("bubble_retry")),
-    );
+    row.append(btn("Close", "", () => invoke("bubble_dismiss")));
+    // an unprompted turn's error has no action: Try again would re-send the person's last prompt
+    if (signIn || e.action === "retry") row.append(btn(signIn ? "Sign in…" : "Try again", "primary", () => invoke("bubble_retry")));
     b.append(row);
   }
 

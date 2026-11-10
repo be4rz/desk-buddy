@@ -18,6 +18,7 @@
     reminder: { mode: "reminder", id: "r_1", text: "Stretch and refill your water.", setMinAgo: 20 },
     "reminder-old": { mode: "reminder", id: "r_0", text: "Stretch and refill your water." },
     error: { mode: "error", error: { reason: "model_error", message: "529 overloaded. Nothing ran.", action: "retry" } },
+    "error-unprompted": { mode: "error", error: { reason: "model_error", message: "529 overloaded. Nothing ran." } },
     "error-no-model": { mode: "error", error: { reason: "no_model", message: "There's no model to talk to yet. Sign in to one first.", action: "sign_in" } },
     html: { mode: "speech", streaming: false, text: "<img src=x onerror=alert(1)><b>not bold</b>" },
   };

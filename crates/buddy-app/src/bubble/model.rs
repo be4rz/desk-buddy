@@ -68,11 +68,15 @@ pub struct BubbleModel {
     /// The reminder chip's "set N min ago" (additive, p4); none for reminders stored before p4.
     #[serde(rename = "setMinAgo", skip_serializing_if = "Option::is_none")]
     pub set_min_ago: Option<u64>,
+    /// When the reminder was set (epoch ms): `set_min_ago` is worked out from it each time the
+    /// chip is shown, so a reminder that waited behind a card isn't stale.
+    #[serde(skip)]
+    pub set_at_ms: Option<u64>,
 }
 
 impl BubbleModel {
     fn new(mode: Mode) -> BubbleModel {
-        BubbleModel { mode, text: None, streaming: None, emotion: None, card: None, error: None, id: None, set_min_ago: None }
+        BubbleModel { mode, text: None, streaming: None, emotion: None, card: None, error: None, id: None, set_min_ago: None, set_at_ms: None }
     }
 
     pub fn speech(text: String, streaming: bool, emotion: Option<String>) -> BubbleModel {
@@ -130,6 +134,9 @@ pub struct Bubble {
     tainted: bool,
     hide_at: Option<u64>,
     last_prompt: Option<String>,
+    /// The running (or last) turn is one the person sent from here: only its error offers
+    /// Try again (which re-sends `last_prompt`); an unprompted turn's error offers Close only.
+    ours: bool,
     /// Bubbles waiting for what the person has to act on (a card, the prompt, a reminder), in order.
     deferred: VecDeque<BubbleModel>,
     /// Reminder id → text, while shown.
@@ -170,7 +177,10 @@ impl Bubble {
         self.run && matches!(&self.shown, Some(m) if m.mode == Mode::Speech && m.streaming == Some(true))
     }
 
-    fn show(&mut self, m: BubbleModel) -> Out {
+    fn show(&mut self, mut m: BubbleModel) -> Out {
+        if let Some(t) = m.set_at_ms {
+            m.set_min_ago = Some(self.wall_ms.saturating_sub(t) / 60_000);
+        }
         if self.shown.as_ref() == Some(&m) {
             return Out::Keep;
         }
@@ -275,6 +285,7 @@ impl Bubble {
         // Try again would re-ask this one
         self.deferred.retain(|m| m.mode != Mode::Error);
         self.last_prompt = Some(text.to_string());
+        self.ours = true;
         self.run = true;
         self.stopped = false;
         self.text.clear();
@@ -379,7 +390,8 @@ impl Bubble {
             MascotEvent::Thinking | MascotEvent::Working { .. } => {
                 self.answered = None;
                 if !self.run {
-                    // a turn the person didn't start here (a resumed run): it shows too
+                    // a turn the person didn't start here (a resumed run, a sense turn): it shows too
+                    self.ours = false;
                     self.run = true;
                     self.text.clear();
                     self.said.clear();
@@ -391,6 +403,7 @@ impl Bubble {
             }
             MascotEvent::Speaking { text } => {
                 self.answered = None;
+                self.ours &= self.run;
                 self.run = true;
                 self.text = text.clone();
                 if self.holding() {
@@ -401,6 +414,7 @@ impl Bubble {
             MascotEvent::AwaitingPermission { call_id, title } => {
                 self.answered = None;
                 self.stopped = false;
+                self.ours &= self.run;
                 self.run = true;
                 if !self.cards.iter().any(|(id, _)| id == call_id) {
                     self.cards.push_back((call_id.clone(), title.clone()));
@@ -444,12 +458,19 @@ impl Bubble {
                 if std::mem::replace(&mut self.stopped, false) {
                     return Out::Keep; // the stop the person asked for
                 }
-                self.error(BubbleModel::error(reason, message))
+                let mut m = BubbleModel::error(reason, message);
+                if !self.ours {
+                    // Try again would re-send the person's last prompt, not this turn
+                    if let Some(e) = m.error.as_mut().filter(|e| e.action.as_deref() == Some("retry")) {
+                        e.action = None;
+                    }
+                }
+                self.error(m)
             }
             MascotEvent::Reminder { id, text, set_at_ms } => {
-                // a reminder stored before p4 has no setAtMs: no chip (condition f)
-                let set_min_ago = set_at_ms.map(|t| self.wall_ms.saturating_sub(t) / 60_000);
-                let m = BubbleModel { text: Some(text.clone()), id: Some(id.clone()), set_min_ago, ..BubbleModel::new(Mode::Reminder) };
+                // a reminder stored before p4 has no setAtMs: no chip (condition f); the age is
+                // worked out when it shows (`show`)
+                let m = BubbleModel { text: Some(text.clone()), id: Some(id.clone()), set_at_ms: *set_at_ms, ..BubbleModel::new(Mode::Reminder) };
                 if self.holding() {
                     self.deferred.push_back(m);
                     return Out::Keep;
@@ -826,5 +847,43 @@ mod tests {
         b.dismiss(3);
         let Out::Show(m) = b.event(&MascotEvent::Reminder { id: "r_2".into(), text: "x".into(), set_at_ms: Some(b.wall_ms + 60_000) }, 4) else { panic!() };
         assert_eq!(m.set_min_ago, Some(0));
+    }
+
+    #[test]
+    fn v11_a_reminder_that_waited_behind_a_card_shows_its_age_at_show_time() {
+        let mut b = Bubble::new();
+        let set = 1_700_000_000_000;
+        b.wall_ms = set + 2 * 60_000;
+        b.event(&MascotEvent::AwaitingPermission { call_id: "c1".into(), title: "Run it?".into() }, 0);
+        assert_eq!(b.event(&MascotEvent::Reminder { id: "r_1".into(), text: "stretch".into(), set_at_ms: Some(set) }, 1), Out::Keep, "it waits behind the card");
+        // the card is answered 15 minutes later
+        b.wall_ms = set + 17 * 60_000;
+        let Out::Show(m) = b.answered("c1", 2) else { panic!() };
+        assert_eq!(m.mode, Mode::Reminder);
+        assert_eq!(m.set_min_ago, Some(17), "worked out when shown, not when it arrived");
+    }
+
+    #[test]
+    fn v5_an_unprompted_turns_error_offers_close_only() {
+        let mut b = Bubble::new();
+        b.submitted("what's the weather");
+        b.event(&MascotEvent::Idle, 1);
+        b.dismiss(2);
+        // a sense turn: it starts with no submit here
+        b.event(&MascotEvent::Thinking, 3);
+        let Out::Show(m) = b.event(&MascotEvent::Error { reason: "model_error".into(), message: "529".into() }, 4) else { panic!() };
+        assert_eq!(m.error.as_ref().unwrap().action, None, "no Try again: it would re-send the last user prompt");
+        assert!(serde_json::to_value(&m).unwrap()["error"].get("action").is_none());
+        b.dismiss(5);
+        // the person's own turn still offers it
+        b.submitted("again?");
+        let Out::Show(m) = b.event(&MascotEvent::Error { reason: "model_error".into(), message: "529".into() }, 6) else { panic!() };
+        assert_eq!(m.error.unwrap().action.as_deref(), Some("retry"));
+        // and an unprompted turn that only speaks then errors is still not ours
+        b.dismiss(7);
+        b.event(&MascotEvent::Idle, 8);
+        b.event(&MascotEvent::Speaking { text: "hm".into() }, 9);
+        let Out::Show(m) = b.event(&MascotEvent::Error { reason: "model_error".into(), message: "x".into() }, 10) else { panic!() };
+        assert_eq!(m.error.unwrap().action, None);
     }
 }

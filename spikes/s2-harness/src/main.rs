@@ -95,6 +95,7 @@ fn main() -> ExitCode {
                 let reply = slot2.get().and_then(Weak::upgrade).map_or_else(|| Err(Refusal::no_agent()), |a| a.remind(&op));
                 ("remind", json!({ "op": format!("{op:?}") }), reply)
             }
+            Action::Widget(op) => ("widget", json!({ "op": format!("{op:?}") }), Err(Refusal::no_agent())),
         };
         p2(json!({ "host": kind, "detail": detail, "turn": e.turn, "afterTurn": e.after_turn }));
         reply

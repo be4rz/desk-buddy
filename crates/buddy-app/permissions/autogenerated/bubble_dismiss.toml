@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-bubble-dismiss"
+description = "Enables the bubble_dismiss command without any pre-configured scope."
+commands.allow = ["bubble_dismiss"]
+
+[[permission]]
+identifier = "deny-bubble-dismiss"
+description = "Denies the bubble_dismiss command without any pre-configured scope."
+commands.deny = ["bubble_dismiss"]

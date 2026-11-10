@@ -124,7 +124,7 @@ pub const MODES: [&str; 3] = ["ask", "allowlist", "skip"];
 
 /// The default rules: computed, never stored, shown with `origin: "default"`.
 /// The `buddy` commands that drive the bear's own body and reminders run without a card, marked or not.
-const DEFAULT_RULES: [(&str, &str, &str); 8] = [
+const DEFAULT_RULES: [(&str, &str, &str); 11] = [
     ("d1", "deny", "Write(.buddy/**)"),
     ("d2", "deny", "Edit(.buddy/**)"),
     ("d3", "ask", "Shell(curl:*)"),
@@ -133,7 +133,36 @@ const DEFAULT_RULES: [(&str, &str, &str); 8] = [
     ("d6", "allow", "Shell(buddy mascot emote:*)"),
     ("d7", "allow", "Shell(buddy status:*)"),
     ("d8", "allow", "Shell(buddy remind:*)"),
+    ("d9", "allow", "Shell(buddy music:*)"),
+    ("d10", "allow", "Shell(buddy widget list:*)"),
+    ("d11", "allow", "Shell(buddy browser snapshot:*)"),
 ];
+/// `buddy browser <these>` act on a page for the agent: while the conversation is marked they
+/// always ask, whatever the mode or the person's rules (design `## widgets`).
+const OUTBOUND: [&str; 3] = ["click", "type", "goto"];
+
+/// `buddy browser click|type|goto …`, or `buddy widget open browser <url>` (a goto).
+/// Whether `command` may drive the browser outward anywhere in it: as a plain segment, behind
+/// `env`/`VAR=1`/`sh -c`/`eval`, inside `$(…)`, with flags (`--json`) between the words or
+/// quotes and backslashes inside them (`brow''ser`), or built from a variable (`$b click`).
+/// A token scan, so it errs toward asking (it never denies).
+fn outbound(command: &str) -> bool {
+    // the shell drops quotes and backslashes inside a word: `bu''ddy`, `brow\ser`
+    let plain: String = command.chars().filter(|c| !matches!(c, '\'' | '"' | '\\')).collect();
+    // flags anywhere (the CLI takes `--json` at any position) don't separate the words
+    let w: Vec<&str> = plain.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-')).filter(|w| !w.is_empty() && !w.starts_with('-')).collect();
+    // the words in order, others allowed between them
+    let seq = |want: &[&[&str]]| {
+        let mut it = w.iter();
+        want.iter().all(|alts| it.any(|x| alts.contains(x)))
+    };
+    if seq(&[&["buddy"], &["browser"], &OUTBOUND]) || seq(&[&["buddy"], &["widget"], &["open"], &["browser"]]) {
+        return true;
+    }
+    // a line that names the browser but builds a word at run time: `b=browser; buddy $b click`
+    let built = plain.contains('$') || plain.contains('`') || w.contains(&"eval");
+    built && w.iter().any(|x| ["buddy", "browser", "widget"].contains(x) || OUTBOUND.contains(x))
+}
 /// Approving a command these rules ask about marks the conversation.
 const FETCH_RULES: [&str; 2] = ["d3", "d4"];
 /// The tools a child conversation (a `task` research helper) may use.
@@ -377,6 +406,20 @@ impl Production {
             if let Some((id, _)) = first(&rules.deny, |p| p.matches_segment(seg)) {
                 return Verdict::Deny(format!("A rule denies this command: {}.", pattern_text(id, f)));
             }
+        }
+        if tainted && outbound(command) {
+            return Verdict::Ask(
+                json!({
+                    "kind": "command",
+                    "tool": "bash",
+                    "title": "Let the bear use the page?",
+                    "detail": "This conversation read a web page, so clicking, typing or opening pages asks every time.",
+                    "command": command,
+                    "suggestedRule": null,
+                    "offerAlways": false,
+                }),
+                None,
+            );
         }
         if mode == "skip" {
             return Verdict::Allow;

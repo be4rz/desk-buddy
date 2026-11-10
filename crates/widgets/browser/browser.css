@@ -1,0 +1,14 @@
+/* the browser widget's top strip; the page itself is a second webview below it (no IPC) */
+.widget.browser { border-radius: 12px 12px 0 0; }
+.urlbar { margin: 0 10px 6px; background: rgba(255,255,255,.08); border-radius: 6px; padding: 4px 8px; font: 12px var(--mono); display: flex; gap: 6px; align-items: center; flex: none; }
+.urlbar #url { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; -webkit-user-select: text; user-select: text; }
+.banner { font-size: 12px; padding: 4px 10px; display: flex; gap: 6px; align-items: center; flex: none; white-space: nowrap; overflow: hidden; }
+.banner.drive { background: var(--hat-d); color: #fff; }
+.banner.you { background: var(--teal); color: #fff; }
+.banner.taint { background: var(--sun); color: var(--rose-d); }
+.banner .link { background: none; border: 0; padding: 0; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
+.page { background: var(--paper); color: var(--ink); flex: 1; padding: 12px; position: relative; font-size: 12px; }
+.page .ln { height: 8px; background: var(--fur); border-radius: 3px; margin: 7px 0; }
+.page .ln.s { width: 55%; } .page .ln.m { width: 80%; }
+.ref { outline: 2px solid var(--hat); outline-offset: 2px; position: relative; display: inline-block; padding: 3px 8px; border-radius: 4px; background: var(--hat-l); font-size: 12px; margin-top: 14px; }
+.ref::after { content: attr(data-ref); position: absolute; top: -16px; right: -6px; font: 600 10px var(--mono); background: var(--hat-d); color: #fff; padding: 0 4px; border-radius: 3px; }

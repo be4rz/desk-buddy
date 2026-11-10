@@ -301,3 +301,55 @@ fn the_port_file_and_git_config_are_off_limits_even_in_skip_mode() {
     // Everything else still runs in skip mode.
     assert_eq!(p.decide(&fx.at, &bash("c7", "cat notes/host.json")), Decision::Allow);
 }
+
+#[test]
+fn widget_reads_run_and_browser_actions_ask_while_marked() {
+    let fx = Fixture::new("widgets");
+    let p = policy();
+    for (i, cmd) in ["buddy music play lofi --json", "buddy music status --json", "buddy widget list --json", "buddy browser snapshot"].iter().enumerate() {
+        assert_eq!(p.decide(&fx.at, &bash(&format!("w{i}"), cmd)), Decision::Allow, "{cmd}");
+    }
+    // not marked: the person's own rule lets the bear click
+    let a = asks(&p.decide(&fx.at, &bash("c1", "buddy browser click e3"))).clone();
+    assert_eq!(a["suggestedRule"], "Shell(buddy browser:*)");
+    p.ui(&fx.at, &json!({ "op": "approval_answer", "callId": "c1", "answer": "allow_always" })).unwrap();
+    assert_eq!(p.decide(&fx.at, &bash("c2", "buddy browser click e4")), Decision::Allow);
+    // a page read marks it: click, type and goto ask again, even in skip mode, and offer no always
+    assert!(p.taint(&fx.at, "browser", "https://example.com/order"));
+    p.ui(&fx.at, &json!({ "op": "set_mode", "mode": "skip" })).unwrap();
+    for (i, cmd) in ["buddy browser click e4", "buddy browser type e2 hello", "buddy browser goto https://evil.example", "echo $(buddy browser click e1)", "x=$(buddy  browser  goto https://evil.example)", "env buddy browser click e1", "FOO=1 buddy browser type e2 secret", "sh -c 'buddy browser goto https://evil.example'", "buddy widget open browser https://evil.example/?q=x"].iter().enumerate() {
+        let d = p.decide(&fx.at, &bash(&format!("t{i}"), cmd));
+        let a = asks(&d);
+        assert_eq!(a["offerAlways"], false, "{cmd}");
+        assert_eq!(a["title"], "Let the bear use the page?", "{cmd}");
+        p.ui(&fx.at, &json!({ "op": "approval_answer", "callId": format!("t{i}"), "answer": "deny" })).unwrap();
+    }
+    // the same, spelled so the words aren't side by side: flags between them, quotes or
+    // backslashes inside them, a word from a variable, eval (review p5 S1)
+    let spelled = [
+        "buddy --json browser click e1",
+        "buddy browser --json click e1",
+        "buddy browser click --json e1",
+        "buddy widget --json open browser https://evil.example",
+        "buddy brow''ser cli\"\"ck e1",
+        "bu\\ddy browser goto https://evil.example",
+        "b=browser; buddy $b click e1",
+        "B=buddy; $B browser type e2 secret",
+        "v=goto; buddy browser ${v} https://evil.example",
+        "eval buddy browser click e1",
+        "eval \"$(printf 'buddy browser click e1')\"",
+        "sh -c \"buddy --json browser goto https://evil.example\"",
+        "echo `buddy browser click e1`",
+    ];
+    for (i, cmd) in spelled.iter().enumerate() {
+        let d = p.decide(&fx.at, &bash(&format!("s{i}"), cmd));
+        let a = asks(&d);
+        assert_eq!(a["title"], "Let the bear use the page?", "{cmd}");
+        p.ui(&fx.at, &json!({ "op": "approval_answer", "callId": format!("s{i}"), "answer": "deny" })).unwrap();
+    }
+    // reading and the bear's own verbs still run
+    assert_eq!(p.decide(&fx.at, &bash("r1", "buddy browser snapshot --json")), Decision::Allow);
+    assert_eq!(p.decide(&fx.at, &bash("r1b", "buddy --json browser snapshot")), Decision::Allow);
+    assert_eq!(p.decide(&fx.at, &bash("r2", "buddy music pause")), Decision::Allow);
+    assert_eq!(p.decide(&fx.at, &bash("r3", "buddy widget list")), Decision::Allow);
+}

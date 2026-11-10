@@ -1,7 +1,20 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "signin",
-  "description": "The Sign in… window: listen for signin://state (design ## accounts). App commands aren't in a Tauri app manifest, so no capability scopes them: each command checks its caller's window label (src/caller.rs); only this window may call the signin_* commands.",
-  "windows": ["signin"],
-  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+  "description": "The Sign in… window: listen for signin://state and call the signin_* commands (design ## accounts). The app manifest (build.rs) makes every app command ACL-checked; each command also checks its caller's window label (src/caller.rs).",
+  "windows": [
+    "signin"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-signin-state",
+    "allow-signin-save-key",
+    "allow-signin-start",
+    "allow-signin-answer",
+    "allow-signin-cancel",
+    "allow-signin-remove",
+    "allow-signin-reopen",
+    "allow-signin-close"
+  ]
 }

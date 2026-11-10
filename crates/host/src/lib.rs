@@ -92,6 +92,22 @@ pub enum Action {
     Emote { name: String },
     /// `buddy remind …`: the app's agent keeps reminders (durable, in its sidecar).
     Remind(RemindOp),
+    /// `buddy widget …` and `buddy <widget> <action> …` (design §4.9).
+    Widget(WidgetOp),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum WidgetOp {
+    /// Reply `{id}`.
+    Open { kind: String, url: Option<String> },
+    /// Reply `{widgets: [{id, kind, visible, state}]}`.
+    List,
+    /// Reply `{}`.
+    Close { id: String },
+    /// Reply: the widget's result.
+    Action { widget: String, action: String, args: Value },
+    /// Reply `{commands: [{widget, cli, name, usage, about, readOnly, args}]}`.
+    Commands,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -501,7 +517,37 @@ fn serve(sh: &Shared, mut req: Request) {
             }
             act(sh, req, HostEvent { caller, action: Action::Remind(RemindOp::Cancel { id }), turn, after_turn }, Value::Null)
         }
-        (_, "/v1/status" | "/v1/say" | "/v1/mascot/emote" | "/v1/remind" | "/v1/reminders" | "/v1/remind/cancel") => refuse(req, 405, "method", "Wrong method."),
+        (Method::Post, "/v1/widget/open") => {
+            let kind = body["kind"].as_str().unwrap_or("").trim().to_string();
+            if kind.is_empty() {
+                return refuse(req, 400, "usage", "Open which widget? buddy widget open <kind> [url].");
+            }
+            let url = body["url"].as_str().map(str::trim).filter(|u| !u.is_empty()).map(str::to_string);
+            act(sh, req, HostEvent { caller, action: Action::Widget(WidgetOp::Open { kind, url }), turn, after_turn }, Value::Null)
+        }
+        (Method::Get, "/v1/widget/list") => act(sh, req, HostEvent { caller, action: Action::Widget(WidgetOp::List), turn, after_turn }, Value::Null),
+        (Method::Get, "/v1/widget/commands") => act(sh, req, HostEvent { caller, action: Action::Widget(WidgetOp::Commands), turn, after_turn }, Value::Null),
+        (Method::Post, "/v1/widget/close") => {
+            let id = body["id"].as_str().unwrap_or("").trim().to_string();
+            if id.is_empty() {
+                return refuse(req, 400, "usage", "Close which widget? buddy widget close <id>.");
+            }
+            act(sh, req, HostEvent { caller, action: Action::Widget(WidgetOp::Close { id }), turn, after_turn }, Value::Null)
+        }
+        (Method::Post, "/v1/widget/action") => {
+            let widget = body["widget"].as_str().unwrap_or("").trim().to_string();
+            let action = body["action"].as_str().unwrap_or("").trim().to_string();
+            if widget.is_empty() || action.is_empty() {
+                return refuse(req, 400, "usage", "Give a widget and an action.");
+            }
+            let args = match body.get("args") {
+                None | Some(Value::Null) => json!({}),
+                Some(v @ Value::Object(_)) => v.clone(),
+                Some(_) => return refuse(req, 400, "usage", "args must be an object."),
+            };
+            act(sh, req, HostEvent { caller, action: Action::Widget(WidgetOp::Action { widget, action, args }), turn, after_turn }, Value::Null)
+        }
+        (_, "/v1/status" | "/v1/say" | "/v1/mascot/emote" | "/v1/remind" | "/v1/reminders" | "/v1/remind/cancel" | "/v1/widget/open" | "/v1/widget/list" | "/v1/widget/commands" | "/v1/widget/close" | "/v1/widget/action") => refuse(req, 405, "method", "Wrong method."),
         _ => refuse(req, 404, "not_found", "No such endpoint."),
     }
 }

@@ -20,7 +20,10 @@ pub type Headers<'a> = &'a [(&'a str, &'a str)];
 /// Send `method path` to `127.0.0.1:port` with `headers` and an optional JSON body.
 pub fn request(port: u16, method: &str, path: &str, headers: Headers, body: Option<&Value>) -> io::Result<Reply> {
     let mut s = TcpStream::connect(("127.0.0.1", port))?;
-    s.set_read_timeout(Some(Duration::from_secs(10)))?;
+    // a widget action waits for its pages: `music play` worst case is the search, the media page
+    // (8 s ready + 15 s reply) and, on embed error 150, the browser page (8 s + 15 s load)
+    let wait = if path.starts_with("/v1/widget") { 75 } else { 10 };
+    s.set_read_timeout(Some(Duration::from_secs(wait)))?;
     s.set_write_timeout(Some(Duration::from_secs(10)))?;
     let payload = body.map(|b| b.to_string()).unwrap_or_default();
     let mut head = format!("{method} {path} HTTP/1.1\r\nConnection: close\r\n");

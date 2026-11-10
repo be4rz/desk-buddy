@@ -1,0 +1,8 @@
+{ "widget_version": 1, "id": "media", "name": "Music", "cli": "music", "entry": "index.html",
+  "window": { "w": 320, "h": 214, "hideable": true, "park_offscreen": false },
+  "actions": [
+    { "name": "play",   "args": [{ "name": "query", "type": "string", "rest": true }], "about": "Play from YouTube: a search, a YouTube link or a video id. Keeps playing while hidden.", "readOnly": false },
+    { "name": "pause",  "args": [], "about": "Pause the widget, else Music or Spotify if one is playing.", "readOnly": false },
+    { "name": "next",   "args": [], "about": "Skip to the next search result, else the next track in Music or Spotify.", "readOnly": false },
+    { "name": "status", "args": [], "about": "What is playing ({playing, title, source, …}).", "readOnly": true }
+  ] }

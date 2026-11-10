@@ -18,6 +18,7 @@ mascot-core = { path = "crates/mascot-core" }
 policy = { path = "crates/policy" }
 bridge = { path = "crates/bridge" }
 host = { path = "crates/host" }
+widgets = { path = "crates/widgets" }
 
 # Lean dev builds (design §6.1): deps optimized as in S1, no full debuginfo.
 [profile.dev]

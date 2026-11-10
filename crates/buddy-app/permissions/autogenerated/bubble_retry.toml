@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-bubble-retry"
+description = "Enables the bubble_retry command without any pre-configured scope."
+commands.allow = ["bubble_retry"]
+
+[[permission]]
+identifier = "deny-bubble-retry"
+description = "Denies the bubble_retry command without any pre-configured scope."
+commands.deny = ["bubble_retry"]

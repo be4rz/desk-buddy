@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
-use crate::store::{CredentialStore, MemoryStore, StoreError};
+use crate::store::{CredentialStore, MemoryStore, StoreError, PREFIX};
 
 /// How long `cred.modify_begin` waits for another start's lease on the same provider.
 const LEASE_WAIT: Duration = Duration::from_secs(30);
@@ -27,6 +27,10 @@ struct Inner {
     /// Providers whose store copy may be older than memory: a write that outlived its lease
     /// landed after a newer one. The next lease to end there (or a restore) writes memory back.
     stale: HashSet<String>,
+    /// Stored items `load` couldn't use (another app's, or not a credential), logged once.
+    skipped: HashSet<String>,
+    /// Providers signed out while a `load` was reading the store: it must not bring them back.
+    removed: HashSet<String>,
     next: u64,
 }
 
@@ -61,25 +65,42 @@ impl Credentials {
     }
 
     /// Read every stored credential into memory (once, at start). An error means the
-    /// store can't be read (a denied keychain): the app starts no agent.
+    /// store can't be listed (a denied keychain): the app starts no agent. One item that can't
+    /// be read or isn't a credential (another app's, a hand edit) is skipped and logged once,
+    /// `[buddy] skipped keychain item provider:<id>`; the others still load.
     pub fn load(&self) -> Result<usize, StoreError> {
+        self.lock().removed.clear();
         let ids = self.store.list()?;
         let mut got = vec![];
+        let mut bad = vec![];
         for id in ids {
-            if let Some(c) = self.store.get(&id)? {
-                if valid(&c) {
-                    got.push((id, c));
-                }
+            match self.store.get(&id) {
+                Ok(Some(c)) if valid(&c) => got.push((id, c)),
+                Ok(None) => {}
+                Ok(Some(_)) | Err(_) => bad.push(id),
             }
         }
         let n = got.len();
         let mut g = self.lock();
+        // a key saved or a refresh written while the read was still running is newer
         for (id, c) in got {
-            if !g.session.contains(&id) {
-                g.creds.insert(id, c);
+            if !g.session.contains(&id) && !g.removed.contains(&id) {
+                g.creds.entry(id).or_insert(c);
+            }
+        }
+        for id in bad {
+            if g.skipped.insert(id.clone()) {
+                eprintln!("[buddy] skipped keychain item {PREFIX}{id}");
             }
         }
         Ok(n)
+    }
+
+    /// The stored items `load` skipped (provider ids), sorted.
+    pub fn skipped(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.lock().skipped.iter().cloned().collect();
+        v.sort();
+        v
     }
 
     /// A credential for this session only, never stored (the fake model, a debug env key).
@@ -106,14 +127,28 @@ impl Credentials {
         Ok(())
     }
 
-    /// Sign out: the stored item goes, then the memory copy.
+    /// Sign out: the memory copy and any refresh lease on it go first, so a refresh still in
+    /// flight ends `not_found` and can't bring it back (a late store write it already started is
+    /// undone: `restore` deletes it), then the stored item. If the store refuses, the memory copy
+    /// comes back, so the window and the state agree.
     pub fn remove(&self, provider_id: &str) -> Result<(), StoreError> {
-        if !self.lock().session.contains(provider_id) {
-            self.store.delete(provider_id)?;
-        }
         let mut g = self.lock();
-        g.session.remove(provider_id);
-        g.creds.remove(provider_id);
+        let session = g.session.remove(provider_id);
+        let had = g.creds.remove(provider_id);
+        g.leases.remove(provider_id);
+        g.stale.remove(provider_id);
+        g.removed.insert(provider_id.to_string());
+        drop(g);
+        self.freed.notify_all();
+        if session {
+            return Ok(());
+        }
+        if let Err(e) = self.store.delete(provider_id) {
+            if let Some(c) = had {
+                self.lock().creds.entry(provider_id.into()).or_insert(c);
+            }
+            return Err(e);
+        }
         Ok(())
     }
 
@@ -177,6 +212,10 @@ impl Credentials {
                 };
                 let bad = req["write"] == true && !valid(&req["credential"]);
                 let write = (req["write"] == true && !bad).then(|| req["credential"].clone());
+                // In memory before the (possibly slow) store write: a refresh that begins once
+                // this lease has run out reads the newest credential, whose refresh token is the
+                // live one, never the spent one before it.
+                let prev = write.as_ref().map(|c| g.creds.insert(provider.clone(), c.clone()));
                 let mut stored = Ok(());
                 if !g.session.contains(&provider) {
                     // this refresh's credential, or (owed) memory's, when the store may be behind
@@ -197,10 +236,21 @@ impl Credentials {
                         }
                     }
                 }
-                if let Some(c) = write {
-                    // Kept in memory even when the store refused it: a refresh may have spent the old
-                    // refresh token, so the old credential would be dead. The store error is still reported.
-                    g.creds.insert(provider.clone(), c);
+                if let (Some(prev), Err(e)) = (prev, &stored) {
+                    match prev {
+                        // A refresh (or a new sign-in over one) the store refused stays in memory for
+                        // this session: the provider may already have spent the old refresh token
+                        // (V8 over V7). The store is owed it (`stale`): the next lease end writes it.
+                        Some(_) => {
+                            g.stale.insert(provider.clone());
+                            eprintln!("[bridge] couldn't save {provider}'s refreshed sign-in ({e}); it's kept for this session only");
+                            stored = Ok(());
+                        }
+                        // A first sign-in the store refused isn't active (the window reports it).
+                        None => {
+                            g.creds.remove(&provider);
+                        }
+                    }
                 }
                 // The lease ends either way; a refresh writes a new key or sign-in, never removes one.
                 g.leases.remove(&provider);
@@ -245,12 +295,18 @@ impl Credentials {
     }
 
     /// After a late write landed: put memory's credential back in the store, under a lease of
-    /// its own. When another refresh holds the provider, its end does it (`stale` is set).
+    /// its own, or delete the item when memory has none (a sign-out). When another refresh holds
+    /// the provider, its end does it (`stale` is set).
     fn restore<'a>(&'a self, mut g: Guard<'a>, provider: &str) {
         while !g.leases.contains_key(provider) && g.stale.contains(provider) {
             let Some(c) = g.creds.get(provider).cloned() else {
                 g.stale.remove(provider);
-                break;
+                drop(g);
+                if let Err(e) = self.store.delete(provider) {
+                    eprintln!("[bridge] can't remove {provider}'s signed-out sign-in from the store: {e}");
+                }
+                self.freed.notify_all();
+                return;
             };
             g.next += 1;
             let lease = format!("l{}-{provider}-restore", g.next);
@@ -355,15 +411,23 @@ mod tests {
         c.request("cred.modify_end", &json!({ "lease": b["lease"], "write": true, "credential": { "type": "api_key", "key": "sk-2" } })).unwrap();
         assert_eq!(mem.get("fake").unwrap(), None);
         assert_eq!(c.request("cred.read", &json!({ "providerId": "fake" })).unwrap()["key"], "sk-2");
-        // a refused store write says so, without the secret, and keeps the refreshed credential in
-        // memory for this run (the refresh may have spent the old refresh token); the store keeps the old
+        // a refresh the store refuses stays in memory for the session (its old refresh token
+        // may be spent), and the store gets it at the next lease end once it works again (V8 over V7)
         refuse.store(true, std::sync::atomic::Ordering::SeqCst);
         let b = c.request("cred.modify_begin", &json!({ "providerId": "anthropic" })).unwrap();
-        let e = c.request("cred.modify_end", &json!({ "lease": b["lease"], "write": true, "credential": { "type": "oauth", "access": "SECRET-a3" } })).unwrap_err();
-        assert_eq!(e.0, "store");
-        assert!(!e.1.contains("SECRET"), "{}", e.1);
-        assert_eq!(c.request("cred.read", &json!({ "providerId": "anthropic" })).unwrap()["access"], "SECRET-a3");
-        assert_eq!(mem.get("anthropic").unwrap().unwrap()["access"], "a2");
+        let end = c.request("cred.modify_end", &json!({ "lease": b["lease"], "write": true, "credential": { "type": "oauth", "access": "a3", "refresh": "r3" } })).unwrap();
+        assert_eq!(end["credential"]["refresh"], "r3");
+        assert_eq!(c.request("cred.read", &json!({ "providerId": "anthropic" })).unwrap()["refresh"], "r3", "the rotated token is kept");
+        assert_eq!(mem.get("anthropic").unwrap().unwrap()["access"], "a2", "the store still has the old one");
+        refuse.store(false, std::sync::atomic::Ordering::SeqCst);
+        let b = c.request("cred.modify_begin", &json!({ "providerId": "anthropic" })).unwrap();
+        c.request("cred.modify_end", &json!({ "lease": b["lease"] })).unwrap();
+        assert_eq!(mem.get("anthropic").unwrap().unwrap()["refresh"], "r3", "owed write landed");
+        refuse.store(true, std::sync::atomic::Ordering::SeqCst);
+        // a first sign-in the store refuses leaves nothing signed in
+        let b = c.request("cred.modify_begin", &json!({ "providerId": "openai" })).unwrap();
+        assert_eq!(c.request("cred.modify_end", &json!({ "lease": b["lease"], "write": true, "credential": { "type": "oauth", "access": "o1" } })).unwrap_err().0, "store");
+        assert!(!c.has("openai"), "not active after a failed write");
         assert!(c.put("openrouter", json!({ "type": "api_key", "key": "k" })).is_err(), "the window's save fails too");
         assert!(!c.has("openrouter"));
         refuse.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -425,7 +489,7 @@ mod tests {
     }
 
     #[test]
-    fn a_late_write_while_another_refresh_holds_the_provider_is_undone_when_that_one_ends() {
+    fn a_late_write_while_another_refresh_holds_the_provider_stays_the_newest() {
         let mem = Arc::new(MemoryStore::new());
         mem.put("anthropic", &json!({ "type": "oauth", "access": "a1" })).unwrap();
         let (go, go_rx) = std::sync::mpsc::channel();
@@ -443,9 +507,144 @@ mod tests {
         go.send(()).unwrap();
         assert_eq!(slow.join().unwrap().unwrap_err().0, "not_found");
         assert_eq!(mem.get("anthropic").unwrap().unwrap()["access"], "a-old", "(the late write landed)");
+        // A's credential was already the newest in memory when B began (V8): B read it
+        assert_eq!(b["credential"]["access"], "a-old");
         c.request("cred.modify_end", &json!({ "lease": b["lease"] })).unwrap();
-        assert_eq!(c.request("cred.read", &json!({ "providerId": "anthropic" })).unwrap()["access"], "a1");
-        assert_eq!(mem.get("anthropic").unwrap().unwrap()["access"], "a1", "B's end put memory's copy back");
+        assert_eq!(c.request("cred.read", &json!({ "providerId": "anthropic" })).unwrap()["access"], "a-old");
+        assert_eq!(mem.get("anthropic").unwrap().unwrap()["access"], "a-old");
+    }
+
+    #[test]
+    fn a_rotated_token_survives_a_keychain_dialog_that_outlives_the_lease() {
+        // V8: A's refresh rotated the refresh token; its store write sits behind a dialog while
+        // its lease runs out and B begins: B must get A's rotated token, not the spent one.
+        let mem = Arc::new(MemoryStore::new());
+        mem.put("anthropic", &json!({ "type": "oauth", "access": "a1", "refresh": "r1" })).unwrap();
+        let (go, go_rx) = std::sync::mpsc::channel();
+        let (entered_tx, entered) = std::sync::mpsc::channel();
+        let c = Arc::new(Credentials::with_store(Box::new(Slow(mem.clone(), std::sync::Mutex::new(Some((entered_tx, go_rx)))))));
+        c.load().unwrap();
+        let a = c.request("cred.modify_begin", &json!({ "providerId": "anthropic" })).unwrap();
+        let la = a["lease"].as_str().unwrap().to_string();
+        let (ca, la2) = (c.clone(), la.clone());
+        let slow = std::thread::spawn(move || ca.request("cred.modify_end", &json!({ "lease": la2, "write": true, "credential": { "type": "oauth", "access": "a2", "refresh": "r2" } })));
+        entered.recv().unwrap();
+        // the lease ran out (as after 60 s): age it instead of waiting
+        c.lock().leases.get_mut("anthropic").unwrap().1 -= LEASE_TTL;
+        let b = c.request("cred.modify_begin", &json!({ "providerId": "anthropic" })).unwrap();
+        assert_eq!(b["credential"]["refresh"], "r2", "B refreshes with the rotated token");
+        c.request("cred.modify_end", &json!({ "lease": b["lease"], "write": true, "credential": { "type": "oauth", "access": "a3", "refresh": "r3" } })).unwrap();
+        go.send(()).unwrap();
+        assert_eq!(slow.join().unwrap().unwrap_err().0, "not_found");
+        assert_eq!(c.request("cred.read", &json!({ "providerId": "anthropic" })).unwrap()["refresh"], "r3");
+        assert_eq!(mem.get("anthropic").unwrap().unwrap()["refresh"], "r3", "the late write doesn't stay in the store");
+    }
+
+    #[test]
+    fn sign_out_during_a_refresh_stays_signed_out() {
+        // V6, before the refresh ends: its end finds no lease and writes nothing
+        let mem = Arc::new(MemoryStore::new());
+        mem.put("anthropic", &json!({ "type": "oauth", "access": "a1" })).unwrap();
+        let c = Credentials::with_store(Box::new(Spy(mem.clone(), Arc::default())));
+        c.load().unwrap();
+        let b = c.request("cred.modify_begin", &json!({ "providerId": "anthropic" })).unwrap();
+        c.remove("anthropic").unwrap();
+        let e = c.request("cred.modify_end", &json!({ "lease": b["lease"], "write": true, "credential": { "type": "oauth", "access": "a2" } })).unwrap_err();
+        assert_eq!(e.0, "not_found", "the late refresh is dropped");
+        assert!(!c.has("anthropic"));
+        assert_eq!(mem.get("anthropic").unwrap(), None);
+        // V6, while the refresh's store write is in flight: it lands, then is undone
+        mem.put("anthropic", &json!({ "type": "oauth", "access": "a1" })).unwrap();
+        let (go, go_rx) = std::sync::mpsc::channel();
+        let (entered_tx, entered) = std::sync::mpsc::channel();
+        let c = Arc::new(Credentials::with_store(Box::new(Slow(mem.clone(), std::sync::Mutex::new(Some((entered_tx, go_rx)))))));
+        c.load().unwrap();
+        let a = c.request("cred.modify_begin", &json!({ "providerId": "anthropic" })).unwrap();
+        let ca = c.clone();
+        let slow = std::thread::spawn(move || ca.request("cred.modify_end", &json!({ "lease": a["lease"], "write": true, "credential": { "type": "oauth", "access": "a2" } })));
+        entered.recv().unwrap();
+        c.remove("anthropic").unwrap();
+        go.send(()).unwrap();
+        assert_eq!(slow.join().unwrap().unwrap_err().0, "not_found");
+        assert!(!c.has("anthropic"), "signed out in memory");
+        assert_eq!(mem.get("anthropic").unwrap(), None, "and in the store");
+    }
+
+    /// A store with one item another app made (it can't be read) and one that isn't JSON.
+    struct Foreign(MemoryStore);
+
+    impl CredentialStore for Foreign {
+        fn get(&self, p: &str) -> crate::store::StoreRes<Option<Value>> {
+            match p {
+                "foreign" => Err(StoreError::new("access denied (another app's item)")),
+                "garbled" => Err(StoreError::new("a stored item isn't a credential")),
+                _ => self.0.get(p),
+            }
+        }
+        fn put(&self, p: &str, c: &Value) -> crate::store::StoreRes<()> {
+            self.0.put(p, c)
+        }
+        fn delete(&self, p: &str) -> crate::store::StoreRes<()> {
+            self.0.delete(p)
+        }
+        fn list(&self) -> crate::store::StoreRes<Vec<String>> {
+            let mut v = self.0.list()?;
+            v.extend(["foreign".to_string(), "garbled".to_string()]);
+            Ok(v)
+        }
+    }
+
+    #[test]
+    fn a_foreign_or_garbled_item_is_skipped_and_the_rest_still_load() {
+        let mem = MemoryStore::new();
+        mem.put("anthropic", &json!({ "type": "oauth", "access": "a1" })).unwrap();
+        mem.put("junk", &json!({ "type": "nope" })).unwrap();
+        let c = Credentials::with_store(Box::new(Foreign(mem)));
+        assert_eq!(c.load().unwrap(), 1, "V3: one bad item doesn't fail the load");
+        assert!(c.has("anthropic"));
+        assert_eq!(c.skipped(), vec!["foreign", "garbled", "junk"]);
+        c.load().unwrap();
+        assert_eq!(c.skipped().len(), 3, "each is skipped (and logged) once");
+    }
+
+    /// A store whose reads wait until told (a slow keychain at launch).
+    struct SlowRead(Arc<MemoryStore>, std::sync::Mutex<Option<Gate>>);
+
+    impl CredentialStore for SlowRead {
+        fn get(&self, p: &str) -> crate::store::StoreRes<Option<Value>> {
+            let got = self.0.get(p);
+            if let Some((entered, go)) = self.1.lock().unwrap().take() {
+                let _ = entered.send(());
+                let _ = go.recv();
+            }
+            got
+        }
+        fn put(&self, p: &str, c: &Value) -> crate::store::StoreRes<()> {
+            self.0.put(p, c)
+        }
+        fn delete(&self, p: &str) -> crate::store::StoreRes<()> {
+            self.0.delete(p)
+        }
+        fn list(&self) -> crate::store::StoreRes<Vec<String>> {
+            self.0.list()
+        }
+    }
+
+    #[test]
+    fn a_sign_out_while_the_launch_read_runs_stays_signed_out() {
+        let mem = Arc::new(MemoryStore::new());
+        mem.put("anthropic", &json!({ "type": "oauth", "access": "a1" })).unwrap();
+        let (go, go_rx) = std::sync::mpsc::channel();
+        let (entered_tx, entered) = std::sync::mpsc::channel();
+        let c = Arc::new(Credentials::with_store(Box::new(SlowRead(mem.clone(), std::sync::Mutex::new(Some((entered_tx, go_rx)))))));
+        let cl = c.clone();
+        let loading = std::thread::spawn(move || cl.load());
+        entered.recv().unwrap();
+        c.remove("anthropic").unwrap();
+        go.send(()).unwrap();
+        assert_eq!(loading.join().unwrap().unwrap(), 1);
+        assert!(!c.has("anthropic"), "the read it started before the sign-out doesn't bring it back");
+        assert_eq!(mem.get("anthropic").unwrap(), None);
     }
 
     #[test]

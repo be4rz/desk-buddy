@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-signin-cancel"
+description = "Enables the signin_cancel command without any pre-configured scope."
+commands.allow = ["signin_cancel"]
+
+[[permission]]
+identifier = "deny-signin-cancel"
+description = "Denies the signin_cancel command without any pre-configured scope."
+commands.deny = ["signin_cancel"]

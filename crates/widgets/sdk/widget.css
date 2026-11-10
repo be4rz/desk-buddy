@@ -1,0 +1,26 @@
+/* desk-buddy widget look (parent prototype p5: .widget, .wbar, .ctrls, .banner) */
+:root {
+  --ink: #1b1820; --ink-2: #2a2530;
+  --paper: #fbfaf8; --paper-2: #f1eff4; --fur: #dcd8e6; --fur-3: #b9b3cb; --fur-4: #8a83a0;
+  --teal: #4f8a83; --teal-l: #a9dccf; --hat: #8b78ad; --hat-l: #d3c6ea; --hat-d: #5a4a72;
+  --blush: #e8a9b2; --rose-d: #5e3f4e; --sun: #e8d49a; --wall-3: #66627a;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+body { font: 13px/1.4 var(--sans); color: var(--paper-2); -webkit-user-select: none; user-select: none; }
+.widget { height: 100%; width: 100%; background: var(--ink-2); color: var(--paper-2); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
+.wbar { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; font: 600 12px var(--sans); background: rgba(255,255,255,.06); cursor: default; flex: none; }
+.wbar .acts { display: flex; gap: 4px; font-weight: 400; }
+.wbar .acts button { background: none; border: 0; color: inherit; opacity: .7; font: 13px var(--sans); padding: 0 4px; cursor: pointer; border-radius: 4px; }
+.wbar .acts button:hover, .wbar .acts button:focus-visible { opacity: 1; background: rgba(255,255,255,.1); outline: none; }
+.empty { text-align: center; color: var(--fur-3); padding: 22px 16px 10px; }
+.empty b { color: var(--paper-2); display: block; font-size: 14px; margin-bottom: 4px; }
+.empty b.err { color: var(--blush); }
+.empty code { font: 12px var(--mono); }
+.row { display: flex; gap: 6px; align-items: center; justify-content: center; padding: 0 10px 10px; }
+.btn { font: 600 13px var(--sans); border-radius: 7px; border: 1.5px solid var(--ink); background: var(--paper); color: var(--ink); padding: 5px 11px; cursor: pointer; box-shadow: 0 2px 0 var(--ink); }
+.btn:focus-visible, .cbtn:focus-visible { outline: 2px solid var(--hat); outline-offset: 2px; }
+[hidden] { display: none !important; }

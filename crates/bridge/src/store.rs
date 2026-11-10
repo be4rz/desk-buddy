@@ -9,7 +9,8 @@ use std::sync::Mutex;
 use serde_json::Value;
 
 pub const SERVICE: &str = "desk-buddy";
-const PREFIX: &str = "provider:";
+/// A provider's keychain account is `provider:<id>`.
+pub const PREFIX: &str = "provider:";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct StoreError {

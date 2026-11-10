@@ -6,6 +6,11 @@
 //!   buddy remind --at HH:MM <text…>      remind at the next HH:MM, local time
 //!   buddy remind list [--json]           the reminders waiting
 //!   buddy remind cancel <id>             drop one
+//!   buddy widget open <kind> [url]       open a widget (media, browser)
+//!   buddy widget list [--json]           the open widgets and their state
+//!   buddy widget close <id>              close one
+//!   buddy <widget> <action> <args…>      a widget's action (buddy music play lofi,
+//!                                        buddy browser snapshot); listed by --help once the app runs
 //!   buddy status [--json]                who the API sees, and the turn
 //!   buddy --help [--json]                this list; `--json` for agents
 //!
@@ -21,6 +26,7 @@ use std::process::ExitCode;
 use host::client::{request, Reply};
 use host::{local_hhmm, parse_duration, parse_hhmm, PortFile, EMOTES, EMOTIONS, MAX_REMIND_MS};
 use serde_json::{json, Value};
+use widgets::manifest::ActionSpec;
 
 fn help() -> Value {
     json!({
@@ -33,6 +39,9 @@ fn help() -> Value {
             { "usage": "buddy remind --at HH:MM <text…>", "about": "Remind at the next HH:MM, local time (today, else tomorrow).", "readOnly": false },
             { "usage": "buddy remind list [--json]", "about": "The reminders waiting, soonest first.", "readOnly": true },
             { "usage": "buddy remind cancel <id>", "about": "Drop a reminder.", "readOnly": false },
+            { "usage": "buddy widget open <kind> [url]", "about": "Open a widget window: media (music from YouTube) or browser (with a URL).", "readOnly": false },
+            { "usage": "buddy widget list [--json]", "about": "The open widgets, whether they're shown, and their state.", "readOnly": true },
+            { "usage": "buddy widget close <id>", "about": "Close a widget (its id from the list, or its kind).", "readOnly": false },
             { "usage": "buddy status [--json]", "about": "Check the connection.", "readOnly": true },
             { "usage": "buddy --help [--json]", "about": "This list.", "readOnly": true },
         ],
@@ -178,13 +187,120 @@ fn remind(rest: &[&str], json_out: bool) -> ExitCode {
     }
 }
 
+/// The running app's widget actions (`None` when it isn't running).
+fn widget_commands() -> Option<Vec<Value>> {
+    match call("GET", "/v1/widget/commands", None) {
+        Ok(r) if r.status == 200 => r.body["commands"].as_array().cloned(),
+        _ => None,
+    }
+}
+
+/// `buddy widget …`.
+fn widget(rest: &[&str], json_out: bool) -> ExitCode {
+    match rest {
+        ["open", kind] => finish(call("POST", "/v1/widget/open", Some(json!({ "kind": kind }))), json_out, "opened"),
+        ["open", kind, url] => finish(call("POST", "/v1/widget/open", Some(json!({ "kind": kind, "url": url }))), json_out, "opened"),
+        ["list" | "ls"] => match call("GET", "/v1/widget/list", None) {
+            Ok(r) if r.status == 200 && !json_out => {
+                let list = r.body["widgets"].as_array().cloned().unwrap_or_default();
+                if list.is_empty() {
+                    println!("no widgets open");
+                }
+                for w in list {
+                    let shown = if w["visible"] == true { "shown" } else { "hidden" };
+                    println!("{}  {}  {shown}  {}", w["id"].as_str().unwrap_or("?"), w["kind"].as_str().unwrap_or("?"), w["state"]);
+                }
+                ExitCode::SUCCESS
+            }
+            other => finish(other, json_out, ""),
+        },
+        ["close", id] => finish(call("POST", "/v1/widget/close", Some(json!({ "id": id }))), json_out, "closed"),
+        _ => usage("buddy widget open <kind> [url] | list | close <id>"),
+    }
+}
+
+/// What a widget action's reply says, for a person reading it.
+fn summary(body: &Value) -> String {
+    if let Some(m) = body["message"].as_str() {
+        return m.to_string();
+    }
+    if let Some(t) = body["text"].as_str() {
+        return t.to_string();
+    }
+    let st = &body["state"];
+    if st.is_object() {
+        let what = st["title"].as_str().filter(|t| !t.is_empty()).or(st["videoId"].as_str()).unwrap_or("");
+        return match (st["playing"] == true, st["paused"] == true) {
+            (true, _) => format!("playing {what}").trim_end().to_string(),
+            (false, true) => format!("paused {what}").trim_end().to_string(),
+            _ => "nothing playing".into(),
+        };
+    }
+    if let Some(u) = body["url"].as_str() {
+        return u.to_string();
+    }
+    "done".into()
+}
+
+/// `buddy <widget> <action> <words…>`: the action as the running app's widgets list it.
+fn widget_action(cli: &str, rest: &[&str], json_out: bool) -> ExitCode {
+    let Some(cmds) = widget_commands() else {
+        // tell an unknown word apart from a widget whose app isn't up
+        return match target().and_then(|_| call("GET", "/v1/status", None)) {
+            Ok(r) if r.status == 200 => usage(&format!("unknown command “{cli}”")),
+            Ok(r) => finish(Ok(r), json_out, ""),
+            Err(e) => {
+                eprintln!("buddy: {e}");
+                ExitCode::from(1)
+            }
+        };
+    };
+    let mine: Vec<&Value> = cmds.iter().filter(|c| c["cli"] == cli).collect();
+    if mine.is_empty() {
+        return usage(&format!("unknown command “{cli}”"));
+    }
+    let list = || mine.iter().filter_map(|c| c["usage"].as_str()).collect::<Vec<_>>().join(" | ");
+    let Some((name, words)) = rest.split_first() else { return usage(&list()) };
+    let Some(spec) = mine.iter().find(|c| c["name"] == *name).and_then(|c| serde_json::from_value::<ActionSpec>((*c).clone()).ok()) else {
+        return usage(&format!("buddy {cli} has no “{name}”: {}", list()));
+    };
+    let enter = words.contains(&"--enter");
+    let words: Vec<String> = words.iter().filter(|w| **w != "--enter").map(|w| w.to_string()).collect();
+    let mut args = match spec.bind(cli, &words) {
+        Ok(a) => a,
+        Err(e) => return usage(&e),
+    };
+    if enter {
+        if let Some(last) = spec.args.last().filter(|a| a.rest && a.ty == "string") {
+            let t = args[&last.name].as_str().unwrap_or("").to_string();
+            args[&last.name] = json!(format!("{t}\n"));
+        }
+    }
+    let widget = mine[0]["widget"].as_str().unwrap_or(cli);
+    match call("POST", "/v1/widget/action", Some(json!({ "widget": widget, "action": spec.name, "args": args }))) {
+        Ok(r) if r.status == 200 && !json_out => {
+            println!("{}", summary(&r.body));
+            ExitCode::SUCCESS
+        }
+        other => finish(other, json_out, ""),
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let json_out = args.iter().any(|a| a == "--json");
     let words: Vec<&str> = args.iter().map(String::as_str).filter(|a| *a != "--json").collect();
     match words.as_slice() {
         [] | ["--help"] | ["-h"] | ["help"] => {
-            let h = help();
+            let mut h = help();
+            // the running app's widget actions, when it runs
+            if let Some(extra) = widget_commands() {
+                let list = h["commands"].as_array_mut().unwrap();
+                let at = list.len() - 2;
+                for (i, c) in extra.into_iter().enumerate() {
+                    list.insert(at + i, json!({ "usage": c["usage"], "about": c["about"], "readOnly": c["readOnly"] }));
+                }
+            }
             if json_out {
                 println!("{h}");
             } else {
@@ -229,6 +345,7 @@ fn main() -> ExitCode {
         ["mascot", "emote", name] => finish(call("POST", "/v1/mascot/emote", Some(json!({ "name": name }))), json_out, "emoted"),
         ["mascot", ..] => usage("buddy mascot emote <name>"),
         ["remind", rest @ ..] => remind(rest, json_out),
-        [other, ..] => usage(&format!("unknown command “{other}”")),
+        ["widget", rest @ ..] => widget(rest, json_out),
+        [other, rest @ ..] => widget_action(other, rest, json_out),
     }
 }

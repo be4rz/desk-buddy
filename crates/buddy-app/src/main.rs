@@ -27,6 +27,7 @@ mod driver;
 mod events;
 mod harness;
 mod instance;
+mod media_os;
 mod panel;
 mod senses;
 mod settings;
@@ -34,6 +35,7 @@ mod signin;
 mod stats;
 mod tray;
 mod unprompted;
+mod widgets;
 
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
@@ -152,6 +154,12 @@ fn main() {
             signin::signin_remove,
             signin::signin_reopen,
             signin::signin_close,
+            widgets::widget_ready,
+            widgets::widget_reply,
+            widgets::widget_state,
+            widgets::widget_visibility,
+            widgets::widget_control,
+            widgets::widget_drag,
         ])
         .setup(move |app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
@@ -176,8 +184,10 @@ fn main() {
             driver::with_app(|a| a.bubble_win = Some(win));
             tray::build(app, tray_init)?;
             signin::window::init(app.handle().clone());
+            let mut host_port = None;
             match harness::Harness::start(&home2, &wanted) {
                 Ok(h) => {
+                    host_port = h.host_port();
                     let view = h.policy_view();
                     driver::with_app(|a| a.policy_changed(&view));
                     signin::install(h, Box::new(signin::window::emit));
@@ -189,8 +199,12 @@ fn main() {
                     driver::with_app(|a| a.agent_changed(&s));
                 }
             }
+            if let Err(e) = widgets::start(app.handle(), host_port) {
+                eprintln!("[buddy] no widgets: {e}");
+            }
             if sensors {
                 senses::start();
+                widgets::watch_now_playing();
             }
             if std::env::var_os("BUDDY_STATS").is_some() {
                 start_stats();

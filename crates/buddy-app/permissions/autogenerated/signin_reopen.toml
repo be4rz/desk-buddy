@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-signin-reopen"
+description = "Enables the signin_reopen command without any pre-configured scope."
+commands.allow = ["signin_reopen"]
+
+[[permission]]
+identifier = "deny-signin-reopen"
+description = "Denies the signin_reopen command without any pre-configured scope."
+commands.deny = ["signin_reopen"]

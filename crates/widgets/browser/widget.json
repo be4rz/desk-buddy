@@ -1,0 +1,8 @@
+{ "widget_version": 1, "id": "browser", "name": "Browser", "cli": "browser", "entry": "index.html",
+  "window": { "w": 520, "h": 460, "hideable": true, "park_offscreen": false },
+  "actions": [
+    { "name": "goto",     "args": [{ "name": "url", "type": "string" }], "about": "Open an http(s) page in the browser widget (opens the widget if needed). Reading it marks the conversation.", "readOnly": false },
+    { "name": "snapshot", "args": [], "about": "The page as text, with [eN] refs on links, buttons and fields. Marks the conversation (the page is untrusted).", "readOnly": true },
+    { "name": "click",    "args": [{ "name": "ref", "type": "string" }], "about": "Click the element with that ref (from the last snapshot).", "readOnly": false },
+    { "name": "type",     "args": [{ "name": "ref", "type": "string" }, { "name": "text", "type": "string", "rest": true }], "about": "Type text into the field with that ref (end the text with \\n to press Enter).", "readOnly": false }
+  ] }

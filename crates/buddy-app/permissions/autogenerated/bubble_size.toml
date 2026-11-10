@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-bubble-size"
+description = "Enables the bubble_size command without any pre-configured scope."
+commands.allow = ["bubble_size"]
+
+[[permission]]
+identifier = "deny-bubble-size"
+description = "Denies the bubble_size command without any pre-configured scope."
+commands.deny = ["bubble_size"]

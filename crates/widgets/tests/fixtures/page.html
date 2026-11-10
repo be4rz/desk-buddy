@@ -1,0 +1,16 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Order 4411</title></head>
+<body>
+<h1>Order #4411</h1>
+<p>Shipped on Monday. <span style="display:none">hidden text</span></p>
+<a href="#track" id="track">Track package</a>
+<form onsubmit="document.getElementById('out').textContent='sent:'+document.getElementById('q').value; return false">
+  <input id="q" name="q" placeholder="Ask support">
+  <button type="submit">Send</button>
+  <input id="pw" type="password">
+  <textarea id="note"></textarea>
+  <input type="submit" value="Go">
+</form>
+<p id="out"></p>
+<script>document.getElementById('track').onclick=function(){document.getElementById('out').textContent='tracked';return false;};</script>
+</body></html>
