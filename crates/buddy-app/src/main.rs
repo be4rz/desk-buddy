@@ -20,6 +20,10 @@
 //! (`instance.rs`): a second launch logs `[buddy] already running (pid N)` and exits 0. Debug
 //! builds only: `ANTHROPIC_API_KEY` (a session key, never stored), `BUDDY_CRED_STORE=memory|fail`
 //! and `BUDDY_FAKE_OAUTH=1` (a scripted `fake-oauth` provider; see `harness.rs`).
+//!
+//! Studio (p6): the tray's Studio… opens `studio/` (page `web/studio/`) on the running pack.
+//! `buddy-app --studio [<pack-dir>]` runs the studio alone: no bear, agent, lock or settings
+//! write, so it can run next to the app on the same `BUDDY_HOME`; closing its window quits.
 
 mod bubble;
 mod caller;
@@ -33,6 +37,7 @@ mod senses;
 mod settings;
 mod signin;
 mod stats;
+mod studio;
 mod tray;
 mod unprompted;
 mod widgets;
@@ -48,17 +53,23 @@ use objc2::MainThreadMarker;
 use objc2_foundation::{NSRunLoop, NSRunLoopCommonModes, NSTimer};
 use tauri::RunEvent;
 
-/// Candidate pack dirs for a pack id, in search order (design §3.2).
-fn pack_candidates(id: &str, home: &Path) -> Vec<PathBuf> {
+/// The folders packs live in, in search order (design §3.2): `BUDDY_PACKS`, the repo's
+/// `mascots/` (debug builds), `BUDDY_HOME/packs`.
+fn pack_roots(home: &Path) -> Vec<PathBuf> {
     let mut v = vec![];
     if let Some(p) = std::env::var_os("BUDDY_PACKS") {
-        v.push(PathBuf::from(p).join(id));
+        v.push(PathBuf::from(p));
     }
     if cfg!(debug_assertions) {
-        v.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../mascots").join(id));
+        v.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../mascots"));
     }
-    v.push(home.join("packs").join(id));
+    v.push(home.join("packs"));
     v
+}
+
+/// Candidate pack dirs for a pack id, in search order.
+fn pack_candidates(id: &str, home: &Path) -> Vec<PathBuf> {
+    pack_roots(home).into_iter().map(|r| r.join(id)).collect()
 }
 
 fn pack_dir(id: &str, home: &Path) -> PathBuf {
@@ -83,6 +94,10 @@ fn seed() -> u64 {
 }
 
 fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(i) = args.iter().position(|a| a == "--studio") {
+        return studio_main(args.get(i + 1).filter(|a| !a.starts_with("--")).map(PathBuf::from));
+    }
     let home = settings::home();
     // held (open) until the process exits
     let _app_lock = match instance::claim(&home) {
@@ -137,6 +152,7 @@ fn main() {
     };
     let brain = Brain::new(pack.clone(), BrainConfig { seed: seed(), temperament: None, dnd_action }, 0);
 
+    studio::configure(Some(dir.clone()), studio::allowed_packs(Some(&dir), &pack_roots(&home)));
     let mut boot = Some((pack, art, settings, home, brain, items, warning, icon));
     let app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -160,6 +176,16 @@ fn main() {
             widgets::widget_visibility,
             widgets::widget_control,
             widgets::widget_drag,
+            studio::studio_state,
+            studio::studio_poll,
+            studio::studio_open,
+            studio::studio_frames,
+            studio::studio_lint,
+            studio::studio_audit,
+            studio::studio_comments,
+            studio::studio_comment_add,
+            studio::studio_comment_status,
+            studio::studio_sim,
         ])
         .setup(move |app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
@@ -184,6 +210,7 @@ fn main() {
             driver::with_app(|a| a.bubble_win = Some(win));
             tray::build(app, tray_init)?;
             signin::window::init(app.handle().clone());
+            studio::window::init(app.handle().clone());
             let mut host_port = None;
             match harness::Harness::start(&home2, &wanted) {
                 Ok(h) => {
@@ -230,6 +257,44 @@ fn main() {
         }
         _ => {}
     });
+}
+
+/// `--studio [<pack-dir>]`: the studio window alone, on `<pack-dir>` or `BUDDY_PACK` (else the
+/// empty state, listing the packs in `pack_roots`). It reads no
+/// settings (it only lists `BUDDY_HOME/packs`) and writes nothing to `BUDDY_HOME` (no lock, host.json or
+/// settings), starts no sidecar and shows no bear; closing the window quits. Its handler list
+/// is the studio's ten commands, checked against build.rs by the `widgets` ACL test.
+fn studio_main(dir: Option<PathBuf>) {
+    let home = settings::home();
+    let start = dir.or_else(|| std::env::var_os("BUDDY_PACK").map(PathBuf::from)).map(|d| if d.is_relative() { std::env::current_dir().map(|c| c.join(&d)).unwrap_or(d) } else { d });
+    match &start {
+        Some(d) => eprintln!("[buddy] studio: pack {}", d.display()),
+        None => eprintln!("[buddy] studio: no pack given (the window offers the packs it finds)"),
+    }
+    studio::configure(start.clone(), studio::allowed_packs(start.as_deref(), &pack_roots(&home)));
+    let app = tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![
+            studio::studio_state,
+            studio::studio_poll,
+            studio::studio_open,
+            studio::studio_frames,
+            studio::studio_lint,
+            studio::studio_audit,
+            studio::studio_comments,
+            studio::studio_comment_add,
+            studio::studio_comment_status,
+            studio::studio_sim
+        ])
+        .setup(|app| {
+            app.set_activation_policy(tauri::ActivationPolicy::Regular);
+            studio::window::init(app.handle().clone());
+            studio::window::open(true);
+            quit_on_signals(app.handle().clone());
+            Ok(())
+        })
+        .build(tauri::generate_context!())
+        .expect("build tauri app");
+    app.run(|_, _| {});
 }
 
 static SIGNAL_FD: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);

@@ -118,6 +118,7 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, "quit", "Quit desk-buddy", true, None::<&str>)?;
     let budget = MenuItem::with_id(app, "budget", "Unprompted 0/4 this hour", false, None::<&str>)?;
     let signin = MenuItem::with_id(app, "signin", "Sign in…", true, None::<&str>)?;
+    let studio = MenuItem::with_id(app, "studio", "Studio…", true, None::<&str>)?;
     let sep5 = PredefinedMenuItem::separator(app)?;
     let status = MenuItem::with_id(app, "status", "", false, None::<&str>)?;
     let dnd = CheckMenuItem::with_id(app, "dnd", "Do not disturb", true, false, None::<&str>)?;
@@ -138,7 +139,7 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
     items.extend([&sep1 as &dyn IsMenuItem<Wry>, &ask, &agent]);
     // "Clear web taint" goes in under the agent line while tainted
     let taint_at = items.len();
-    items.extend([&sep4 as &dyn IsMenuItem<Wry>, &zs[0], &zs[1], &zs[2], &hide, &next, &sep2, &dnd, &quiet, &busy, &sep5, &budget, &signin, &sep3, &quit]);
+    items.extend([&sep4 as &dyn IsMenuItem<Wry>, &zs[0], &zs[1], &zs[2], &hide, &next, &sep2, &dnd, &quiet, &busy, &sep5, &budget, &signin, &studio, &sep3, &quit]);
     let menu = Menu::with_items(app, &items)?;
 
     let hide2 = hide.clone();
@@ -206,6 +207,7 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
                 "quit" => app.exit(0),
                 "ask" => with_app(|a| a.open_prompt()),
                 "signin" => crate::signin::window::open(),
+                "studio" => crate::studio::window::open(false),
                 "taint" => {
                     std::thread::spawn(|| {
                         if let Some(h) = harness::get() {

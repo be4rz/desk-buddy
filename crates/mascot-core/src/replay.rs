@@ -121,7 +121,8 @@ pub fn parse(text: &str) -> Result<Timeline, String> {
     Ok(tl)
 }
 
-fn start_minutes(s: &str) -> Result<u16, String> {
+/// `"HH:MM"` (00:00–23:59) → minutes after midnight.
+pub fn start_minutes(s: &str) -> Result<u16, String> {
     let bad = || format!("start_local {s:?} is not HH:MM");
     let (h, m) = s.split_once(':').ok_or_else(bad)?;
     let (h, m): (u16, u16) = (h.parse().map_err(|_| bad())?, m.parse().map_err(|_| bad())?);

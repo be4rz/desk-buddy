@@ -1,0 +1,20 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "studio",
+  "description": "The studio window (design ## studio, §4.10): call the studio_* commands from the app's own page only. Each command also checks its caller's window label (src/caller.rs); the page names packs by id and never gives a path.",
+  "windows": [
+    "studio"
+  ],
+  "permissions": [
+    "allow-studio-state",
+    "allow-studio-poll",
+    "allow-studio-open",
+    "allow-studio-frames",
+    "allow-studio-lint",
+    "allow-studio-audit",
+    "allow-studio-comments",
+    "allow-studio-comment-add",
+    "allow-studio-comment-status",
+    "allow-studio-sim"
+  ]
+}

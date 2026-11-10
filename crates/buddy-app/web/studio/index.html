@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>desk-buddy studio</title>
+<link rel="stylesheet" href="studio.css">
+<!-- mock.js only acts in a plain browser with ?mock=<state> (design parity checks) -->
+<script src="mock.js"></script>
+<script src="studio.js" defer></script>
+</head>
+<body>
+<div id="studio-lint-error" class="errbanner" role="alert" hidden></div>
+
+<section id="studio-empty" class="empty" hidden>
+  <b>No pack open</b>
+  <span>Pick a pack folder that has a <code>pack.json</code>. Packs come from <code>mascots/</code> and the folder given to <code>--studio</code>.</span>
+  <div class="row center" id="pack-list"></div>
+  <p class="hint" id="empty-error"></p>
+</section>
+
+<main id="studio" class="studio" hidden>
+  <div class="tb2"><span id="title">Studio</span><span class="pill teal" id="reloaded" hidden></span></div>
+
+  <aside class="pane" aria-label="pickers">
+    <h4>Pack</h4>
+    <select id="pack" aria-label="pack"></select>
+    <h4>Clip</h4>
+    <select id="clip" aria-label="clip"></select>
+    <h4>Direction</h4>
+    <div class="seg" id="dirs" role="group" aria-label="direction"></div>
+    <div id="face-box">
+      <h4>Face</h4>
+      <div class="seg" id="eyes" role="group" aria-label="eyes"></div>
+      <div class="seg gap" id="mouth" role="group" aria-label="mouth"></div>
+    </div>
+    <h4>Temperament <small>(simulator)</small></h4>
+    <div id="temper"></div>
+  </aside>
+
+  <section class="preview" aria-label="preview">
+    <div class="canvas" id="studio-comment">
+      <canvas id="view" aria-label="preview"></canvas>
+      <div id="marks"></div>
+      <div class="region" id="drag" hidden></div>
+    </div>
+    <div class="scrub">
+      <button class="btn small" id="play" aria-label="play or pause">▶</button>
+      <span class="mono" id="fpos">0/0</span>
+      <div class="ticks" id="ticks" aria-label="frames"><div class="head" id="head"></div></div>
+      <div class="seg" id="zoom" role="group" aria-label="zoom"></div>
+      <span class="mono" id="loop" title="loops"></span>
+    </div>
+    <div class="term" id="studio-cli" aria-label="the same view from the command line"></div>
+  </section>
+
+  <aside class="pane" aria-label="tools">
+    <div class="tabs" role="tablist">
+      <span role="tab" data-tab="comments" class="on">Comments</span>
+      <span role="tab" data-tab="sim">Simulator</span>
+      <span role="tab" data-tab="lint" id="lint-tab">Lint</span>
+      <span role="tab" data-tab="audit">Audit</span>
+    </div>
+
+    <div class="tab" id="tab-comments">
+      <div id="comments"></div>
+      <textarea class="sel" id="note" maxlength="2000" placeholder="Click the preview to pin a note; drag for a region"></textarea>
+      <div class="row"><span class="hint" id="note-at"></span><button class="btn small" id="note-clear">Clear pin</button><button class="btn small primary" id="note-add">Add</button></div>
+    </div>
+
+    <div class="tab" id="tab-sim" hidden>
+      <div class="row start"><button class="btn small" id="sim-run">Run</button><button class="btn small" id="sim-reset">Reset</button><label class="hint"><input type="checkbox" id="sim-follow"> preview follows</label></div>
+      <div class="mono simline" id="sim-show"></div>
+      <h4>Events</h4>
+      <div class="evbtns" id="events"></div>
+      <h4>Senses</h4>
+      <div class="evbtns" id="senses"></div>
+      <h4>Timeline</h4>
+      <textarea class="sel mono" id="timeline" spellcheck="false" aria-label="timeline JSON"></textarea>
+      <div class="row"><span class="hint" id="sim-err"></span><button class="btn small" id="timeline-run">Run timeline</button></div>
+      <h4>Trace</h4>
+      <div class="trace mono" id="trace"></div>
+    </div>
+
+    <div class="tab" id="tab-lint" hidden>
+      <div class="row start"><span class="hint" id="lint-sum"></span><button class="btn small" id="lint-run">Lint again</button></div>
+      <div id="issues"></div>
+    </div>
+
+    <div class="tab" id="tab-audit" hidden>
+      <div class="row start">
+        <label class="hint">minutes <input class="num" id="audit-min" type="number" min="1" max="240" value="30"></label>
+        <label class="hint">seed <input class="num" id="audit-seed" type="number" min="0" value="3"></label>
+        <button class="btn small" id="audit-run">Run</button>
+      </div>
+      <h4 id="audit-h">Audit</h4>
+      <div class="chart" id="chart" aria-label="behavior plays"></div>
+      <div class="mono audit-sum" id="audit-sum"></div>
+      <img id="audit-png" alt="audit.png, the chart the headless command writes" hidden>
+    </div>
+  </aside>
+</main>
+</body>
+</html>

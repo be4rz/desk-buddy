@@ -48,6 +48,14 @@ services:
     #   cargo build -p host --bin buddy && cargo test -p buddy-app --test browser_widget -- --ignored
     # fake media (debug builds only): BUDDY_MEDIA_FAKE=1; the widget server logs "[buddy] widgets at http://127.0.0.1:<wport>"
     start: cargo build -p host --bin buddy && BUDDY_HOME=<tmp> BUDDY_SENSES=0 BUDDY_CRED_STORE=memory BUDDY_MEDIA_FAKE=1 cargo run -p buddy-app
+  studio:
+    cwd: .
+    # studio crate + `buddy-studio`/`buddy studio` CLI (render/sheet/gif/diff/lint/audit/comments/import-aseprite) and the
+    # studio window (p6). Golden render hash, lint fixture (exactly off_palette + partial_alpha, exit 1), corrupt .aseprite
+    # writes nothing, hot-reload error keeps the last good pack, studio ACL (only the `studio` window may call studio_*)
+    check: cargo test -p studio -p buddy-app -p host -p widgets
+    # opens only the studio window; writes nothing under BUDDY_HOME (no host.json, settings.json, app.lock), no sidecar
+    start: BUDDY_HOME=<tmp> cargo run -p buddy-app -- --studio mascots/bear
   agent-sidecar:
     cwd: agent
     # needs bun; builds dist/buddy-agent (~68 MB) and runs it against the scripted fake model
@@ -90,4 +98,12 @@ flows: >-
   widgets error: a bad crates/widgets/<id>/widget.json → an error naming the field; embed error 150 → opened in the browser
   widget and the reply says so; `buddy browser click e999` exits 1 "no such element: e999"; goto the widget or host port is
   refused; `buddy browser click|type` after a snapshot asks (taint); release build: no BUDDY_MEDIA_FAKE string;
+  studio: `cargo build -p studio -p host --bin buddy` then `buddy studio render --pack mascots/bear --clip idle --dir SE --frame 7 --zoom 4 --out a.png`
+  twice gives identical bytes (sha256 printed, the golden in crates/studio/tests/studio.rs); `buddy studio lint --pack mascots/bear` exits 0 (warnings only);
+  `buddy studio audit --pack mascots/bear --minutes 30 --seed 3 --out <tmp>` writes audit.json + audit.png and is byte-identical on a rerun;
+  `buddy studio import-aseprite crates/studio/tests/fixtures/blob.aseprite --pack <tmp>/p --name blob` imports pixel-identical frames;
+  parity: web/studio/index.html?mock=1|lint-error|empty against #studio, #studio-comment, #studio-cli, #studio-lint-error, #studio-empty;
+  studio error: a truncated or garbage .aseprite → "…; nothing written", exit 1, the pack unchanged; a second import of the same name refuses;
+  a broken pack.json while the studio is open → banner #studio-lint-error, the last good pack keeps playing; bad CLI args exit 2;
+  human checks on the real desktop: docs/handover.md;
   harness error: a denied card never reaches the host; a model error ends in an "error" event and exit 1; kill -9 mid-tool restarts with an "interrupted" entry

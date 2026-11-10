@@ -53,6 +53,11 @@ and talks through speech bubbles, powered by an LLM.
   polls window bounds only while it sits (never window names). Debug only: `BUDDY_MEDIA_FAKE=1` (local stand-in for
   YouTube). Real-window browser test: `cargo build -p host --bin buddy && cargo test -p buddy-app --test browser_widget -- --ignored`.
   Spike record: `docs/spikes/media.md`.
+  Studio (p6): `crates/studio` (headless, pixel-stable: `buddy studio render|sheet|gif|diff|lint|audit|comments|import-aseprite`,
+  also the `buddy-studio` binary; `--json` everywhere, exit 0 ok / 1 findings or error / 2 usage) + `src/studio/` (window
+  `studio`, page `web/studio/index.html?mock=1|lint-error|empty`, only it may call `studio_*`). Tray **Studio…**, or
+  `cargo run -p buddy-app -- --studio [<pack-dir>]` (only the studio window: no lock, settings, host.json or sidecar).
+  It only shows and checks art; comments go to `<pack>/review/comments.jsonl`. Human desktop checks: `docs/handover.md`.
   A bad pack or art dir exits 1 with `[buddy] cannot load mascot …`. Art comes
   from `experiments/mascot/out/bear3d/` via `mascots/bear/pack.json`, so re-rendering changes it.
   Always `export CARGO_TARGET_DIR=/Users/chantran/orca/desk-buddy/target` (one shared target;

@@ -270,6 +270,11 @@ impl Shell for AppShell {
 
     fn browser_goto(&self, url: &str) -> Result<(), String> {
         let u: Url = url.parse().map_err(|e| format!("{e}"))?;
+        // the same guard as every page navigation, before it starts: a refused goto is an error
+        // (the caller exits 1), never a silent "ok" on a page that didn't move
+        if !page_nav(&u) {
+            return Err(format!("refused navigation to {}", u.origin().ascii_serialization()));
+        }
         let (tx, rx) = mpsc::channel();
         *LOADS.lock().unwrap() = Some(tx);
         self.on_main(move |app| Self::page(app)?.navigate(u).map_err(|e| e.to_string()))??;
@@ -474,14 +479,14 @@ mod acl {
         text.split('"').skip(1).step_by(2).map(str::to_string).collect()
     }
 
-    /// The app manifest (build.rs), the commands the capabilities grant (bubble, signin, the
-    /// widgets' runtime ones) and the handler (main.rs) name the same commands: a command left
+    /// The app manifest (build.rs), the commands the capabilities grant (bubble, signin, studio,
+    /// the widgets' runtime ones) and the handler (main.rs) name the same commands: a command left
     /// out of build.rs would skip the ACL, one left out of a capability would never answer.
     #[test]
     fn build_rs_capabilities_and_the_handler_list_the_same_commands() {
         let build: std::collections::BTreeSet<String> = include_str!("../build.rs").lines().filter(|l| l.starts_with("const ")).flat_map(quoted).collect();
         let mut granted = std::collections::BTreeSet::new();
-        for cap in [include_str!("../capabilities/bubble.json"), include_str!("../capabilities/signin.json")] {
+        for cap in [include_str!("../capabilities/bubble.json"), include_str!("../capabilities/signin.json"), include_str!("../capabilities/studio.json")] {
             let v: serde_json::Value = serde_json::from_str(cap).unwrap();
             for p in v["permissions"].as_array().unwrap().iter().filter_map(|p| p.as_str()?.strip_prefix("allow-")) {
                 assert!(granted.insert(p.replace('-', "_")), "{p} granted twice");
@@ -489,10 +494,17 @@ mod acl {
         }
         granted.extend(super::COMMANDS.iter().map(|c| c.to_string()));
         let main = include_str!("main.rs");
-        let list = &main[main.find("generate_handler![").unwrap()..];
-        let handler: std::collections::BTreeSet<String> = list[..list.find(']').unwrap()].split(',').filter_map(|w| w.trim().rsplit("::").next()).filter(|w| !w.is_empty() && !w.contains('[')).map(str::to_string).collect();
+        let lists: Vec<std::collections::BTreeSet<String>> = main
+            .split("generate_handler![")
+            .skip(1)
+            .map(|list| list[..list.find(']').unwrap()].split(',').filter_map(|w| w.trim().rsplit("::").next()).filter(|w| !w.is_empty()).map(str::to_string).collect())
+            .collect();
+        assert_eq!(lists.len(), 2, "the app's list and `--studio`'s");
         assert_eq!(build, granted, "build.rs vs capabilities");
-        assert_eq!(build, handler, "build.rs vs main.rs generate_handler!");
-        assert_eq!(build.len(), 20);
+        assert_eq!(build, lists[0], "build.rs vs main.rs generate_handler!");
+        let studio: std::collections::BTreeSet<String> = build.iter().filter(|c| c.starts_with("studio_")).cloned().collect();
+        assert_eq!(studio.len(), 10);
+        assert_eq!(studio, lists[1], "`--studio` registers exactly the studio commands");
+        assert_eq!(build.len(), 30);
     }
 }

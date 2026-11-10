@@ -114,7 +114,8 @@ pub fn check_url(url: &str, refused: &[u16]) -> Result<(), String> {
         "https" => 443,
         _ => return Err("the browser widget opens http(s) URLs only".into()),
     };
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    // a `\` ends the authority like `/` (WHATWG, special schemes): `http://127.0.0.1:1\@x/` is 127.0.0.1
+    let authority = rest.split(['/', '\\', '?', '#']).next().unwrap_or("");
     let hostport = authority.rsplit('@').next().unwrap_or("");
     if hostport.is_empty() {
         return Err("that URL has no host".into());

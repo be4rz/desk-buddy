@@ -199,6 +199,13 @@ fn goto_refuses_desk_buddys_own_ports_and_other_schemes() {
     }
     assert_eq!(m.open("browser", Some("http://127.0.0.1:47001/sdk/buddy-widget.js")).unwrap_err().code, "forbidden_url");
     assert!(!fake.log().iter().any(|l| l.starts_with("goto")));
+    // p5-m0: a `\` before the `@` ends the host, so this is 127.0.0.1:47001, refused
+    for u in ["http://127.0.0.1:47001\\@example.com/", "http://127.0.0.1:47001\\x", "http://localhost:47002\\@evil.example:80/"] {
+        assert!(check_url(u, &[47001, 47002]).is_err(), "{u}");
+        let e = m.action(true, "browser", "goto", &json!({ "url": u })).unwrap_err();
+        assert_eq!((e.status, e.code), (403, "forbidden_url"), "{u}");
+    }
+    assert!(!fake.log().iter().any(|l| l.starts_with("goto")));
     assert!(check_url("https://example.com/a?b=c", &[47001]).is_ok());
     assert!(check_url("http://127.0.0.1:8123/fixture.html", &[47001, 47002]).is_ok());
 }

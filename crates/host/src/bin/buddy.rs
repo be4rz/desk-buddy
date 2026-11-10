@@ -42,6 +42,7 @@ fn help() -> Value {
             { "usage": "buddy widget open <kind> [url]", "about": "Open a widget window: media (music from YouTube) or browser (with a URL).", "readOnly": false },
             { "usage": "buddy widget list [--json]", "about": "The open widgets, whether they're shown, and their state.", "readOnly": true },
             { "usage": "buddy widget close <id>", "about": "Close a widget (its id from the list, or its kind).", "readOnly": false },
+            { "usage": "buddy studio <cmd> …", "about": "The headless art studio: render, sheet, gif, diff, lint, audit, comments, import-aseprite (buddy studio --help). Most write files (renders, comments, imported clips).", "readOnly": false },
             { "usage": "buddy status [--json]", "about": "Check the connection.", "readOnly": true },
             { "usage": "buddy --help [--json]", "about": "This list.", "readOnly": true },
         ],
@@ -286,8 +287,22 @@ fn widget_action(cli: &str, rest: &[&str], json_out: bool) -> ExitCode {
     }
 }
 
+/// `buddy studio …` (§4.10): exec `buddy-studio` from beside this binary, else from PATH, so
+/// the host carries no render code. Its exit code and output are the command's.
+fn studio(rest: &[String]) -> ExitCode {
+    use std::os::unix::process::CommandExt;
+    let beside = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("buddy-studio"))).filter(|p| p.is_file());
+    let prog = beside.unwrap_or_else(|| "buddy-studio".into());
+    let e = std::process::Command::new(&prog).args(rest).exec();
+    eprintln!("buddy: can't run {}: {e} (build it with cargo build -p studio)", prog.display());
+    ExitCode::from(1)
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|a| a == "studio") {
+        return studio(&args[1..]);
+    }
     let json_out = args.iter().any(|a| a == "--json");
     let words: Vec<&str> = args.iter().map(String::as_str).filter(|a| *a != "--json").collect();
     match words.as_slice() {

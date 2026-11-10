@@ -126,6 +126,14 @@ pub fn search(query: &str) -> Result<Vec<Video>, String> {
     Ok(found)
 }
 
+/// Letter words joined by `-` or `_`, each lowercase or Capitalized: a phrase, not an id.
+fn plain_words(q: &str) -> bool {
+    q.split(['-', '_']).all(|w| {
+        let mut b = w.bytes();
+        b.next().is_some_and(|c| c.is_ascii_alphabetic()) && b.all(|c| c.is_ascii_lowercase())
+    })
+}
+
 /// `query` as videos to play: a URL or id as given, else `search` (or `fake`).
 pub fn resolve(query: &str, use_fake: bool, search: &dyn Fn(&str) -> Result<Vec<Video>, String>) -> Result<Vec<Video>, String> {
     let q = query.trim();
@@ -135,8 +143,9 @@ pub fn resolve(query: &str, use_fake: bool, search: &dyn Fn(&str) -> Result<Vec<
     if let Some(id) = id_of_url(q) {
         return Ok(vec![Video { id, title: String::new() }]);
     }
-    // a bare id has a digit, `-` or `_`, or capitals past the first letter ("Tchaikovsky" is a query)
-    if is_video_id(q) && (q.bytes().any(|b| b.is_ascii_digit() || b == b'-' || b == b'_') || q.bytes().skip(1).any(|b| b.is_ascii_uppercase())) {
+    // a bare id has a digit, `-` or `_`, or capitals past the first letter ("Tchaikovsky" is a
+    // query); words joined by `-`/`_` ("hello-world", "Hello_World") are a query too
+    if is_video_id(q) && !plain_words(q) && (q.bytes().any(|b| b.is_ascii_digit() || b == b'-' || b == b'_') || q.bytes().skip(1).any(|b| b.is_ascii_uppercase())) {
         return Ok(vec![Video { id: q.into(), title: String::new() }]);
     }
     if use_fake {
@@ -165,6 +174,13 @@ mod tests {
         assert_eq!(resolve("Tchaikovsky", false, &s).unwrap()[0].title, "Tchaikovsky");
         assert_eq!(resolve("Springsteen", false, &s).unwrap()[0].title, "Springsteen");
         assert_eq!(resolve("M7lc1UVf-VE", false, &none).unwrap()[0].id, "M7lc1UVf-VE");
+        // p5-m1: ordinary words, hyphenated or not, are searched
+        for q in ["programming", "hello-world", "Hello-World", "lofi_beatss", "rock-n-roll"] {
+            assert_eq!(resolve(q, false, &s).unwrap()[0].title, q, "{q}");
+        }
+        for id in ["jfKfPfyJRdk", "M7lc1UVf-VE", "abc_DEFghij", "5qap5aO4i9A", "abc-DEF-ghi"] {
+            assert_eq!(resolve(id, false, &none).unwrap()[0].id, id, "{id}");
+        }
         assert!(resolve("  ", false, &s).is_err());
     }
 

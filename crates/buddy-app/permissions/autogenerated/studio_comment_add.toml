@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-studio-comment-add"
+description = "Enables the studio_comment_add command without any pre-configured scope."
+commands.allow = ["studio_comment_add"]
+
+[[permission]]
+identifier = "deny-studio-comment-add"
+description = "Denies the studio_comment_add command without any pre-configured scope."
+commands.deny = ["studio_comment_add"]

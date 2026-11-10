@@ -1,0 +1,21 @@
+[package]
+name = "studio"
+description = "Studio: pixel-stable render/sheet/gif/diff, lint, audit, comments and .aseprite import over a pack (design ## studio, §4.10)"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+mascot-protocol.workspace = true
+mascot-core.workspace = true
+mascot-render = { path = "../mascot-render" }
+png = "0.17"
+gif = "0.14"
+flate2 = "1"
+sha2 = "0.10"
+
+[[bin]]
+name = "buddy-studio"
+path = "src/bin/buddy-studio.rs"

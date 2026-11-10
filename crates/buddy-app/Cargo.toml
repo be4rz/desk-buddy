@@ -20,6 +20,7 @@ bridge.workspace = true
 host.workspace = true
 policy.workspace = true
 widgets.workspace = true
+studio.workspace = true
 objc2 = "0.6"
 block2 = "0.6"
 objc2-foundation = "0.3"
