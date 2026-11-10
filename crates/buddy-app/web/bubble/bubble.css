@@ -1,0 +1,48 @@
+/* The speech bubble (design §4.8). Tokens and classes from the parent prototype.html
+   (`#bubble-*`); the tokens come from the pack palettes. Bear-owned UI: the same in light and dark. */
+:root {
+  --ink: #1b1820; --ink-2: #2a2530;
+  --paper: #fbfaf8; --paper-2: #f1eff4; --fur-3: #b9b3cb; --fur-4: #8a83a0;
+  --teal: #4f8a83; --teal-l: #a9dccf; --teal-d: #2f5a58;
+  --hat: #8b78ad; --hat-l: #d3c6ea; --hat-d: #5a4a72;
+  --blush: #e8a9b2; --rose-d: #5e3f4e;
+  --sun: #e8d49a; --sun-l: #f4ecc8;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; -webkit-user-select: none; user-select: none; }
+@keyframes blink { 50% { opacity: 0; } }
+
+/* room for the tail (10px) and the drop shadow (3px) around the 290px bubble */
+#root { width: 306px; padding: 4px 8px 14px; }
+html[data-side="below"] #root { padding: 14px 8px 4px; }
+#root:empty { padding: 0; height: 0; }
+
+.bubble { position: relative; width: 290px; max-width: 100%; background: var(--paper); color: var(--ink); border: 2px solid var(--ink); border-radius: 12px; padding: 10px 12px; font: 14px/1.45 var(--sans); box-shadow: 0 3px 0 rgba(27,24,32,.35); }
+.bubble::after { content: ""; position: absolute; left: 50%; bottom: -10px; width: 14px; height: 14px; background: var(--paper); border-right: 2px solid var(--ink); border-bottom: 2px solid var(--ink); transform: translateX(-50%) rotate(45deg); }
+html[data-side="below"] .bubble::after { bottom: auto; top: -10px; border: 0; border-left: 2px solid var(--ink); border-top: 2px solid var(--ink); }
+.bubble .meta { display: flex; justify-content: space-between; align-items: center; font: 11px var(--mono); color: var(--fur-4); margin-bottom: 4px; }
+.bubble .x { border: 0; background: none; font: 14px var(--sans); color: var(--fur-4); cursor: pointer; padding: 0 2px; }
+.caret { display: inline-block; width: 7px; height: 14px; background: var(--ink); vertical-align: -2px; animation: blink 1s steps(1) infinite; }
+.bubble textarea { width: 100%; resize: none; border: 1.5px solid var(--fur-3); border-radius: 8px; padding: 7px 9px; font: 14px var(--sans); color: var(--ink); background: #fff; min-height: 58px; -webkit-user-select: text; user-select: text; }
+.bubble textarea:focus { outline: 2px solid var(--hat-l); border-color: var(--hat); }
+.row { display: flex; gap: 6px; align-items: center; justify-content: flex-end; margin-top: 8px; flex-wrap: wrap; }
+.hint { font-size: 11px; color: var(--fur-4); margin-right: auto; }
+.btn { font: 600 13px var(--sans); border-radius: 7px; border: 1.5px solid var(--ink); background: var(--paper); color: var(--ink); padding: 5px 11px; cursor: pointer; box-shadow: 0 2px 0 var(--ink); }
+.btn.primary { background: var(--teal); color: var(--paper); }
+.btn.danger { background: var(--rose-d); color: var(--paper); }
+.btn[disabled] { opacity: .45; cursor: not-allowed; box-shadow: none; }
+.card-title { font-weight: 700; margin: 2px 0 4px; }
+.cmd { font: 12px/1.4 var(--mono); background: var(--ink-2); color: var(--paper-2); border-radius: 6px; padding: 6px 8px; margin: 6px 0; overflow-wrap: anywhere; -webkit-user-select: text; user-select: text;
+  /* a long command scrolls: the answer buttons stay in the window */
+  white-space: pre-wrap; max-height: calc(12px * 1.4 * 10); overflow-y: auto; }
+.note { font-size: 12px; border-radius: 6px; padding: 5px 8px; margin-top: 6px; }
+.note.taint { background: var(--sun-l); color: var(--rose-d); border: 1px solid var(--sun); }
+.note.err { background: #f8d4dc; color: var(--rose-d); border: 1px solid var(--blush); }
+.pill { display: inline-block; font: 600 10px var(--mono); padding: 1px 6px; border-radius: 999px; background: var(--hat-l); color: var(--hat-d); }
+.pill.teal { background: var(--teal-l); color: var(--teal-d); }
+.pill.rose { background: #f8d4dc; color: var(--rose-d); }
+
+/* plain text; after six lines it scrolls */
+.text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: calc(14px * 1.45 * 6); overflow-y: auto; -webkit-user-select: text; user-select: text; }

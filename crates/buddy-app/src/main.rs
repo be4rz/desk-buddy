@@ -8,9 +8,16 @@
 //! (+ `BUDDY_DUMP_EVERY=<n>`), `BUDDY_EVENTS=<file.jsonl>`, `BUDDY_SCREEN=<n>`,
 //! `BUDDY_VERBOSE=1`, `BUDDY_SENSES=0` (sensors off; also off under `BUDDY_EVENTS` unless
 //! `BUDDY_SENSES=1`), `BUDDY_SENSES_LOG=1` (sense changes to stderr).
+//!
+//! Talk (p3): the speech bubble (`bubble/`, page `web/bubble/`) and the agent harness
+//! (`harness.rs`: host API at `BUDDY_HOME/host.json`, policy gate, one agent). Dev credential:
+//! `BUDDY_FAKE_MODEL=<url>` or the app's own `ANTHROPIC_API_KEY` (kept in memory). Debug builds
+//! only: `BUDDY_PROMPT=<text>` (one prompt once the agent is ready), `BUDDY_ANSWER=allow|deny`.
 
+mod bubble;
 mod driver;
 mod events;
+mod harness;
 mod panel;
 mod senses;
 mod settings;
@@ -111,6 +118,14 @@ fn main() {
 
     let mut boot = Some((pack, art, settings, home, brain, items, warning, icon));
     let app = tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![
+            bubble::window::prompt_submit,
+            bubble::window::card_answer,
+            bubble::window::bubble_dismiss,
+            bubble::window::bubble_size,
+            bubble::window::bubble_retry,
+            bubble::window::reminder_snooze,
+        ])
         .setup(move |app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             let (pack, art, settings, home, brain, items, warning, icon) = boot.take().unwrap();
@@ -127,14 +142,26 @@ fn main() {
                 quiet_enabled: q.enabled,
                 quiet_span: format!("{}–{}", q.start, q.end),
             };
+            let wanted = settings.model.clone();
+            let home2 = home.clone();
             driver::start(driver::Init { pack, art, settings, home, panel, brain, t0 }, app.handle().clone());
+            let win = bubble::window::BubbleWin::new(app, mtm)?;
+            driver::with_app(|a| a.bubble_win = Some(win));
             tray::build(app, tray_init)?;
+            match harness::Harness::start(&home2, &wanted) {
+                Ok(h) => {
+                    let view = h.policy_view();
+                    driver::with_app(|a| a.policy_changed(&view));
+                }
+                Err(e) => eprintln!("[buddy] cannot start the host API: {e}"),
+            }
             if sensors {
                 senses::start();
             }
             if std::env::var_os("BUDDY_STATS").is_some() {
                 start_stats();
             }
+            quit_on_signals(app.handle().clone());
             if let Some(items) = items {
                 events::replay(items, t0);
             }
@@ -143,11 +170,47 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("build tauri app");
 
-    app.run(|_app, ev| {
+    app.run(|_app, ev| match ev {
         // no window closing quits the app; only Quit does
-        if let RunEvent::ExitRequested { code: None, api, .. } = ev {
-            api.prevent_exit();
+        RunEvent::ExitRequested { code: None, api, .. } => api.prevent_exit(),
+        // Quit: stop the sidecar and remove host.json (also after a sidecar crash)
+        RunEvent::Exit => {
+            if let Some(h) = harness::get() {
+                h.shutdown();
+                eprintln!("[buddy] quit: agent stopped, {} removed", h.host_file().display());
+            }
         }
+        _ => {}
+    });
+}
+
+static SIGNAL_FD: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+
+extern "C" fn on_signal(_: libc::c_int) {
+    let fd = SIGNAL_FD.load(std::sync::atomic::Ordering::Relaxed);
+    if fd >= 0 {
+        // async-signal-safe: one byte down a pipe; a thread does the quitting
+        unsafe { libc::write(fd, b"q".as_ptr().cast(), 1) };
+    }
+}
+
+/// SIGTERM / SIGINT / SIGHUP quit like the tray's Quit (the sidecar stops, host.json goes).
+/// Handlers reset to the default in children at exec, so the sidecar is unaffected.
+fn quit_on_signals(handle: tauri::AppHandle) {
+    let mut fds = [0 as libc::c_int; 2];
+    if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+        return;
+    }
+    SIGNAL_FD.store(fds[1], std::sync::atomic::Ordering::Relaxed);
+    for sig in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] {
+        unsafe { libc::signal(sig, on_signal as *const () as libc::sighandler_t) };
+    }
+    let rd = fds[0];
+    let _ = std::thread::Builder::new().name("buddy-signals".into()).spawn(move || {
+        let mut b = [0u8; 1];
+        while unsafe { libc::read(rd, b.as_mut_ptr().cast(), 1) } != 1 {}
+        eprintln!("[buddy] signal: quitting");
+        handle.exit(0);
     });
 }
 

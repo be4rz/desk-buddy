@@ -141,6 +141,9 @@ pub const CHILD_TOOLS: [&str; 2] = ["web_fetch", "web_search"];
 const MAX_PENDING: usize = 8;
 const MAX_TAINT_SOURCES: usize = 20;
 
+/// The `task` card in ask mode: its helper then searches and reads the web without a card.
+pub const TASK_CARD_DETAIL: &str = "Ask every time is on. Its helper can search and read the web without asking.";
+
 pub const DECLINED: &str = "The person declined this call. Don’t retry it; try another way or ask them what to do.";
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -438,12 +441,14 @@ impl Production {
             _ => ("Send a helper to research this?".to_string(), args["prompt"].as_str().unwrap_or("").to_string()),
         };
         let what: String = what.chars().take(300).collect();
+        // A helper's own web calls never ask (children get the web tools only): the card says so.
+        let detail = if tool == "task" { TASK_CARD_DETAIL } else { "Ask every time is on." };
         Verdict::Ask(
             json!({
                 "kind": "web",
                 "tool": tool,
                 "title": title,
-                "detail": "Ask every time is on.",
+                "detail": detail,
                 "query": what,
                 "suggestedRule": null,
                 "offerAlways": false,

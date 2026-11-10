@@ -3,6 +3,8 @@
 //! to next display, Quit. p2 (senses): a status line while DND or quiet hours is active,
 //! "Do not disturb" (session only), "Quiet hours HH:MM–HH:MM" (writes
 //! `quiet_hours.enabled`) and "When busy ▸ Hide / Hold still" (writes `dnd.action`).
+//! p3 (talk): "Ask…" (opens the bubble's prompt), the agent line ("Agent: running · <model>",
+//! stopped, error, no key) and "Clear web taint" while the chat is tainted.
 
 use mascot_core::{Dir, EyeState, Intent, MouthState, Show, Visibility};
 use mascot_render::{Art, View};
@@ -12,6 +14,7 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{App as TauriApp, Wry};
 
 use crate::driver::with_app;
+use crate::harness;
 use crate::settings::DndAct;
 
 /// Menu-bar template icon: the bear's own silhouette from idle S frame 0, composed from
@@ -104,6 +107,9 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
         .map(|z| CheckMenuItem::with_id(app, format!("zoom{z}"), format!("Zoom ×{z}"), true, z == t.zoom, None::<&str>));
     let [z1, z2, z3] = zooms;
     let zs = [z1?, z2?, z3?];
+    let ask = MenuItem::with_id(app, "ask", "Ask…", true, None::<&str>)?;
+    let agent = MenuItem::with_id(app, "agent", harness::AgentState::Starting.line(), false, None::<&str>)?;
+    let taint = MenuItem::with_id(app, "taint", "Clear web taint", true, None::<&str>)?;
     let hide = MenuItem::with_id(app, "hide", "Hide bear", true, None::<&str>)?;
     let next = MenuItem::with_id(app, "nextdisplay", "Move to next display", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit desk-buddy", true, None::<&str>)?;
@@ -116,18 +122,49 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
     let sep1 = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let sep3 = PredefinedMenuItem::separator(app)?;
+    let sep4 = PredefinedMenuItem::separator(app)?;
     let mut items: Vec<&dyn IsMenuItem<Wry>> = vec![&header];
     if let Some(w) = &warn {
         items.push(w);
     }
     // the status line goes in at index `items.len()` (under the header/warning) when active
     let status_at = items.len();
-    items.extend([&sep1 as &dyn IsMenuItem<Wry>, &zs[0], &zs[1], &zs[2], &hide, &next, &sep2, &dnd, &quiet, &busy, &sep3, &quit]);
+    items.extend([&sep1 as &dyn IsMenuItem<Wry>, &ask, &agent]);
+    // "Clear web taint" goes in under the agent line while tainted
+    let taint_at = items.len();
+    items.extend([&sep4 as &dyn IsMenuItem<Wry>, &zs[0], &zs[1], &zs[2], &hide, &next, &sep2, &dnd, &quiet, &busy, &sep3, &quit]);
     let menu = Menu::with_items(app, &items)?;
 
     let hide2 = hide.clone();
     let (menu2, status2) = (menu.clone(), status.clone());
+    let (menu3, taint2) = (menu.clone(), taint.clone());
+    let (dnd2, quiet2, bh2, bs2, busy2) = (dnd.clone(), quiet.clone(), busy_hide.clone(), busy_still.clone(), busy.clone());
     with_app(move |a| {
+        a.on_agent = Some(Box::new(move |s| {
+            let _ = agent.set_text(s.line());
+        }));
+        a.on_taint = Some(Box::new(move |t| {
+            let shown = menu3.get("taint").is_some();
+            // the status line may sit above: count it in
+            let at = taint_at + usize::from(menu3.get("status").is_some());
+            match (t, shown) {
+                (true, false) => {
+                    let _ = menu3.insert(&taint2, at);
+                }
+                (false, true) => {
+                    let _ = menu3.remove(&taint2);
+                }
+                _ => {}
+            }
+        }));
+        // settings changed under the menu (Inbox::Settings): the checkmarks follow
+        a.on_settings = Some(Box::new(move |s| {
+            let _ = quiet2.set_checked(s.quiet_hours.enabled);
+            let _ = bh2.set_checked(s.dnd.action == DndAct::Hide);
+            let _ = bs2.set_checked(s.dnd.action == DndAct::Still);
+            let _ = busy2.set_text(busy_label(s.dnd.action));
+        }));
+        let _ = dnd2.set_checked(a.dnd_toggle());
         a.on_hidden = Some(Box::new(move |h| {
             let _ = hide2.set_text(if h { "Show bear" } else { "Hide bear" });
         }));
@@ -152,6 +189,17 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
             let id = ev.id().as_ref();
             match id {
                 "quit" => app.exit(0),
+                "ask" => with_app(|a| a.open_prompt()),
+                "taint" => {
+                    std::thread::spawn(|| {
+                        if let Some(h) = harness::get() {
+                            eprintln!("[buddy] clear web taint");
+                            if let Err(e) = h.agent().policy_ui(&serde_json::json!({ "op": "clear_taint" })) {
+                                eprintln!("[buddy] clear taint: {e}");
+                            }
+                        }
+                    });
+                }
                 "zoom1" | "zoom2" | "zoom3" => {
                     let z: u32 = id[4..].parse().unwrap_or(1);
                     for (i, it) in zs.iter().enumerate() {

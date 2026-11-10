@@ -11,7 +11,8 @@
 //!
 //! It reaches the host API with `BUDDY_API` + `BUDDY_TOKEN` (+ `BUDDY_TURN`),
 //! which the agent's commands get; from a terminal it reads the port file
-//! (`BUDDY_HOST_FILE`, else `~/.desk-buddy/host.json`). Exit codes: 0 done,
+//! (`BUDDY_HOST_FILE`, else `$BUDDY_HOME/host.json`, else `~/.desk-buddy/host.json`);
+//! with the app gone (no file, or nothing listening) it says "desk-buddy isn't running". Exit codes: 0 done,
 //! 1 refused or unreachable, 2 usage.
 
 use std::path::PathBuf;
@@ -47,17 +48,26 @@ struct Target {
     port: u16,
     token: String,
     turn: Option<String>,
+    /// Read from the port file: a refused connection means the app is gone (a stale file).
+    from_file: bool,
 }
+
+const NOT_RUNNING: &str = "desk-buddy isn't running";
 
 fn target() -> Result<Target, String> {
     let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
     if let (Some(api), Some(token)) = (env("BUDDY_API"), env("BUDDY_TOKEN")) {
         let port = api.strip_prefix("http://127.0.0.1:").and_then(|p| p.trim_end_matches('/').parse().ok()).ok_or_else(|| format!("BUDDY_API={api} isn’t http://127.0.0.1:<port>"))?;
-        return Ok(Target { port, token, turn: env("BUDDY_TURN") });
+        return Ok(Target { port, token, turn: env("BUDDY_TURN"), from_file: false });
     }
-    let file = env("BUDDY_HOST_FILE").map(PathBuf::from).or_else(|| env("HOME").map(|h| PathBuf::from(h).join(".desk-buddy").join("host.json"))).ok_or("no BUDDY_API and no home folder")?;
-    let pf = PortFile::read(&file).map_err(|e| format!("desk-buddy isn’t running ({}: {e})", file.display()))?;
-    Ok(Target { port: pf.port, token: pf.token, turn: None })
+    // The person's terminal: the app's port file (design §3.1), never consulted when the agent's env is set.
+    let file = env("BUDDY_HOST_FILE")
+        .map(PathBuf::from)
+        .or_else(|| env("BUDDY_HOME").map(|h| PathBuf::from(h).join("host.json")))
+        .or_else(|| env("HOME").map(|h| PathBuf::from(h).join(".desk-buddy").join("host.json")))
+        .ok_or("no BUDDY_API and no home folder")?;
+    let pf = PortFile::read(&file).map_err(|e| format!("{NOT_RUNNING} ({}: {e})", file.display()))?;
+    Ok(Target { port: pf.port, token: pf.token, turn: None, from_file: true })
 }
 
 fn call(method: &str, path: &str, body: Option<Value>) -> Result<Reply, String> {
@@ -67,7 +77,13 @@ fn call(method: &str, path: &str, body: Option<Value>) -> Result<Reply, String> 
     if let Some(turn) = &t.turn {
         headers.push(("X-Buddy-Turn", turn.as_str()));
     }
-    request(t.port, method, path, &headers, body.as_ref()).map_err(|e| format!("couldn’t reach desk-buddy: {e}"))
+    request(t.port, method, path, &headers, body.as_ref()).map_err(|e| {
+        if t.from_file && e.kind() == std::io::ErrorKind::ConnectionRefused {
+            format!("{NOT_RUNNING} (nothing listens on port {}; the port file is stale)", t.port)
+        } else {
+            format!("couldn’t reach desk-buddy: {e}")
+        }
+    })
 }
 
 fn finish(r: Result<Reply, String>, json_out: bool, done: &str) -> ExitCode {

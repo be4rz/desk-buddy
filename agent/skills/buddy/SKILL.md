@@ -15,6 +15,10 @@ needs; never print or copy them.
 - `buddy mascot emote <name>` plays an emote, such as a wave (`buddy --help --json` lists them).
 - `buddy status` checks the connection.
 
+Your answer already streams into the bear's speech bubble as plain text (no Markdown), so don't repeat it with
+`buddy say`. Use `buddy say` for a short line while you work ("Looking that up…") or for a note after the turn.
+Keep bubble lines short: after six lines the bubble scrolls.
+
 ## Reminders
 
 Reminders are kept by the app and survive a restart. When one is due, the bear shows it to the person; you don't

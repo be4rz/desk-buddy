@@ -287,6 +287,43 @@ fn an_allowed_buddy_say_reaches_the_host_with_the_turn_and_maps_to_mascot_events
 }
 
 #[test]
+fn an_allowed_card_shows_awaiting_permission_then_the_answer_then_working() {
+    let fx = fixture("allow-card");
+    let from = fx.len();
+    // `make` isn't allowed, so the whole line asks.
+    fx.agent.prompt("gated hi please").unwrap();
+    let (asked_at, call) = fx.wait(from, "an approval card", |e| match e {
+        AgentEvent::Mascot(MascotEvent::AwaitingPermission { call_id, .. }) => Some(call_id.clone()),
+        _ => None,
+    });
+    // Nothing runs while the card is up.
+    std::thread::sleep(Duration::from_millis(300));
+    let answered_at = fx.len();
+    assert!(
+        fx.mascot(from).iter().all(|e| !matches!(e, MascotEvent::Working { .. })),
+        "no Working before the answer: {:#?}",
+        fx.mascot(from)
+    );
+    fx.agent.policy_ui(&json!({ "op": "approval_answer", "callId": call, "answer": "allow" })).unwrap();
+    let (working_at, _) = fx.wait(answered_at, "the command running", |e| matches!(e, AgentEvent::Mascot(MascotEvent::Working { kind: WorkKind::Shell, .. })).then_some(()));
+    assert!(asked_at < answered_at && answered_at <= working_at, "AwaitingPermission ({asked_at}) → answer ({answered_at}) → Working ({working_at})");
+    assert_eq!(fx.run_end(from), MascotEvent::Idle);
+    let m = fx.mascot(from);
+    assert!(
+        subsequence(
+            &m,
+            &[
+                |e| matches!(e, MascotEvent::Thinking),
+                |e| matches!(e, MascotEvent::AwaitingPermission { title, .. } if title == "Run make?"),
+                |e| matches!(e, MascotEvent::Working { kind: WorkKind::Shell, tool } if tool == "bash"),
+                |e| matches!(e, MascotEvent::Idle),
+            ]
+        ),
+        "{m:#?}"
+    );
+}
+
+#[test]
 fn a_denied_buddy_say_never_reaches_the_host() {
     let fx = fixture("deny");
     let from = fx.len();

@@ -20,6 +20,9 @@ use mascot_render::{Art, Canvas, View};
 use objc2::rc::Retained;
 use objc2_foundation::{NSRunLoop, NSRunLoopCommonModes, NSTimer};
 
+use crate::bubble::window::BubbleWin;
+use crate::bubble::{Bubble, Out};
+use crate::harness::{self, AgentState};
 use crate::panel::Panel;
 use crate::senses::{self, Ring};
 use crate::settings::{self, DndAct, Settings};
@@ -126,6 +129,24 @@ pub struct App {
     presented: u64,
     /// called after a user-visible change (tray labels)
     pub on_hidden: Option<Box<dyn Fn(bool)>>,
+    /// the tray's agent line
+    pub on_agent: Option<Box<dyn Fn(&AgentState)>>,
+    /// the tray's "Clear web taint" (shown while tainted)
+    pub on_taint: Option<Box<dyn Fn(bool)>>,
+    /// the tray's checkmarks after `Inbox::Settings`
+    pub on_settings: Option<Box<dyn Fn(&Settings)>>,
+    /// the speech bubble's state and window
+    pub bubble: Bubble,
+    pub bubble_win: Option<BubbleWin>,
+    /// the page has reported a size once (it is loaded and listening)
+    bubble_loaded: bool,
+    /// the last `bubble show` label logged (a new line only when mode/streaming change)
+    bubble_label: Option<String>,
+    /// a brain-driven hide, for the `[buddy] hide:` line
+    brain_hidden: bool,
+    /// `BUDDY_STATS=1`: the mouth while talking
+    mouth_log: bool,
+    last_mouth: Option<MouthState>,
 }
 
 pub struct Init {
@@ -178,6 +199,16 @@ pub fn start(init: Init, handle: tauri::AppHandle) {
         dump,
         presented: 0,
         on_hidden: None,
+        on_agent: None,
+        on_taint: None,
+        on_settings: None,
+        bubble: Bubble::new(),
+        bubble_win: None,
+        bubble_loaded: false,
+        bubble_label: None,
+        brain_hidden: false,
+        mouth_log: std::env::var_os("BUDDY_STATS").is_some(),
+        last_mouth: None,
     };
     APP.with(|a| *a.borrow_mut() = Some(app));
     forward(rx, handle);
@@ -208,6 +239,8 @@ impl App {
             Inbox::Event(ev) => {
                 eprintln!("[buddy] event {}", serde_json::to_string(&ev).unwrap_or_default());
                 self.brain.event(&ev, now);
+                let out = self.bubble.event(&ev, now);
+                self.apply(out);
             }
             Inbox::Senses(patch) => {
                 // a patch merges over the raw senses; the brain always sees them whole, gated
@@ -225,6 +258,9 @@ impl App {
                 }
                 eprintln!("[buddy] poke {p:?}");
                 self.brain.poke(p, now);
+                if p == Poke::Click {
+                    self.open_prompt();
+                }
             }
             Inbox::Settings(s) => {
                 let action = s.dnd.action;
@@ -232,6 +268,9 @@ impl App {
                 self.save_settings();
                 self.brain.set_dnd_action(dnd_action(action), now);
                 self.regate(now);
+                if let Some(f) = &self.on_settings {
+                    f(&self.settings);
+                }
             }
             Inbox::Call(f) => f(self),
         }
@@ -357,8 +396,19 @@ impl App {
             self.view.cam[0] += show.moved_px[0];
             self.view.cam[1] += show.moved_px[1];
         }
-        let hidden = self.user_hidden || show.visibility == Visibility::Hidden;
+        let brain_hidden = show.visibility == Visibility::Hidden;
+        if brain_hidden != self.brain_hidden {
+            self.brain_hidden = brain_hidden;
+            match brain_hidden {
+                true => eprintln!("[buddy] hide: {}", hide_reason(&self.senses)),
+                false => eprintln!("[buddy] hide: none (shown again)"),
+            }
+        }
+        let hidden = self.user_hidden || brain_hidden;
         self.panel.set_shown(!hidden);
+        if let Some(w) = &self.bubble_win {
+            w.set_bear_hidden(hidden, &self.panel.panel, self.bubble.shown().is_some());
+        }
         if hidden || self.occluded {
             return; // 0 fps until something arrives in the inbox
         }
@@ -412,6 +462,15 @@ impl App {
     }
 
     fn log(&mut self, show: &Show) {
+        if self.mouth_log {
+            let m = (show.intent == Intent::Talk).then_some(show.mouth);
+            if m != self.last_mouth {
+                if let Some(m) = m {
+                    eprintln!("[buddy] mouth {m:?}");
+                }
+                self.last_mouth = m;
+            }
+        }
         if self.last_log.as_ref().is_some_and(|(i, b)| *i == show.intent && *b == show.behavior) {
             return;
         }
@@ -428,6 +487,198 @@ impl App {
             t.setTolerance(0.004);
             NSRunLoop::mainRunLoop().addTimer_forMode(&t, NSRunLoopCommonModes);
             self.timer = Some(t);
+        }
+    }
+}
+
+/// Why the brain hid the bear (the gated senses that hide it).
+fn hide_reason(s: &Senses) -> &'static str {
+    match () {
+        _ if s.fullscreen => "fullscreen app",
+        _ if s.screen_share => "screen sharing",
+        _ if s.dnd_toggle => "do not disturb",
+        _ if s.quiet_hours => "quiet hours",
+        _ => "busy",
+    }
+}
+
+/// The speech bubble's side of the app: what goes in, what the window does.
+impl App {
+    /// Show, hide or keep what the bubble state machine decided; re-arm its hide timer.
+    pub fn apply(&mut self, out: Out) {
+        let Some(w) = &self.bubble_win else { return };
+        match out {
+            Out::Show(m) => {
+                let label = m.label();
+                if self.bubble_label.as_ref() != Some(&label) {
+                    eprintln!("[buddy] bubble show {label}");
+                    self.bubble_label = Some(label);
+                }
+                w.show(&m, &self.panel.panel);
+            }
+            Out::Hide => {
+                self.bubble_label = None;
+                eprintln!("[buddy] bubble hide");
+                w.hide(&self.panel.panel);
+            }
+            Out::Keep => {}
+        }
+        let now = self.now_ms();
+        w.arm(self.bubble.hide_at().map(|t| t.saturating_sub(now) as f64 / 1000.0));
+    }
+
+    /// The bubble's hide timer.
+    pub fn bubble_tick(&mut self) {
+        let hovered = self.bubble_win.as_ref().is_some_and(|w| w.hovered());
+        let out = self.bubble.tick(self.now_ms(), hovered);
+        self.apply(out);
+    }
+
+    /// Click on the bear or tray → Ask…
+    pub fn open_prompt(&mut self) {
+        let out = self.bubble.open_prompt();
+        self.apply(out);
+    }
+
+    /// The person sent a prompt: to the agent, off the main thread.
+    pub fn submit(&mut self, text: String) {
+        let out = self.bubble.submitted(&text);
+        self.apply(out);
+        if let Some(w) = &self.bubble_win {
+            w.give_keyboard_back();
+        }
+        eprintln!("[buddy] prompt {}", serde_json::to_string(&text).unwrap_or_default());
+        std::thread::spawn(move || {
+            let r = match harness::get() {
+                Some(h) => h.prompt(&text).map(|_| ()),
+                None => Err(bridge::BridgeError::new("no_agent", "The agent isn't set up.")),
+            };
+            if let Err(e) = r {
+                post(Inbox::Call(Box::new(move |a| a.bubble_failed(&e))));
+            }
+        });
+    }
+
+    /// Allow once / Always / Deny: to the policy gate, off the main thread.
+    pub fn card_answer(&mut self, call_id: String, answer: String) {
+        if answer == "allow_always" && !self.bubble.can_always(&call_id) {
+            eprintln!("[buddy] card {call_id}: \"Always\" isn't offered now");
+            return;
+        }
+        eprintln!("[buddy] card {call_id}: {answer}");
+        std::thread::spawn(move || {
+            if let Some(h) = harness::get() {
+                if let Err(e) = h.answer(&call_id, &answer) {
+                    eprintln!("[buddy] card answer: {e}");
+                }
+            }
+            post(Inbox::Call(Box::new(move |a| a.bubble_answered(&call_id))));
+        });
+    }
+
+    /// The card was answered (by the person or `BUDDY_ANSWER`): the brain settles.
+    pub fn bubble_answered(&mut self, call_id: &str) {
+        let out = self.bubble.answered(call_id, self.now_ms());
+        if out != Out::Keep {
+            let now = self.now_ms();
+            self.brain.event(&MascotEvent::Settled, now);
+        }
+        self.apply(out);
+        self.wake();
+    }
+
+    /// ✕ / Esc / Close / Done, and ■ on the streaming answer (which also stops the turn).
+    pub fn bubble_dismiss(&mut self) {
+        if self.bubble.dismiss_stops() {
+            eprintln!("[buddy] stop");
+            std::thread::spawn(|| {
+                if let Some(h) = harness::get() {
+                    if let Err(e) = h.abort() {
+                        eprintln!("[buddy] stop: {e}");
+                    }
+                }
+            });
+        }
+        let out = self.bubble.dismiss(self.now_ms());
+        self.apply(out);
+        if let Some(w) = &self.bubble_win {
+            w.give_keyboard_back();
+        }
+    }
+
+    /// The page measured itself. Its first report means it loaded: resend what's shown.
+    pub fn bubble_sized(&mut self, w: f64, h: f64) {
+        let Some(win) = &self.bubble_win else { return };
+        if !std::mem::replace(&mut self.bubble_loaded, true) {
+            if let Some(m) = self.bubble.shown() {
+                win.show(m, &self.panel.panel);
+                return;
+            }
+        }
+        win.sized(w, h, &self.panel.panel);
+    }
+
+    /// Try again (error bubble): the last prompt once more. "Sign in…" waits for p4.
+    pub fn bubble_retry(&mut self) {
+        let no_model = self.bubble.shown().and_then(|m| m.error.as_ref()).is_some_and(|e| e.reason == "no_model");
+        if no_model {
+            eprintln!("[buddy] sign-in arrives in p4");
+            return self.bubble_dismiss();
+        }
+        match self.bubble.last_prompt().map(str::to_string) {
+            Some(p) => self.submit(p),
+            None => self.bubble_dismiss(),
+        }
+    }
+
+    /// Snooze: the reminder's text again in `minutes`, then the bubble goes.
+    pub fn reminder_snooze(&mut self, id: String, minutes: u32) {
+        let text = self.bubble.reminder().filter(|(i, _)| *i == id).map(|(_, t)| t.clone());
+        if let Some(text) = text {
+            eprintln!("[buddy] snooze {id} {minutes} min");
+            std::thread::spawn(move || match harness::get().map(|h| h.snooze(&text, minutes)) {
+                Some(Ok(_)) => {}
+                Some(Err(e)) => eprintln!("[buddy] snooze: {}", e.message),
+                None => eprintln!("[buddy] snooze: the agent isn't set up"),
+            });
+        }
+        let out = self.bubble.dismiss(self.now_ms());
+        self.apply(out);
+    }
+
+    /// A `buddy say` line (from the host).
+    pub fn bubble_say(&mut self, text: String, emotion: Option<String>, merge: bool) {
+        let out = self.bubble.say(&text, emotion, merge, self.now_ms());
+        self.apply(out);
+    }
+
+    /// An approval card's details.
+    pub fn bubble_approval(&mut self, call_id: &str, data: serde_json::Value) {
+        let out = self.bubble.approval(call_id, data);
+        self.apply(out);
+    }
+
+    /// The prompt didn't go through.
+    pub fn bubble_failed(&mut self, e: &bridge::BridgeError) {
+        eprintln!("[buddy] prompt failed: {e}");
+        let out = self.bubble.failed(e.code, &e.message);
+        self.apply(out);
+    }
+
+    /// The policy's view changed (taint, mode, rules, pending).
+    pub fn policy_changed(&mut self, view: &serde_json::Value) {
+        let tainted = !view["taint"].is_null();
+        if let Some(f) = &self.on_taint {
+            f(tainted);
+        }
+        let out = self.bubble.set_tainted(tainted);
+        self.apply(out);
+    }
+
+    /// The agent started, stopped, crashed, …
+    pub fn agent_changed(&mut self, s: &AgentState) {
+        if let Some(f) = &self.on_agent {
+            f(s);
         }
     }
 }

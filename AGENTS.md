@@ -32,7 +32,13 @@ and talks through speech bubbles, powered by an LLM.
   `BUDDY_PACK=<dir>`, `BUDDY_ZOOM=1|2|3`, `BUDDY_STATS=1` (fps + CPU every 10 s),
   `BUDDY_DUMP=<dir>` (+ `BUDDY_DUMP_EVERY`, canvas PNGs), `BUDDY_EVENTS=<file.jsonl>` (replays
   MascotEvents, e.g. `crates/buddy-app/tests/fixtures/events.jsonl`), `BUDDY_SCREEN`,
-  `BUDDY_VERBOSE=1`. A bad pack or art dir exits 1 with `[buddy] cannot load mascot …`. Art comes
+  `BUDDY_VERBOSE=1`, `BUDDY_SENSES=0|1` (sensors; off under `BUDDY_EVENTS` unless `=1`),
+  `BUDDY_SENSES_LOG=1` (sense changes to stderr). Talk (p3): the speech bubble (`src/bubble/`,
+  page `web/bubble/index.html`, `?mock=<state>` in a plain browser) and `harness.rs` (host API at
+  `BUDDY_HOME/host.json`, policy, agent "main"); dev credential `BUDDY_FAKE_MODEL=<url>` or the app's
+  own `ANTHROPIC_API_KEY` (memory only); debug builds only: `BUDDY_PROMPT=<text>`,
+  `BUDDY_ANSWER=allow|deny`. SIGTERM/SIGINT quit like the tray's Quit (host.json removed).
+  A bad pack or art dir exits 1 with `[buddy] cannot load mascot …`. Art comes
   from `experiments/mascot/out/bear3d/` via `mascots/bear/pack.json`, so re-rendering changes it.
   Always `export CARGO_TARGET_DIR=/Users/chantran/orca/desk-buddy/target` (one shared target;
   a Tauri build needs ~3 GB and the disk is tight).

@@ -99,6 +99,13 @@ fn web_tools_run_unless_ask_mode_and_children_get_only_web_tools() {
     let a = asks(&p.decide(&fx.at, &tool("w4", "web_search", json!({ "query": "otters" })))).clone();
     assert_eq!(a["kind"], "web");
     assert_eq!(a["offerAlways"], false);
+    assert_eq!(a["detail"], "Ask every time is on.");
+    // The task card says in plain words that its helper's web calls won't ask (R-ask).
+    let t = asks(&p.decide(&fx.at, &tool("w5", "task", json!({ "prompt": "find otters" })))).clone();
+    assert_eq!(t["title"], "Send a helper to research this?");
+    assert_eq!(t["detail"], "Ask every time is on. Its helper can search and read the web without asking.");
+    assert_eq!(t["detail"], crate::TASK_CARD_DETAIL);
+    assert_eq!(t["offerAlways"], false);
     assert_eq!(CHILD_TOOLS, ["web_fetch", "web_search"]);
 }
 

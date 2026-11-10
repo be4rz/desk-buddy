@@ -1,8 +1,7 @@
-# desk-buddy workspace (plan §6). Spike S1 keeps its own lockfile and target.
+# desk-buddy workspace (plan §6).
 [workspace]
 resolver = "2"
 members = ["crates/*", "spikes/s2-harness"]
-exclude = ["spikes/s1-window"]
 
 [workspace.package]
 version = "0.1.0"

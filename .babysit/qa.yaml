@@ -29,6 +29,11 @@ services:
     # one prompt through the harness against the fake: start the fake first
     # (bun agent/test/support/fake.ts --port <p> --script <file.json>), then:
     start: cargo build -p host --bin buddy && S2_HOME=<tmp> cargo run -p s2-harness -- --yes --fake http://127.0.0.1:<p> "<prompt>"
+  talk:
+    cwd: .
+    # speech bubble + in-app harness (AC6); the fake model: bun agent/test/support/fake.ts --port 0 --script <file.json>
+    check: cargo test -p buddy-app -p bridge -p host -p policy
+    start: cargo build -p host --bin buddy && BUDDY_HOME=<tmp> BUDDY_FAKE_MODEL=http://127.0.0.1:<p> BUDDY_PROMPT="<prompt>" BUDDY_ANSWER=allow BUDDY_STATS=1 cargo run -p buddy-app
   agent-sidecar:
     cwd: agent
     # needs bun; builds dist/buddy-agent (~68 MB) and runs it against the scripted fake model
@@ -52,4 +57,9 @@ flows: >-
   senses error: no window-server access (CGWindowList null) → not fullscreen / not sharing, logged once, no crash;
   pipeline: verify_b.py PASS after any change to experiments/mascot/out/bear3d/anim_b;
   harness: s2-harness prints mascot events thinking → awaiting_permission → working(buddy) → speaking → idle and a host "say" whose turn is the prompt's request id;
+  talk: BUDDY_PROMPT="gated hi please" BUDDY_ANSWER=allow logs "[buddy] bubble show speech streaming" → "card" → "speech streaming" → "speech" → "bubble hide" (6 s later)
+  and "[buddy] mouth Open/Wide/Closed" (BUDDY_STATS) while talking; `BUDDY_HOME=<tmp> buddy say "hello" --emotion happy` from a plain terminal exits 0
+  and logs "[buddy] host say user (happy)"; parity: web/bubble/index.html?mock=<state> against the parent prototype's #bubble-* ids;
+  talk error: BUDDY_ANSWER=deny → no "[buddy] host say"; app down → buddy say exits 1 "desk-buddy isn't running"; a model error → "bubble show error";
+  no key → "Agent: no key (sign in arrives in p4)" and a prompt shows the no_model error; SIGTERM (also after kill -9 of the sidecar) removes host.json;
   harness error: a denied card never reaches the host; a model error ends in an "error" event and exit 1; kill -9 mid-tool restarts with an "interrupted" entry

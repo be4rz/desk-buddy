@@ -108,3 +108,75 @@ fn remind_with_no_agent_exits_1() {
     let err = String::from_utf8_lossy(&o.stderr);
     assert!(err.contains("desk-buddy’s agent isn’t running") && err.contains("503"), "{err}");
 }
+
+/// `buddy` from the person's terminal: only `BUDDY_HOME` (no agent env, no `BUDDY_HOST_FILE`).
+fn buddy_home(home: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_buddy"))
+        .args(args)
+        .env_remove("BUDDY_API")
+        .env_remove("BUDDY_TOKEN")
+        .env_remove("BUDDY_TURN")
+        .env_remove("BUDDY_HOST_FILE")
+        .env("BUDDY_HOME", home)
+        .output()
+        .unwrap()
+}
+
+/// A host whose sink records who said what.
+fn recording(name: &str) -> (Host, PathBuf, Arc<Mutex<Vec<host::HostEvent>>>) {
+    let dir = std::env::temp_dir().join(format!("buddy-cli-{name}-{}-{}", std::process::id(), random_hex(3)));
+    let seen: Arc<Mutex<Vec<host::HostEvent>>> = Arc::default();
+    let s2 = seen.clone();
+    let host = Host::start(&dir.join("host.json"), move |e| {
+        s2.lock().unwrap().push(e);
+        Ok(json!({}))
+    })
+    .unwrap();
+    (host, dir, seen)
+}
+
+#[test]
+fn say_from_a_terminal_reads_buddy_home_and_reports_the_app_gone() {
+    let (host, dir, seen) = recording("home");
+    let o = buddy_home(&dir, &["say", "hello", "--emotion", "happy"]);
+    assert_eq!(code(&o), 0, "{}", String::from_utf8_lossy(&o.stderr));
+    {
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].caller, host::Caller::User);
+        assert_eq!(seen[0].action, Action::Say { text: "hello".into(), emotion: Some("happy".into()) });
+    }
+    // A stale file (the app died without removing it): nothing listens on its port.
+    let stale = std::fs::read(host.file()).unwrap();
+    drop(host);
+    assert!(!dir.join("host.json").exists(), "dropping the host removes its file");
+    std::fs::write(dir.join("host.json"), &stale).unwrap();
+    let o = buddy_home(&dir, &["say", "hi"]);
+    assert_eq!(code(&o), 1);
+    assert!(String::from_utf8_lossy(&o.stderr).contains("desk-buddy isn't running"), "{}", String::from_utf8_lossy(&o.stderr));
+    // No file at all.
+    std::fs::remove_file(dir.join("host.json")).unwrap();
+    let o = buddy_home(&dir, &["say", "hi"]);
+    assert_eq!(code(&o), 1);
+    assert!(String::from_utf8_lossy(&o.stderr).contains("desk-buddy isn't running"), "{}", String::from_utf8_lossy(&o.stderr));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_agent_token_env_wins_over_buddy_home() {
+    let (host, dir, seen) = recording("agentfirst");
+    let token = host.issue("main", 7);
+    let o = Command::new(env!("CARGO_BIN_EXE_buddy"))
+        .args(["say", "from the agent"])
+        .env_remove("BUDDY_HOST_FILE")
+        .env_remove("BUDDY_TURN")
+        .env("BUDDY_HOME", &dir)
+        .env("BUDDY_API", host.url())
+        .env("BUDDY_TOKEN", &token)
+        .output()
+        .unwrap();
+    assert_eq!(code(&o), 0, "{}", String::from_utf8_lossy(&o.stderr));
+    assert_eq!(seen.lock().unwrap()[0].caller, host::Caller::Agent { agent_id: "main".into(), gen: 7 });
+    drop(host);
+    let _ = std::fs::remove_dir_all(&dir);
+}
