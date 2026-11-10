@@ -28,6 +28,8 @@ export type Rec = { t: string; [k: string]: any };
 export type Handlers = {
   decide?: (args: Rec) => unknown | Promise<unknown>;
   wait?: (args: Rec) => unknown | Promise<unknown>;
+  /** `policy.taint`; default: newly the first time. */
+  taint?: (args: Rec) => unknown | Promise<unknown>;
 };
 
 export const ALLOW_ALL: Handlers = { decide: () => ({ decision: "allow" }) };
@@ -43,6 +45,8 @@ export type DriverOptions = {
   shellEnv?: Record<string, string>;
   host?: Init["host"];
   model?: Init["model"];
+  /** The fake provider's models; default FAKE_MODELS. */
+  models?: typeof FAKE_MODELS;
 };
 
 export class Driver {
@@ -59,6 +63,8 @@ export class Driver {
   exited!: Promise<number | null>;
   credentials: Map<string, unknown>;
   stderr = "";
+  /** Whether the default `policy.taint` handler marked the conversation yet. */
+  tainted = false;
   private cmds = 0;
   private acks = new Map<string, (r: Rec) => void>();
 
@@ -80,7 +86,7 @@ export class Driver {
       storagePath: this.storagePath,
       skillsDir: join(agentDir, "skills"),
       model: o.model === undefined ? { provider: "fake", model: "fake-1" } : o.model,
-      providers: [{ id: "fake", name: "Fake", api: "openai-completions", baseUrl: `${o.fakeUrl}/v1`, models: FAKE_MODELS }],
+      providers: [{ id: "fake", name: "Fake", api: "openai-completions", baseUrl: `${o.fakeUrl}/v1`, models: o.models ?? FAKE_MODELS }],
       shellEnv: o.shellEnv ?? { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: this.home, LANG: "en_US.UTF-8", TERM: "dumb" },
       shellPath: "/bin/bash",
       platform: process.platform === "darwin" ? "macos" : process.platform === "win32" ? "windows" : "linux",
@@ -148,6 +154,12 @@ export class Driver {
           return h.decide ? ok(await h.decide(req)) : ok({ decision: "deny", reason: "No policy in this test." });
         case "policy.wait":
           return h.wait ? ok(await h.wait(req)) : err("unsupported", "No approvals in this test.");
+        case "policy.taint": {
+          if (h.taint) return ok(await h.taint(req));
+          const newly = !this.tainted;
+          this.tainted = true;
+          return ok({ newly });
+        }
         default:
           return err("unknown_op", req.op);
       }

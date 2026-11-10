@@ -1,0 +1,13 @@
+{
+  "timeline_version": 1,
+  "seed": 1,
+  "duration_ms": 20000,
+  "start_local": "14:00",
+  "weekday": 2,
+  "items": [
+    { "at_ms": 1000,  "event": { "type": "thinking" } },
+    { "at_ms": 4000,  "event": { "type": "speaking", "text": "All done!" } },
+    { "at_ms": 7000,  "event": { "type": "say", "text": "Tests pass!", "emotion": "happy" } },
+    { "at_ms": 12000, "event": { "type": "emote", "name": "jump" } }
+  ]
+}

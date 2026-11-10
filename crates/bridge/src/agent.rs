@@ -2,6 +2,8 @@
 //! `cred.*` and `policy.*` requests, gives each start a host API token (revoked
 //! on exit), tells the host API the running turn, maps its records to
 //! `MascotEvent`s, and remembers how it ended for the next start's `lastExit`.
+//! It also marks the agent when it reads the web (`policy.taint`) and keeps
+//! the person's reminders in the sidecar (`remind.*`, design §4.6/§4.7).
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -10,7 +12,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex, Weak};
 use std::time::Duration;
 
-use host::Host;
+use host::{Host, Refusal, RemindOp, Reply};
 use mascot_protocol::MascotEvent;
 use policy::{AgentCtx, Decide, Decision, Production};
 use serde_json::{json, Value};
@@ -147,7 +149,12 @@ impl Agent {
             return Err(BridgeError::new("running", "The agent is already running."));
         }
         let gen = self.gen.fetch_add(1, Ordering::SeqCst) + 1;
-        let mut settings = json!({ "stepLimit": 50, "shutdownMs": 3000 });
+        let mut settings = json!({
+            "stepLimit": 50,
+            "shutdownMs": 3000,
+            "context": { "maxLines": 200, "maxBytes": 16384, "clearBatch": 8, "compactPct": 80 },
+            "subagents": { "max": 3 },
+        });
         if let (Some(s), Value::Object(extra)) = (settings.as_object_mut(), self.spec.settings.clone()) {
             s.extend(extra);
         }
@@ -222,6 +229,41 @@ impl Agent {
         let id = new_request_id();
         self.cmd("prompt", json!({ "requestId": id, "text": text, "source": "chat" }))?;
         Ok(id)
+    }
+
+    /// A `buddy remind` op for the host's sink: the reminder lives in the
+    /// sidecar's store (a durable timer), so with no sidecar there is none.
+    pub fn remind(&self, op: &RemindOp) -> Reply {
+        let refusal = |e: BridgeError| match e.code {
+            "not_running" => Refusal::no_agent(),
+            "usage" => Refusal::new(400, "usage", e.message),
+            "too_many" => Refusal::new(409, "too_many", e.message),
+            "timeout" => Refusal::new(504, "timeout", e.message),
+            code => Refusal::new(502, code, e.message),
+        };
+        if !self.is_running() {
+            return Err(Refusal::no_agent());
+        }
+        match op {
+            RemindOp::Add { at_ms, text } => {
+                // `reminderId`: `id` is the command record's own.
+                let id = format!("r_{}", host::random_hex(6));
+                let r = self.cmd("remind.add", json!({ "reminderId": id, "atMs": at_ms, "text": text })).map_err(refusal)?;
+                Ok(json!({ "id": r["id"], "atMs": r["atMs"] }))
+            }
+            RemindOp::List => {
+                let r = self.cmd("remind.list", json!({})).map_err(refusal)?;
+                Ok(json!({ "reminders": r["reminders"].as_array().cloned().unwrap_or_default() }))
+            }
+            RemindOp::Cancel { id } => {
+                let r = self.cmd("remind.cancel", json!({ "reminderId": id })).map_err(refusal)?;
+                if r["cancelled"] == true {
+                    Ok(json!({}))
+                } else {
+                    Err(Refusal::new(404, "not_found", format!("There’s no reminder {id}.")))
+                }
+            }
+        }
     }
 
     /// The UI's policy ops (`approval_answer`, `set_mode`, …) for this agent.
@@ -316,6 +358,14 @@ impl Agent {
                 Ok(decision.json())
             }
             "policy.wait" => Ok(self.policy.wait(&at, req["callId"].as_str().unwrap_or(""))),
+            // A web tool read the web: mark the agent before the content reaches the model.
+            "policy.taint" => {
+                let source = req["source"].as_str().unwrap_or("");
+                if !matches!(source, "web_fetch" | "web_search") {
+                    return Err(("bad_request".into(), format!("Unknown taint source: {source}")));
+                }
+                Ok(json!({ "newly": self.policy.taint(&at, source, req["detail"].as_str().unwrap_or("")) }))
+            }
             _ => Err(("unknown_op".into(), format!("Unknown request: {op}"))),
         }
     }

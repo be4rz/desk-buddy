@@ -14,14 +14,15 @@ use std::time::Instant;
 
 use block2::RcBlock;
 use mascot_core::replay::SensesPatch;
-use mascot_core::{Brain, Dir, EyeState, Intent, MouthState, Ori, PackMeta, Poke, Senses, Show, Visibility};
+use mascot_core::{Brain, Dir, DndAction, EyeState, Intent, MouthState, Ori, PackMeta, Poke, Senses, Show, Visibility};
 use mascot_protocol::MascotEvent;
 use mascot_render::{Art, Canvas, View};
 use objc2::rc::Retained;
 use objc2_foundation::{NSRunLoop, NSRunLoopCommonModes, NSTimer};
 
 use crate::panel::Panel;
-use crate::settings::{self, Settings};
+use crate::senses::{self, Ring};
+use crate::settings::{self, DndAct, Settings};
 use crate::stats::Stats;
 
 /// Everything that reaches the brain or the app from elsewhere (frozen for later phases).
@@ -84,8 +85,22 @@ struct Key {
 
 pub struct App {
     pub brain: Brain,
-    /// the senses last handed to the brain (patches merge over them)
+    /// raw senses as the sensors (or a replay) report them; patches merge over them
+    raw: Senses,
+    /// `raw` gated by settings and the DND toggle: what the brain was handed last
     senses: Senses,
+    /// tray "Do not disturb" (this session only, never persisted)
+    dnd_toggle: bool,
+    /// a local-clock sample arrived (quiet hours need one; the default is 00:00)
+    have_clock: bool,
+    /// the last 256 raw sense changes (memory only)
+    #[allow(dead_code)] // read by p4 (budget) and p6 (studio)
+    pub ring: Ring,
+    /// `BUDDY_SENSES_LOG=1`: sense changes to stderr
+    senses_log: bool,
+    /// tray status line ("Hidden: fullscreen app", …) on change
+    status: Option<&'static str>,
+    pub on_status: Option<Box<dyn Fn(Option<&'static str>)>>,
     #[allow(dead_code)] // for later phases (studio, senses)
     pub pack: Arc<PackMeta>,
     pub settings: Settings,
@@ -136,7 +151,14 @@ pub fn start(init: Init, handle: tauri::AppHandle) {
     let canvas = init.art.canvas();
     let app = App {
         brain: init.brain,
+        raw: Senses::default(),
         senses: Senses::default(),
+        dnd_toggle: false,
+        have_clock: false,
+        ring: Ring::new(),
+        senses_log: std::env::var_os("BUDDY_SENSES_LOG").is_some_and(|v| v != "0"),
+        status: None,
+        on_status: None,
         pack: init.pack,
         settings: init.settings,
         home: init.home,
@@ -188,9 +210,14 @@ impl App {
                 self.brain.event(&ev, now);
             }
             Inbox::Senses(patch) => {
-                // a patch merges over the last senses; the brain always sees them whole
-                patch.apply(&mut self.senses);
-                self.brain.senses(&self.senses, now);
+                // a patch merges over the raw senses; the brain always sees them whole, gated
+                if self.senses_log {
+                    eprintln!("[buddy] senses {}", serde_json::to_string(&patch).unwrap_or_default());
+                }
+                self.have_clock |= patch.local.is_some();
+                patch.apply(&mut self.raw);
+                self.ring.push(now, patch);
+                self.regate(now);
             }
             Inbox::Poke(p) => {
                 if p == Poke::DragEnd {
@@ -200,8 +227,11 @@ impl App {
                 self.brain.poke(p, now);
             }
             Inbox::Settings(s) => {
+                let action = s.dnd.action;
                 self.settings = s;
                 self.save_settings();
+                self.brain.set_dnd_action(dnd_action(action), now);
+                self.regate(now);
             }
             Inbox::Call(f) => f(self),
         }
@@ -235,6 +265,65 @@ impl App {
     pub fn next_display(&mut self) {
         self.panel.next_display();
         self.save_position();
+    }
+
+    /// Gate the raw senses and hand them to the brain; update the tray status line.
+    fn regate(&mut self, now: u64) {
+        let g = senses::gate(&self.raw, &self.settings, self.dnd_toggle, self.have_clock);
+        let flags = |s: &Senses| (s.fullscreen, s.screen_share, s.dnd_toggle, s.quiet_hours);
+        let changed = flags(&g) != flags(&self.senses);
+        self.senses = g;
+        self.brain.senses(&self.senses, now);
+        if self.senses_log && changed {
+            let s = &self.senses;
+            eprintln!(
+                "[buddy] senses gated: fullscreen={} screen_share={} dnd_toggle={} quiet_hours={} -> unprompted_allowed={}",
+                s.fullscreen,
+                s.screen_share,
+                s.dnd_toggle,
+                s.quiet_hours,
+                self.brain.unprompted_allowed()
+            );
+        }
+        let st = status(&self.senses, self.settings.dnd.action);
+        if st != self.status {
+            self.status = st;
+            if let Some(f) = &self.on_status {
+                f(st);
+            }
+        }
+    }
+
+    /// Tray "Do not disturb" (session only).
+    pub fn set_dnd_toggle(&mut self, on: bool) {
+        self.dnd_toggle = on;
+        eprintln!("[buddy] do not disturb {}", if on { "on" } else { "off" });
+        let now = self.now_ms();
+        self.regate(now);
+        self.wake();
+    }
+
+    pub fn dnd_toggle(&self) -> bool {
+        self.dnd_toggle
+    }
+
+    /// Tray "When busy: Hide / Hold still" (persisted as `dnd.action`).
+    pub fn set_dnd_action(&mut self, a: DndAct) {
+        self.settings.dnd.action = a;
+        self.save_settings();
+        let now = self.now_ms();
+        self.brain.set_dnd_action(dnd_action(a), now);
+        self.regate(now);
+        self.wake();
+    }
+
+    /// Tray "Quiet hours" (persisted as `quiet_hours.enabled`).
+    pub fn set_quiet_enabled(&mut self, on: bool) {
+        self.settings.quiet_hours.enabled = on;
+        self.save_settings();
+        let now = self.now_ms();
+        self.regate(now);
+        self.wake();
     }
 
     pub fn set_user_hidden(&mut self, h: bool) {
@@ -340,5 +429,42 @@ impl App {
             NSRunLoop::mainRunLoop().addTimer_forMode(&t, NSRunLoopCommonModes);
             self.timer = Some(t);
         }
+    }
+}
+
+pub fn dnd_action(a: DndAct) -> DndAction {
+    match a {
+        DndAct::Hide => DndAction::Hide,
+        DndAct::Still => DndAction::Still,
+    }
+}
+
+/// The tray status line for the gated senses (None = nothing active).
+pub fn status(s: &Senses, action: DndAct) -> Option<&'static str> {
+    let hide = action == DndAct::Hide;
+    Some(match () {
+        _ if s.fullscreen => if hide { "Hidden: fullscreen app" } else { "Still: fullscreen app" },
+        _ if s.screen_share => if hide { "Hidden: screen sharing" } else { "Still: screen sharing" },
+        _ if s.dnd_toggle => if hide { "Hidden: do not disturb" } else { "Still: do not disturb" },
+        _ if s.quiet_hours => "Sleepy: quiet hours",
+        _ => return None,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_line_wording() {
+        let mut s = Senses::default();
+        assert_eq!(status(&s, DndAct::Hide), None);
+        s.quiet_hours = true;
+        assert_eq!(status(&s, DndAct::Hide), Some("Sleepy: quiet hours"));
+        s.dnd_toggle = true;
+        assert_eq!(status(&s, DndAct::Still), Some("Still: do not disturb"));
+        assert_eq!(status(&s, DndAct::Hide), Some("Hidden: do not disturb"));
+        s.fullscreen = true;
+        assert_eq!(status(&s, DndAct::Hide), Some("Hidden: fullscreen app"));
     }
 }

@@ -9,14 +9,19 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { type Conversation, type ConversationWatch, Harness, type LiveState, type ModelRef as PiModelRef } from "@earendil-works/pi-durable";
 import { SqliteStorage } from "@earendil-works/pi-durable/storage/sqlite";
 import { RustCredentialStore } from "./credentials.ts";
+import { setCurrentModel, setModels } from "./current.ts";
 import { executionEnv } from "./env.ts";
+import { compactionSettings } from "./ext/context/index.ts";
 import { bindRoot, command, EVENT_KIND, INPUT_KIND, recordEvent } from "./ext/core/index.ts";
 import { currentTrigger, gate, markAsked, setTrigger, type Trigger } from "./ext/gate/index.ts";
+import { bindJobs } from "./ext/jobs/index.ts";
+import { bindHarness } from "./ext/task/index.ts";
 import { buildModels } from "./models.ts";
 import { CmdError, type Cmd, exit, type Init, type ModelRef, requestSource, send, type Status, V } from "./protocol.ts";
 import { buildRegistry } from "./registry.ts";
 import { failAll, settle } from "./rpc.ts";
 import { openBunSqliteDatabase } from "./storage/bun-sqlite.ts";
+import { messageText } from "./text.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 
@@ -26,15 +31,6 @@ type Part = { type: string; text?: string; id?: string; name?: string; arguments
 type Message = { role: string; content: string | Part[] };
 export type Entry = { id: string; kind: string; data?: any; model?: Message[] };
 
-/** The text of a message's text parts. */
-export function messageText(m: Message | undefined): string {
-  if (!m) return "";
-  if (typeof m.content === "string") return m.content;
-  return m.content
-    .filter((p) => p.type === "text")
-    .map((p) => p.text ?? "")
-    .join("");
-}
 
 /** What the run is doing, from `pi.live`, the gate and the arguments of the round's calls. */
 export function statusOf(live: LiveState | undefined, args: Map<string, Record<string, unknown>>, g: { cleared: Set<string>; asking: Set<string> } = gate): Status {
@@ -63,7 +59,10 @@ export async function host(init: Init, input: AsyncIterator<Record<string, unkno
   if (init.v !== V) throw new CmdError("bad_version", `Expected protocol version ${V}, got ${init.v}.`);
   const credentials = new RustCredentialStore();
   const models = buildModels(credentials, init.providers ?? []);
-  const { registry, modelTools } = buildRegistry(init);
+  setModels(models);
+  setCurrentModel(init.model);
+  const { registry, modelTools: initialTools, modelToolsFor } = buildRegistry(init);
+  let modelTools = initialTools;
 
   let model = init.model;
   mkdirSync(dirname(init.storagePath), { recursive: true });
@@ -77,7 +76,11 @@ export async function host(init: Init, input: AsyncIterator<Record<string, unkno
       env: ({ cwd }) => executionEnv(init, cwd),
       // One automatic retry: in 1.5 a generation cut off by a crash counts as a failed attempt, so with 0 a
       // crash mid-answer would end the run `interrupted` instead of resending it (plan "Crash retry").
-      settings: { retry: { maxRetries: init.settings.maxRetries ?? 1, ...(typeof retryDelay === "number" ? { baseDelayMs: retryDelay } : {}) } },
+      // A function, read at each use: compaction is sized by the current model's window (design §4.7).
+      settings: () => ({
+        retry: { maxRetries: init.settings.maxRetries ?? 1, ...(typeof retryDelay === "number" ? { baseDelayMs: retryDelay } : {}) },
+        compaction: compactionSettings(init),
+      }),
       identity: { attribution: null },
       onReport: (report) => {
         if (report.kind === "storage_failed") {
@@ -94,6 +97,8 @@ export async function host(init: Init, input: AsyncIterator<Record<string, unkno
 
   const conv: Conversation = await harness.root(ctx, { agent: { model: piModel(model), cwd: init.workDir, modelTools } });
   bindRoot(conv);
+  bindHarness(harness);
+  bindJobs(harness, conv);
   const agent = await conv.agent(ctx);
   const want = piModel(model);
   // The stored agent keeps the tools of the sidecar that created it: offer this build's.
@@ -104,7 +109,8 @@ export async function host(init: Init, input: AsyncIterator<Record<string, unkno
   // Unfinished work from the previous sidecar: a live task or an input placed in a run.
   const inspection = await harness.inspect(ctx);
   const placed = inspection.submissions.find((s) => String(s.conversationId) === String(conv.id) && s.type === "input" && s.status === "placed");
-  const live = inspection.tasks.some((t) => t.state.kind !== "blocked");
+  // Background tasks (reminders sleeping until their time) aren't a cut-off run.
+  const live = inspection.tasks.some((t) => t.state.kind !== "blocked" && !t.record.background);
 
   // --- the view → ev records ---------------------------------------------------
   let seq = 0;
@@ -227,6 +233,9 @@ export async function host(init: Init, input: AsyncIterator<Record<string, unkno
         return {};
       case "set_model": {
         model = (cmd.model as ModelRef | null) ?? null;
+        setCurrentModel(model);
+        // `look` comes and goes with the model's image input.
+        modelTools = modelToolsFor(model);
         await conv.configure({ model: piModel(model), modelTools }, ctx);
         return {};
       }

@@ -17,6 +17,11 @@ services:
     cwd: .
     start: BUDDY_STATS=1 cargo run -p buddy-app
     check: cargo test -p mascot-render -p buddy-app
+  senses:
+    cwd: .
+    # sensors (frontmost, idle, clock, fullscreen, screen share), reflexes, DND/quiet hours (AC4)
+    check: cargo test -p mascot-core -p buddy-app && test -z "$(rg -n 'std::fs|File::' crates/buddy-app/src/senses)"
+    start: BUDDY_STATS=1 BUDDY_SENSES_LOG=1 cargo run -p buddy-app   # "[buddy] senses …" on stderr only
   harness:
     cwd: .
     # root Cargo workspace (crates/* + spikes/s2-harness); bridge's e2e needs bun
@@ -40,6 +45,11 @@ flows: >-
   tray: Zoom ×1/×2/×3 (persisted to BUDDY_HOME/settings.json), Hide/Show bear, Move to next display, Quit desk-buddy;
   error: BUDDY_PACK=/nonexistent cargo run -p buddy-app exits 1 with "[buddy] cannot load mascot pack";
   error: a corrupt BUDDY_HOME/settings.json → defaults, settings.json.bad kept, tray shows "⚠ Settings reset (see settings.json.bad)";
+  senses: BUDDY_STATS=1 BUDDY_SENSES_LOG=1 cargo run -p buddy-app for 60 s prints "[buddy] senses {…}" lines (frontmost,
+  idle, local, fullscreen, screen_share) to stderr, nothing under BUDDY_HOME but settings.json, idle CPU < 1%;
+  tray: Do not disturb (bear hides, status "Hidden: do not disturb"), When busy ▸ Hold still (bear holds still, status
+  "Still: …", dnd.action persisted), Quiet hours toggle (quiet_hours.enabled persisted);
+  senses error: no window-server access (CGWindowList null) → not fullscreen / not sharing, logged once, no crash;
   pipeline: verify_b.py PASS after any change to experiments/mascot/out/bear3d/anim_b;
   harness: s2-harness prints mascot events thinking → awaiting_permission → working(buddy) → speaking → idle and a host "say" whose turn is the prompt's request id;
   harness error: a denied card never reaches the host; a model error ends in an "error" event and exit 1; kill -9 mid-tool restarts with an "interrupted" entry

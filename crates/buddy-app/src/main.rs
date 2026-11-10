@@ -6,11 +6,13 @@
 //! settings `pack` under `$BUDDY_PACKS`, the repo's `mascots/` in debug builds, then
 //! `BUDDY_HOME/packs`), `BUDDY_ZOOM=1|2|3`, `BUDDY_STATS=1`, `BUDDY_DUMP=<dir>`
 //! (+ `BUDDY_DUMP_EVERY=<n>`), `BUDDY_EVENTS=<file.jsonl>`, `BUDDY_SCREEN=<n>`,
-//! `BUDDY_VERBOSE=1`.
+//! `BUDDY_VERBOSE=1`, `BUDDY_SENSES=0` (sensors off; also off under `BUDDY_EVENTS` unless
+//! `BUDDY_SENSES=1`), `BUDDY_SENSES_LOG=1` (sense changes to stderr).
 
 mod driver;
 mod events;
 mod panel;
+mod senses;
 mod settings;
 mod stats;
 mod tray;
@@ -21,7 +23,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use block2::RcBlock;
-use mascot_core::{Brain, BrainConfig, DndAction, PackMeta};
+use mascot_core::{Brain, BrainConfig, PackMeta};
 use objc2::MainThreadMarker;
 use objc2_foundation::{NSRunLoop, NSRunLoopCommonModes, NSTimer};
 use tauri::RunEvent;
@@ -97,11 +99,13 @@ fn main() {
         pack.behaviors.keys().filter(|b| pack.available(b)).count(),
         dir.display()
     );
-    let icon = tray::icon(&pack);
+    let icon = tray::icon(&art);
     let t0 = Instant::now();
-    let dnd_action = match settings.dnd.action {
-        settings::DndAct::Hide => DndAction::Hide,
-        settings::DndAct::Still => DndAction::Still,
+    let dnd_action = driver::dnd_action(settings.dnd.action);
+    let sensors = match std::env::var("BUDDY_SENSES").ok().as_deref() {
+        Some("0") => false,
+        Some(_) => true,
+        None => items.is_none(), // a replay drives the senses itself
     };
     let brain = Brain::new(pack.clone(), BrainConfig { seed: seed(), temperament: None, dnd_action }, 0);
 
@@ -113,9 +117,21 @@ fn main() {
             let mtm = MainThreadMarker::new().expect("setup runs on the main thread");
             let (w, h) = mascot_render::canvas_size(&pack);
             let panel = panel::Panel::new(mtm, w, h, zoom, settings.position.as_ref());
-            let tray_init = tray::TrayInit { pack_id: pack.id.clone(), zoom, warning, icon };
+            let q = &settings.quiet_hours;
+            let tray_init = tray::TrayInit {
+                pack_id: pack.id.clone(),
+                zoom,
+                warning,
+                icon,
+                dnd_action: settings.dnd.action,
+                quiet_enabled: q.enabled,
+                quiet_span: format!("{}–{}", q.start, q.end),
+            };
             driver::start(driver::Init { pack, art, settings, home, panel, brain, t0 }, app.handle().clone());
             tray::build(app, tray_init)?;
+            if sensors {
+                senses::start();
+            }
             if std::env::var_os("BUDDY_STATS").is_some() {
                 start_stats();
             }

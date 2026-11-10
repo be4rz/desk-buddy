@@ -1,7 +1,7 @@
 //! Spike S2 driver: one prompt through the whole harness, printing what the
 //! mascot would see. A thin wrapper over `crates/bridge` (plan §7 S2).
 //!
-//!   cargo build -p host --bin buddy && cargo run -p s2-harness -- [--yes] [--fake <url>] "<prompt>"
+//!   cargo build -p host --bin buddy && cargo run -p s2-harness -- [--yes] [--fake <url>] [--remind <dur> <text>] ["<prompt>"]
 //!
 //! `--fake <url>` uses the scripted fake model (`bun agent/test/support/fake.ts
 //! --port <p> --script <file>`; pass its base URL, without `/v1`). Without it, the
@@ -9,19 +9,21 @@
 //! from this process's `ANTHROPIC_API_KEY` into the in-memory credential store:
 //! it never reaches the sidecar's or a command's environment.
 //! `--yes` allows every approval card; otherwise each one asks here (y/n/a).
-//! Prints one JSON line per mascot event and per `buddy say`/`emote`.
+//! `--remind <dur> <text>` sets a reminder (`dur` like `3s`, `20m`; 1 s floor here)
+//! after the prompt's run, if any, and waits for it to fire.
+//! Prints one JSON line per mascot event, per `buddy say`/`emote` and per reminder op.
 
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::{mpsc, Arc, Mutex};
-use std::time::Duration;
+use std::sync::{mpsc, Arc, Mutex, OnceLock, Weak};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bridge::bridge::sidecar_bin;
 use bridge::credentials::Credentials;
 use bridge::protocol::{ModelRef, ProviderDef, ProviderModel};
 use bridge::{Agent, AgentEvent, AgentSpec};
-use host::{Action, Host};
+use host::{parse_duration, Action, Host, Refusal, RemindOp, MAX_REMIND_MS};
 use mascot_protocol::MascotEvent;
 use policy::Production;
 use serde_json::json;
@@ -30,10 +32,26 @@ fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let yes = take_flag(&mut args, "--yes");
     let fake = take_value(&mut args, "--fake");
+    let usage = || {
+        eprintln!("usage: s2-harness [--yes] [--fake <url>] [--remind <dur> <text>] [\"<prompt>\"]");
+        ExitCode::from(2)
+    };
+    let remind = match args.iter().position(|a| a == "--remind") {
+        None => None,
+        Some(i) => {
+            if i + 2 >= args.len() {
+                return usage();
+            }
+            let v: Vec<String> = args.drain(i..i + 3).collect();
+            match parse_duration(&v[1]) {
+                Some(ms) if (1000..=MAX_REMIND_MS).contains(&ms) => Some((ms, v[2].clone())),
+                _ => return usage(),
+            }
+        }
+    };
     let prompt = args.join(" ");
-    if prompt.trim().is_empty() {
-        eprintln!("usage: s2-harness [--yes] [--fake <url>] \"<prompt>\"");
-        return ExitCode::from(2);
+    if prompt.trim().is_empty() && remind.is_none() {
+        return usage();
     }
     let Some(program) = sidecar_bin() else {
         eprintln!("s2-harness: no sidecar; build it with `cd agent && bun run build`, or set BUDDY_AGENT_BIN (debug builds)");
@@ -66,12 +84,20 @@ fn main() -> ExitCode {
         }
     };
     let p2 = print.clone();
+    // Reminders live in the agent's sidecar, as in the app.
+    let slot: Arc<OnceLock<Weak<Agent>>> = Arc::default();
+    let slot2 = slot.clone();
     let host = match Host::start(&root.join("host.json"), move |e| {
-        let (kind, detail) = match e.action {
-            Action::Say { text, emotion } => ("say", json!({ "text": text, "emotion": emotion })),
-            Action::Emote { name } => ("emote", json!({ "name": name })),
+        let (kind, detail, reply) = match e.action {
+            Action::Say { text, emotion } => ("say", json!({ "text": text, "emotion": emotion }), Ok(json!({}))),
+            Action::Emote { name } => ("emote", json!({ "name": name }), Ok(json!({}))),
+            Action::Remind(op) => {
+                let reply = slot2.get().and_then(Weak::upgrade).map_or_else(|| Err(Refusal::no_agent()), |a| a.remind(&op));
+                ("remind", json!({ "op": format!("{op:?}") }), reply)
+            }
         };
         p2(json!({ "host": kind, "detail": detail, "turn": e.turn, "afterTurn": e.after_turn }));
+        reply
     }) {
         Ok(h) => Arc::new(h),
         Err(e) => {
@@ -108,36 +134,67 @@ fn main() -> ExitCode {
             let _ = tx.lock().unwrap().send(m);
         }
     });
+    let _ = slot.set(Arc::downgrade(&agent));
+    host.set_min_remind_ms(1000);
     if let Err(e) = agent.start() {
         eprintln!("s2-harness: {e}");
         return ExitCode::from(1);
     }
-    if let Err(e) = agent.prompt(&prompt) {
-        eprintln!("s2-harness: {e}");
-        agent.shutdown(Duration::from_secs(3));
-        return ExitCode::from(1);
+    let mut code = ExitCode::SUCCESS;
+    if !prompt.trim().is_empty() {
+        if let Err(e) = agent.prompt(&prompt) {
+            eprintln!("s2-harness: {e}");
+            agent.shutdown(Duration::from_secs(3));
+            return ExitCode::from(1);
+        }
+        code = drive(&agent, &rx, yes, None, PATIENCE);
     }
+    if let (Some((ms, text)), true) = (remind, code == ExitCode::SUCCESS) {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+        match agent.remind(&RemindOp::Add { at_ms: now + ms, text }) {
+            Ok(r) => {
+                print(json!({ "remind": "added", "reply": r }));
+                // Quiet until it fires: wait past its time, not just the usual patience.
+                code = drive(&agent, &rx, yes, Some(r["id"].as_str().unwrap_or("").to_string()), PATIENCE + Duration::from_millis(ms));
+            }
+            Err(e) => {
+                eprintln!("s2-harness: the reminder was refused: {} ({})", e.message, e.code);
+                code = ExitCode::from(1);
+            }
+        }
+    }
+    agent.shutdown(Duration::from_secs(3));
+    code
+}
+
+/// How long a run may go without a mascot event.
+const PATIENCE: Duration = Duration::from_secs(300);
+
+/// Follow mascot events until the run ends (`reminder: None`) or that reminder fires.
+fn drive(agent: &Agent, rx: &mpsc::Receiver<MascotEvent>, yes: bool, reminder: Option<String>, patience: Duration) -> ExitCode {
     let mut busy = false;
-    let code = loop {
-        let Ok(m) = rx.recv_timeout(Duration::from_secs(300)) else {
-            eprintln!("s2-harness: no progress for 5 minutes");
-            break ExitCode::from(1);
+    loop {
+        let Ok(m) = rx.recv_timeout(patience) else {
+            eprintln!("s2-harness: no progress for {} s", patience.as_secs());
+            return ExitCode::from(1);
         };
         match m {
             MascotEvent::AwaitingPermission { call_id, title } => {
+                busy = true;
                 let answer = if yes { "allow" } else { ask(&title) };
                 if let Err(e) = agent.policy_ui(&json!({ "op": "approval_answer", "callId": call_id, "answer": answer })) {
                     eprintln!("s2-harness: {e}");
                 }
             }
-            MascotEvent::Idle if busy => break ExitCode::SUCCESS,
-            MascotEvent::Error { .. } => break ExitCode::from(1),
-            MascotEvent::Idle => {}
-            _ => busy = true,
+            MascotEvent::Idle if busy && reminder.is_none() => return ExitCode::SUCCESS,
+            MascotEvent::Error { .. } if reminder.is_none() => return ExitCode::from(1),
+            MascotEvent::Idle | MascotEvent::Error { .. } => {}
+            MascotEvent::Thinking | MascotEvent::Working { .. } | MascotEvent::Speaking { .. } => busy = true,
+            // One-offs, not a run: they never make the run busy.
+            MascotEvent::Reminder { id, .. } if reminder.as_deref() == Some(id.as_str()) => return ExitCode::SUCCESS,
+            MascotEvent::Say { .. } | MascotEvent::Emote { .. } | MascotEvent::Reminder { .. } | MascotEvent::Settled => {}
         }
-    };
-    agent.shutdown(Duration::from_secs(3));
-    code
+    }
 }
 
 fn ask(title: &str) -> &'static str {

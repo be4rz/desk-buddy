@@ -1,0 +1,6 @@
+[
+  {"owner": "Microsoft Teams", "pid": 900, "layer": 0, "x": 100, "y": 60, "w": 1200, "h": 800},
+  {"owner": "Microsoft Teams", "pid": 900, "layer": 8, "x": 0, "y": 0, "w": 1512, "h": 982},
+  {"owner": "Microsoft Teams", "pid": 900, "layer": 8, "x": 506, "y": 36, "w": 500, "h": 48},
+  {"owner": "Window Server", "pid": 160, "layer": 24, "x": 0, "y": 0, "w": 1512, "h": 33}
+]

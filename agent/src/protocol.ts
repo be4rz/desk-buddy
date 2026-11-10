@@ -70,8 +70,26 @@ export type Settings = {
   retryDelayMs?: number;
   /** How the previous sidecar of this agent ended, for the `interrupted` event. */
   lastExit?: "crash" | "quit" | "clean";
+  /** Tool output capping, clearing and compaction (design §4.7). */
+  context?: Partial<ContextSettings>;
+  /** The `task` research children. */
+  subagents?: { max?: number };
+  /** Test hooks for the web tools: a local DuckDuckGo-HTML fixture and loopback fetches. Never set by the app. */
+  web?: { searchUrl?: string; allowLoopback?: boolean };
   [k: string]: unknown;
 };
+
+export type ContextSettings = {
+  /** A tool result longer than this is cut, the full text kept in `.buddy/outputs/<callId>.txt`. */
+  maxLines: number;
+  maxBytes: number;
+  /** Old tool results are cleared this many at a time once a request passes 60% of the window. */
+  clearBatch: number;
+  /** Compaction starts at this share of the window (`reserveTokens = ceil((100 - compactPct)% × window)`). */
+  compactPct: number;
+};
+
+export const CONTEXT_DEFAULTS: ContextSettings = { maxLines: 200, maxBytes: 16384, clearBatch: 8, compactPct: 80 };
 
 /** What the run is doing, derived from `pi.live` (the mascot's source of truth). */
 export type Status = {

@@ -25,9 +25,8 @@ use objc2_app_kit::{
     NSWorkspaceActiveSpaceDidChangeNotification, NSWorkspaceDidActivateApplicationNotification,
 };
 use objc2_core_foundation::{CFRetained, CFUUID, CGPoint, CGRect, CGSize};
-use objc2_core_graphics::{CGWindowListCopyWindowInfo, CGWindowListOption};
 use objc2_foundation::{
-    ns_string, NSArray, NSDictionary, NSNotification, NSNotificationCenter, NSNumber, NSObject,
+    ns_string, NSDictionary, NSNotification, NSNotificationCenter, NSNumber, NSObject,
     NSObjectProtocol, NSOperationQueue, NSRunLoop, NSRunLoopCommonModes, NSTimer,
 };
 use objc2_io_surface::{
@@ -658,61 +657,14 @@ impl Panel {
     }
 }
 
-/// Is the frontmost app showing a window that covers a whole screen
-/// (including the menu bar strip)? That only happens in a fullscreen Space
-/// (or for borderless-fullscreen games), never for a zoomed window.
-fn frontmost_is_fullscreen(mtm: MainThreadMarker) -> bool {
+/// Is the frontmost app fullscreen (`senses::fullscreen`, S1's bounds rule)? A null
+/// CGWindowList reads as "not fullscreen" (logged once by `senses::read_windows`).
+fn frontmost_is_fullscreen(_mtm: MainThreadMarker) -> bool {
     let Some(app) = NSWorkspace::sharedWorkspace().frontmostApplication() else { return false };
     let pid = app.processIdentifier();
     if pid == std::process::id() as i32 {
         return false;
     }
-    let Some(list) = CGWindowListCopyWindowInfo(
-        CGWindowListOption::OptionOnScreenOnly | CGWindowListOption::ExcludeDesktopElements,
-        0,
-    ) else {
-        return false;
-    };
-    // CFArray of CFDictionary is toll-free bridged to NSArray of NSDictionary
-    let arr: &NSArray = unsafe { &*(CFRetained::as_ptr(&list).as_ptr() as *const NSArray) };
-    let screens = NSScreen::screens(mtm);
-    if screens.count() == 0 {
-        return false;
-    }
-    let main_h = screens.objectAtIndex(0).frame().size.height;
-    let num = |d: &NSDictionary, k: &objc2_foundation::NSString| -> Option<f64> {
-        let k: &AnyObject = k;
-        d.objectForKey(k).and_then(|o| o.downcast::<NSNumber>().ok()).map(|n| n.doubleValue())
-    };
-    for item in arr.iter() {
-        let Ok(d) = item.downcast::<NSDictionary>() else { continue };
-        if num(&d, ns_string!("kCGWindowOwnerPID")) != Some(pid as f64) {
-            continue;
-        }
-        if num(&d, ns_string!("kCGWindowLayer")) != Some(0.0) {
-            continue;
-        }
-        let key: &AnyObject = ns_string!("kCGWindowBounds");
-        let Some(b) = d.objectForKey(key).and_then(|o| o.downcast::<NSDictionary>().ok()) else { continue };
-        let (Some(x), Some(y), Some(w), Some(h)) = (
-            num(&b, ns_string!("X")),
-            num(&b, ns_string!("Y")),
-            num(&b, ns_string!("Width")),
-            num(&b, ns_string!("Height")),
-        ) else {
-            continue;
-        };
-        for s in screens.iter() {
-            let f = s.frame();
-            let cg_y = main_h - (f.origin.y + f.size.height);
-            if (x - f.origin.x).abs() < 1.0
-                && (y - cg_y).abs() < 1.0
-                && (w - f.size.width).abs() < 1.0
-                && (h - f.size.height).abs() < 1.0
-            {
-                return true;
-            }
-        }
-    }
-    false
+    let Some(wins) = crate::senses::read_windows() else { return false };
+    crate::senses::fullscreen::is_fullscreen(&wins, pid, &crate::senses::fullscreen::displays())
 }

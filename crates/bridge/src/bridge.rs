@@ -274,6 +274,7 @@ fn code_of(code: &str) -> &'static str {
         "not_found" => "not_found",
         "unknown_op" => "unknown_op",
         "unsupported" => "unsupported",
+        "too_many" => "too_many",
         // Shutting down: the command is for the next sidecar.
         "closing" => "not_running",
         _ => "agent_error",

@@ -55,11 +55,21 @@ and talks through speech bubbles, powered by an LLM.
 - Build order, each step needing the previous one's .blend:
   `sh run.sh` (model → `out/bear3d/cute/`, ~40 s) → `sh run_anim.sh` (Stage A → `out/bear3d/anim/`, ~5 min)
   → `sh run_b.sh` (Stage B → `out/bear3d/anim_b/` + `props/`).
+  Stage C (needs `bear.blend` + `out/bear3d/anim/`): `sh run_c.sh` (`rig_bear.py --stage c` → `bear_rig_c.blend` +
+  `clips_c.json`; think/talk/ask loop + oops/happy/celebrate one-shot in Stage A's 84×123 frame → `out/bear3d/anim_c/`,
+  ~7 min) → `sh run_face.sh` (D16 face layers → `out/bear3d/face/`, ~40 s; ends with `verify_face.py`).
 - `python3 verify_b.py`: Stage B hand-off frames must be pixel-identical to props + the idle sprite; run it after any re-render.
+- `python3 verify_face.py` (`--self-test`: two in-memory mutations, each must be caught, exit 1): the face invariant
+  "T" (amends design §3.4). Default patches drawn at each frame's position must equal the expected frame (the anim_c
+  frame; for idle the Blender reference `face/ref/idle_<dir>.png`, rigid face, no baked blink) exactly on idle's rest
+  frames and on Stage C frames with arms and squash at rest (all hand-offs). Elsewhere they may differ by ≤ 16 px per
+  frame, only inside the masks + 1 px, only ink/fur/blush outline or shade flips, no cluster of 5+ px. Paws must never
+  cross the face in S/SE/E/W/SW. walk*/run* have no face. Stage C has no roll, lean or squash (face bones shift by
+  whole pixels). It prints a residual table and writes `face/residual_worst.png`. Stage A/B/props bytes never change.
 - Pixel rules: iso 2:1 ortho camera, 8 directions, 12 fps, ppu 40.07, alpha 0/255 only, 1px ink outline, palette =
   `bear-proto/palette-bear.json` + `scene-proto/palette.json` (+ `bear3d/palette-ext.json` for furniture).
 - Preview: `python3 -m http.server 8771 --directory experiments/mascot/out`, then open
-  `bear3d/anim/preview.html` or `bear3d/anim_b/preview_b.html`.
+  `bear3d/anim/preview.html`, `bear3d/anim_b/preview_b.html` or `bear3d/anim_c/preview_c.html` (Stage C + face sheets).
 
 ## Gotchas
 

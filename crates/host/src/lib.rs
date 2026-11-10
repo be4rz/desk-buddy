@@ -5,12 +5,15 @@
 //! (DNS rebinding) is refused. Each sidecar start gets its own agent token,
 //! revoked when it exits. `X-Buddy-Turn` names the turn a command ran in; a
 //! command from a turn that already ended still runs, flagged `afterTurn`.
+//! The sink answers each command (design §4.6): its JSON is merged into
+//! `{ "ok": true, … }`, a `Refusal` becomes the error reply.
 
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Read};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
@@ -24,6 +27,36 @@ pub const MAX_SAY: usize = 2000;
 /// The emotions `say` takes, and the emotes `mascot emote` plays.
 pub const EMOTIONS: [&str; 6] = ["neutral", "happy", "sad", "surprised", "thinking", "sleepy"];
 pub const EMOTES: [&str; 5] = ["wave", "nod", "shake", "jump", "spin"];
+/// The longest reminder text.
+pub const MAX_REMIND_TEXT: usize = 500;
+/// How far ahead a reminder may be: 7 days.
+pub const MAX_REMIND_MS: u64 = 7 * 24 * 3600 * 1000;
+/// How soon a reminder may be, unless `Host::set_min_remind_ms` says otherwise: 10 s.
+pub const MIN_REMIND_MS: u64 = 10_000;
+/// The refusal when no agent runs to hold a reminder.
+pub const NO_AGENT: &str = "desk-buddy’s agent isn’t running";
+
+/// What the sink answers a command with.
+pub type Reply = Result<Value, Refusal>;
+
+/// A command the app refused, as the HTTP status and error the caller sees.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Refusal {
+    pub status: u16,
+    pub code: &'static str,
+    pub message: String,
+}
+
+impl Refusal {
+    pub fn new(status: u16, code: &'static str, message: impl Into<String>) -> Refusal {
+        Refusal { status, code, message: message.into() }
+    }
+
+    /// 503 `no_agent`: nothing runs to take the command.
+    pub fn no_agent() -> Refusal {
+        Refusal::new(503, "no_agent", NO_AGENT)
+    }
+}
 
 /// `n` random bytes as hex.
 pub fn random_hex(n: usize) -> String {
@@ -45,7 +78,7 @@ pub enum Caller {
 #[derive(Clone, Debug, PartialEq)]
 pub struct HostEvent {
     pub caller: Caller,
-    /// `say` or `emote`.
+    /// `say`, `emote` or a reminder op.
     pub action: Action,
     /// The `X-Buddy-Turn` the command sent.
     pub turn: Option<String>,
@@ -57,9 +90,21 @@ pub struct HostEvent {
 pub enum Action {
     Say { text: String, emotion: Option<String> },
     Emote { name: String },
+    /// `buddy remind …`: the app's agent keeps reminders (durable, in its sidecar).
+    Remind(RemindOp),
 }
 
-type Sink = Box<dyn Fn(HostEvent) + Send + Sync>;
+#[derive(Clone, Debug, PartialEq)]
+pub enum RemindOp {
+    /// Reply `{id, atMs}`.
+    Add { at_ms: u64, text: String },
+    /// Reply `{reminders: [{id, atMs, text}]}`.
+    List,
+    /// Reply `{}`, or a 404 refusal when there's no such reminder.
+    Cancel { id: String },
+}
+
+type Sink = Box<dyn Fn(HostEvent) -> Reply + Send + Sync>;
 
 #[derive(Default)]
 struct State {
@@ -72,6 +117,7 @@ struct Shared {
     state: Mutex<State>,
     sink: Sink,
     port: u16,
+    min_remind_ms: AtomicU64,
 }
 
 pub struct Host {
@@ -123,14 +169,14 @@ fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
 
 impl Host {
     /// Listen on 127.0.0.1 at a free port and write `file` (0600) with the port and the person's token.
-    pub fn start(file: &Path, sink: impl Fn(HostEvent) + Send + Sync + 'static) -> io::Result<Host> {
+    pub fn start(file: &Path, sink: impl Fn(HostEvent) -> Reply + Send + Sync + 'static) -> io::Result<Host> {
         let server = Server::http("127.0.0.1:0").map_err(io::Error::other)?;
         let port = server.server_addr().to_ip().map(|a| a.port()).ok_or_else(|| io::Error::other("no port"))?;
         let user_token = format!("bu_{}", random_hex(24));
         write_private(file, &serde_json::to_vec(&json!({ "port": port, "token": user_token, "pid": std::process::id() }))?)?;
         let mut state = State::default();
         state.tokens.insert(user_token.clone(), Caller::User);
-        let shared = Arc::new(Shared { state: Mutex::new(state), sink: Box::new(sink), port });
+        let shared = Arc::new(Shared { state: Mutex::new(state), sink: Box::new(sink), port, min_remind_ms: AtomicU64::new(MIN_REMIND_MS) });
         let server = Arc::new(server);
         let (s, sh) = (server.clone(), shared.clone());
         let thread = thread::Builder::new().name("buddy-host".into()).spawn(move || {
@@ -153,6 +199,11 @@ impl Host {
 
     pub fn user_token(&self) -> &str {
         &self.user_token
+    }
+
+    /// How soon a `--in` reminder may be (default 10 s; tests and QA go lower).
+    pub fn set_min_remind_ms(&self, ms: u64) {
+        self.shared.min_remind_ms.store(ms, Ordering::SeqCst);
     }
 
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
@@ -209,6 +260,174 @@ fn refuse(req: Request, status: u16, code: &str, message: &str) {
     reply(req, status, json!({ "ok": false, "error": { "code": code, "message": message } }));
 }
 
+/// Hand `action` to the sink and answer with its reply merged into `{ok: true, …}`.
+fn act(sh: &Shared, req: Request, event: HostEvent, extra: Value) {
+    match (sh.sink)(event) {
+        Ok(v) => {
+            let mut body = json!({ "ok": true });
+            for src in [extra, v] {
+                if let Value::Object(m) = src {
+                    // The envelope's `ok` is the host's.
+                    body.as_object_mut().unwrap().extend(m.into_iter().filter(|(k, _)| k != "ok"));
+                }
+            }
+            reply(req, 200, body)
+        }
+        Err(r) => refuse(req, r.status, r.code, &r.message),
+    }
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+/// A `--in` duration in ms: `90s`, `20m`, `1h30m`, `2d`, `1d12h` (units in d, h, m, s order, each once).
+pub fn parse_duration(s: &str) -> Option<u64> {
+    let s = s.trim();
+    let mut total: u64 = 0;
+    let mut num = String::new();
+    let mut last_rank = 0;
+    for c in s.chars() {
+        if c.is_ascii_digit() {
+            num.push(c);
+            continue;
+        }
+        let (rank, unit) = match c {
+            'd' => (1, 86_400_000u64),
+            'h' => (2, 3_600_000),
+            'm' => (3, 60_000),
+            's' => (4, 1_000),
+            _ => return None,
+        };
+        if num.is_empty() || rank <= last_rank || num.len() > 9 {
+            return None;
+        }
+        total = total.checked_add(num.parse::<u64>().ok()?.checked_mul(unit)?)?;
+        num.clear();
+        last_rank = rank;
+    }
+    (num.is_empty() && last_rank > 0).then_some(total)
+}
+
+/// `HH:MM` as (hour, minute).
+pub fn parse_hhmm(s: &str) -> Option<(u32, u32)> {
+    let (h, m) = s.trim().split_once(':')?;
+    if h.is_empty() || h.len() > 2 || m.len() != 2 || !h.bytes().chain(m.bytes()).all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let (h, m) = (h.parse().ok()?, m.parse().ok()?);
+    (h < 24 && m < 60).then_some((h, m))
+}
+
+#[cfg(unix)]
+mod local {
+    //! Local time through the C library (`localtime_r`/`mktime`), declared by
+    //! hand so the crate needs no libc dependency.
+    use std::os::raw::{c_char, c_int, c_long};
+
+    #[repr(C)]
+    pub struct Tm {
+        pub sec: c_int,
+        pub min: c_int,
+        pub hour: c_int,
+        pub mday: c_int,
+        pub mon: c_int,
+        pub year: c_int,
+        pub wday: c_int,
+        pub yday: c_int,
+        pub isdst: c_int,
+        pub gmtoff: c_long,
+        pub zone: *const c_char,
+    }
+
+    /// `time_t` is a C `long` on the Unixes the app runs on (macOS, 64-bit Linux).
+    type TimeT = c_long;
+
+    extern "C" {
+        fn localtime_r(t: *const TimeT, out: *mut Tm) -> *mut Tm;
+        fn mktime(tm: *mut Tm) -> TimeT;
+    }
+
+    pub fn tm_of(secs: i64) -> Option<Tm> {
+        let t = secs as TimeT;
+        let mut tm = Tm { sec: 0, min: 0, hour: 0, mday: 0, mon: 0, year: 0, wday: 0, yday: 0, isdst: 0, gmtoff: 0, zone: std::ptr::null() };
+        // SAFETY: both pointers are valid for the call; localtime_r is the thread-safe form.
+        let r = unsafe { localtime_r(&t, &mut tm) };
+        (!r.is_null()).then_some(tm)
+    }
+
+    pub fn secs_of(tm: &mut Tm) -> Option<i64> {
+        // SAFETY: `tm` is a valid, initialized struct tm.
+        let t = unsafe { mktime(tm) };
+        (t != -1).then_some(t as i64)
+    }
+}
+
+/// The next local `HH:MM` strictly after `now_ms`, in ms (today's, else tomorrow's).
+#[cfg(unix)]
+pub fn next_local(hour: u32, minute: u32, now_ms: u64) -> Option<u64> {
+    let mut tm = local::tm_of((now_ms / 1000) as i64)?;
+    for _ in 0..2 {
+        tm.hour = hour as i32;
+        tm.min = minute as i32;
+        tm.sec = 0;
+        tm.isdst = -1;
+        let at = local::secs_of(&mut tm)? as u64 * 1000;
+        if at > now_ms {
+            return Some(at);
+        }
+        // mktime normalized the fields; one day on (mday 32 rolls over too).
+        tm.mday += 1;
+    }
+    None
+}
+
+#[cfg(not(unix))]
+pub fn next_local(_hour: u32, _minute: u32, _now_ms: u64) -> Option<u64> {
+    None
+}
+
+/// `ms` as local `HH:MM` (`None` where local time isn't available).
+pub fn local_hhmm(ms: u64) -> Option<String> {
+    #[cfg(unix)]
+    {
+        let tm = local::tm_of((ms / 1000) as i64)?;
+        Some(format!("{:02}:{:02}", tm.hour, tm.min))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = ms;
+        None
+    }
+}
+
+/// `POST /v1/remind`'s body as the time to fire and the text.
+fn remind_add(sh: &Shared, body: &Value) -> Result<(u64, String), String> {
+    let text = body["text"].as_str().unwrap_or("").trim().to_string();
+    if text.is_empty() {
+        return Err("Remind of what? buddy remind --in 20m <text>.".into());
+    }
+    if text.chars().count() > MAX_REMIND_TEXT {
+        return Err(format!("Keep a reminder under {MAX_REMIND_TEXT} characters."));
+    }
+    let now = now_ms();
+    let at_ms = match (body.get("inMs").filter(|v| !v.is_null()), body.get("at").filter(|v| !v.is_null())) {
+        (Some(_), Some(_)) | (None, None) => return Err("Give one of inMs or at.".into()),
+        (Some(v), None) => {
+            let min = sh.min_remind_ms.load(Ordering::SeqCst);
+            match v.as_u64() {
+                Some(ms) if (min..=MAX_REMIND_MS).contains(&ms) => now + ms,
+                _ => return Err(format!("A reminder is {} s to 7 days away.", min / 1000)),
+            }
+        }
+        (None, Some(v)) => {
+            let (h, m) = v.as_str().and_then(parse_hhmm).ok_or("at is a local time, HH:MM.")?;
+            next_local(h, m, now).ok_or("--at isn’t supported here.")?
+        }
+    };
+    Ok((at_ms, text))
+}
+
 fn serve(sh: &Shared, mut req: Request) {
     // A web page's fetch always carries an Origin; the CLI never does.
     if header(&req, "Origin").is_some() {
@@ -261,18 +480,28 @@ fn serve(sh: &Shared, mut req: Request) {
                     return refuse(req, 400, "usage", &format!("Emotion is one of {}.", EMOTIONS.join(", ")));
                 }
             }
-            (sh.sink)(HostEvent { caller, action: Action::Say { text, emotion }, turn, after_turn });
-            reply(req, 200, json!({ "ok": true, "afterTurn": after_turn }))
+            act(sh, req, HostEvent { caller, action: Action::Say { text, emotion }, turn, after_turn }, json!({ "afterTurn": after_turn }))
         }
         (Method::Post, "/v1/mascot/emote") => {
             let name = body["name"].as_str().unwrap_or("").to_string();
             if !EMOTES.contains(&name.as_str()) {
                 return refuse(req, 400, "usage", &format!("Emote is one of {}.", EMOTES.join(", ")));
             }
-            (sh.sink)(HostEvent { caller, action: Action::Emote { name }, turn, after_turn });
-            reply(req, 200, json!({ "ok": true, "afterTurn": after_turn }))
+            act(sh, req, HostEvent { caller, action: Action::Emote { name }, turn, after_turn }, json!({ "afterTurn": after_turn }))
         }
-        (_, "/v1/status" | "/v1/say" | "/v1/mascot/emote") => refuse(req, 405, "method", "Wrong method."),
+        (Method::Post, "/v1/remind") => match remind_add(sh, &body) {
+            Err(e) => refuse(req, 400, "usage", &e),
+            Ok((at_ms, text)) => act(sh, req, HostEvent { caller, action: Action::Remind(RemindOp::Add { at_ms, text }), turn, after_turn }, Value::Null),
+        },
+        (Method::Get, "/v1/reminders") => act(sh, req, HostEvent { caller, action: Action::Remind(RemindOp::List), turn, after_turn }, Value::Null),
+        (Method::Post, "/v1/remind/cancel") => {
+            let id = body["id"].as_str().unwrap_or("").trim().to_string();
+            if id.is_empty() {
+                return refuse(req, 400, "usage", "Which reminder? buddy remind cancel <id>.");
+            }
+            act(sh, req, HostEvent { caller, action: Action::Remind(RemindOp::Cancel { id }), turn, after_turn }, Value::Null)
+        }
+        (_, "/v1/status" | "/v1/say" | "/v1/mascot/emote" | "/v1/remind" | "/v1/reminders" | "/v1/remind/cancel") => refuse(req, 405, "method", "Wrong method."),
         _ => refuse(req, 404, "not_found", "No such endpoint."),
     }
 }

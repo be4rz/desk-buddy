@@ -1,0 +1,5 @@
+[
+  {"owner": "Google Chrome", "pid": 640, "layer": 0, "x": 0, "y": 33, "w": 1512, "h": 949},
+  {"owner": "Google Chrome", "pid": 640, "layer": 3, "x": 456, "y": 912, "w": 600, "h": 52},
+  {"owner": "Window Server", "pid": 160, "layer": 24, "x": 0, "y": 0, "w": 1512, "h": 33}
+]

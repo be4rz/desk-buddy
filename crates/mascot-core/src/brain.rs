@@ -10,6 +10,7 @@ use mascot_protocol::{EmoteName, Emotion, MascotEvent};
 use serde::{Deserialize, Serialize};
 
 use crate::pack::{Dir, Ori, PackMeta};
+use crate::reflex::Reflexes;
 use crate::rng::Rng;
 
 /// What the mascot means to do; packs map intents to behaviors.
@@ -240,6 +241,11 @@ pub struct TraceLine {
 }
 
 const TRACE_N: usize = 256;
+/// Queued out-of-turn cues (`say`, `emote`, reminders, reflexes) at most.
+const CUE_CAP: usize = 4;
+/// `advance` replays at most this much of a gap (after a long hide or
+/// occlusion the bear picks up from `now − CATCHUP_MS`).
+const CATCHUP_MS: u64 = 10_000;
 /// Open eyes between the two blinks of a double blink.
 const DOUBLE_GAP_FRAMES: u64 = 2;
 
@@ -258,18 +264,29 @@ enum TurnState {
     Once(Intent),
 }
 
-/// An out-of-turn cue (`say`, `emote`, reminder): over the turn while it lasts.
+/// An out-of-turn cue (`say`, `emote`, reminder, reflex): over the turn while
+/// it lasts. Cues queue; only the front one plays.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Cue {
-    /// Held until `until` or Settled, then `then` once.
-    Timed { intent: Intent, until: u64, then: Option<Intent> },
+    /// Held for `dur` ms from when it reaches the front (`until`), or (a Say,
+    /// intent Talk) until Settled, then `then` once.
+    Timed { intent: Intent, dur: u64, until: Option<u64>, then: Option<Intent> },
     Once(Intent),
+    /// A reflex's one-shot: it yields to a harness turn and to DND.
+    Reflex(Intent),
 }
 
 impl Cue {
     fn intent(&self) -> Intent {
         match *self {
-            Cue::Timed { intent, .. } | Cue::Once(intent) => intent,
+            Cue::Timed { intent, .. } | Cue::Once(intent) | Cue::Reflex(intent) => intent,
+        }
+    }
+
+    fn once(&self) -> Option<Intent> {
+        match *self {
+            Cue::Once(i) | Cue::Reflex(i) => Some(i),
+            Cue::Timed { .. } => None,
         }
     }
 }
@@ -299,10 +316,17 @@ pub struct Brain {
     play: Play,
     dir: Dir,
     turn: Option<TurnState>,
-    cue: Option<Cue>,
+    cue: VecDeque<Cue>,
     dragging: bool,
     vis: Visibility,
     quiet: bool,
+    /// DND from the last senses (fullscreen || screen share || toggle).
+    dnd: bool,
+    /// `late` reflex: sleepiness + 0.2.
+    late: bool,
+    reflex: Reflexes,
+    /// `Brain::new` time: the warm-up runs from here.
+    started: u64,
     // idle scheduler memory
     last_start: BTreeMap<String, u64>,
     recent: VecDeque<String>,
@@ -336,10 +360,14 @@ impl Brain {
             play: Play { intent: Intent::Idle, behavior: String::new(), step: 0, left: None, frame: 0, frame_start: now_ms, ori: None, pinned: false, drag: false },
             dir: Dir::S,
             turn: None,
-            cue: None,
+            cue: VecDeque::new(),
             dragging: false,
             vis: Visibility::Shown,
             quiet: false,
+            dnd: false,
+            late: false,
+            reflex: Reflexes::new(),
+            started: now_ms,
             last_start: BTreeMap::new(),
             recent: VecDeque::new(),
             blink_at: u64::MAX,
@@ -394,11 +422,17 @@ impl Brain {
                     Emotion::Thinking => Some(Intent::Think),
                     Emotion::Sleepy => Some(Intent::Sleepy),
                 });
-                self.cue = Some(Cue::Timed { intent: Intent::Talk, until, then });
-                self.talk_until(until);
+                // the latest line wins over a queued or playing one
+                let say = Cue::Timed { intent: Intent::Talk, dur: until - t, until: None, then };
+                match self.cue.iter().position(|c| matches!(c, Cue::Timed { intent: Intent::Talk, .. })) {
+                    Some(i) => self.cue[i] = say,
+                    None => self.push_cue(say),
+                }
+                self.activate_cue(t);
             }
-            MascotEvent::Emote { name } => {
-                self.cue = Some(Cue::Once(match name {
+            // a moment reaction: nothing to react with while hidden or held still
+            MascotEvent::Emote { name } if self.vis == Visibility::Shown => {
+                self.push_cue(Cue::Once(match name {
                     EmoteName::Wave => Intent::Wave,
                     EmoteName::Nod => Intent::Nod,
                     EmoteName::Shake => Intent::Shake,
@@ -406,17 +440,21 @@ impl Brain {
                     EmoteName::Spin => Intent::Spin,
                 }));
             }
+            MascotEvent::Emote { .. } => {}
             MascotEvent::Reminder { text, .. } => {
-                self.cue = Some(Cue::Timed { intent: Intent::Remind, until: t + bubble_ms(text), then: None });
+                self.push_cue(Cue::Timed { intent: Intent::Remind, dur: bubble_ms(text), until: None, then: None });
+                self.activate_cue(t);
             }
             MascotEvent::Settled => {
                 if matches!(self.turn, Some(TurnState::Held(Intent::Ask | Intent::Talk))) {
                     self.turn = None;
                 }
-                if let Some(Cue::Timed { then, .. }) = self.cue {
-                    self.cue = then.map(Cue::Once);
-                }
+                // cut the mouth first: a Say queued behind starts its own below
                 self.talking_until = self.talking_until.min(t);
+                // the turn's Say ends with it; a Reminder showing is not the turn's and keeps its time
+                if let Some(&Cue::Timed { intent: Intent::Talk, then, .. }) = self.cue.front() {
+                    self.finish_timed(then, t);
+                }
             }
         }
         if !matches!(ev, MascotEvent::Speaking { .. }) {
@@ -442,8 +480,44 @@ impl Brain {
         self.advance(now_ms);
         let t = self.t;
         self.quiet = s.quiet_hours;
-        let dnd = s.fullscreen || s.screen_share || s.dnd_toggle;
-        let vis = match (dnd, self.cfg.dnd_action) {
+        self.dnd = s.fullscreen || s.screen_share || s.dnd_toggle;
+        self.apply_vis(t);
+        let off = !self.unprompted_allowed();
+        if off {
+            self.drop_cues(false); // reflexes are off in DND and quiet hours
+        }
+        let free = self.cue.is_empty() && self.turn.is_none() && !self.dragging && self.vis == Visibility::Shown;
+        let shyness = self.temperament.shyness;
+        let rng = &mut self.rng;
+        if let Some(f) = self.reflex.sample(s, t, off, free, shyness, &mut |p| rng.chance(p)) {
+            self.note(t, "reflex", f.rule.to_string());
+            self.push_cue(Cue::Reflex(f.intent));
+        }
+        let late = self.reflex.late(s, off);
+        if late != self.late {
+            self.late = late;
+            self.note(t, "reflex", format!("{} {}", crate::reflex::LATE, if late { "on" } else { "off" }));
+        }
+        self.settle(t);
+    }
+
+    /// Unprompted turns (sense-triggered, p4's budget) may start: not in DND
+    /// and not in quiet hours.
+    pub fn unprompted_allowed(&self) -> bool {
+        !self.dnd && !self.quiet
+    }
+
+    /// Tray "When busy: Hide / Hold still" (additive to §4.3).
+    pub fn set_dnd_action(&mut self, a: DndAction, now_ms: u64) {
+        self.advance(now_ms);
+        let t = self.t;
+        self.cfg.dnd_action = a;
+        self.apply_vis(t);
+        self.settle(t);
+    }
+
+    fn apply_vis(&mut self, t: u64) {
+        let vis = match (self.dnd, self.cfg.dnd_action) {
             (false, _) => Visibility::Shown,
             (true, DndAction::Hide) => Visibility::Hidden,
             (true, DndAction::Still) => Visibility::Still,
@@ -451,6 +525,11 @@ impl Brain {
         if vis != self.vis {
             let was = self.vis;
             self.vis = vis;
+            if vis != Visibility::Shown {
+                // Hidden/Still play no frames, so a one-shot would wait at the front
+                // and block the Says and Reminders behind it
+                self.drop_cues(true);
+            }
             self.note(t, "vis", format!("{was:?} -> {vis:?}"));
             if was == Visibility::Hidden {
                 // Nothing played while hidden: pick up from here.
@@ -466,7 +545,6 @@ impl Brain {
                 self.schedule_blink(t);
             }
         }
-        self.settle(t);
     }
 
     pub fn poke(&mut self, p: Poke, now_ms: u64) {
@@ -519,7 +597,8 @@ impl Brain {
             cut: std::mem::take(&mut self.cut),
             place: None,
         };
-        self.cache = Some((now_ms, show.clone()));
+        // a repeat in the same ms has nothing new: no cut, no motion (R7)
+        self.cache = Some((now_ms, Show { cut: false, moved_px: [0, 0], ..show.clone() }));
         self.dirty = false;
         show
     }
@@ -531,7 +610,7 @@ impl Brain {
             return u64::MAX;
         }
         let mut next = self.frame_end();
-        if let Some(Cue::Timed { until, .. }) = self.cue {
+        if let Some(&Cue::Timed { until: Some(until), .. }) = self.cue.front() {
             next = next.min(until);
         }
         if self.face_here() {
@@ -555,11 +634,29 @@ impl Brain {
         if now < self.t {
             return;
         }
+        if now - self.t > CATCHUP_MS {
+            // R4: skip a long gap instead of replaying every frame of it; cue
+            // and talk deadlines stay absolute and simply expire below
+            let skip = now - CATCHUP_MS - self.t;
+            let shift = |v: &mut u64| {
+                if *v != u64::MAX {
+                    *v = v.saturating_add(skip);
+                }
+            };
+            shift(&mut self.play.frame_start);
+            shift(&mut self.blink_at);
+            shift(&mut self.blink_first);
+            shift(&mut self.mouth_at);
+            if let Some(c) = &mut self.closed_until {
+                *c = c.saturating_add(skip);
+            }
+            self.t += skip;
+        }
         loop {
             let hidden = self.vis == Visibility::Hidden;
             let frame_end = if hidden { u64::MAX } else { self.frame_end() };
-            let cue_end = match self.cue {
-                Some(Cue::Timed { until, .. }) => until,
+            let cue_end = match self.cue.front() {
+                Some(&Cue::Timed { until: Some(until), .. }) => until,
                 _ => u64::MAX,
             };
             let blink = if hidden { u64::MAX } else { self.closed_until.unwrap_or(self.blink_at) };
@@ -569,16 +666,19 @@ impl Brain {
             if next > now {
                 break;
             }
+            let due = next;
+            // a deadline that passed during a skipped gap lands now, not in the past
+            let next = next.max(self.t);
             self.t = next;
             self.dirty = true;
-            if next == cue_end {
-                if let Some(Cue::Timed { then, .. }) = self.cue {
-                    self.cue = then.map(Cue::Once);
+            if due == cue_end {
+                if let Some(&Cue::Timed { then, .. }) = self.cue.front() {
+                    self.finish_timed(then, next);
                 }
                 self.settle(next);
-            } else if next == blink {
+            } else if due == blink {
                 self.blink_step(next);
-            } else if next == mouth {
+            } else if due == mouth {
                 self.mouth_step(next);
             } else {
                 self.frame_done(next);
@@ -610,7 +710,7 @@ impl Brain {
             self.play.frame = 0;
             // A one-shot cue (e.g. Say's `thinking` follow-up) that resolves to a
             // held loop plays it once, then end_behavior consumes the cue.
-            let once_cue = matches!(self.cue, Some(Cue::Once(i)) if i == self.play.intent);
+            let once_cue = self.cue.front().and_then(Cue::once) == Some(self.play.intent);
             let release = self.desired() != self.play.intent || (self.play.drag && !self.dragging) || once_cue;
             let step_done = match &mut self.play.left {
                 None => release,
@@ -705,12 +805,13 @@ impl Brain {
         let was = self.play.intent;
         self.note(t, "end", String::new());
         if self.play.intent != Intent::Idle {
-            if let Some(Cue::Once(i)) = self.cue {
+            if let Some(i) = self.cue.front().and_then(Cue::once) {
                 if i == was {
-                    self.cue = None;
+                    self.cue.pop_front();
+                    self.activate_cue(t);
                 }
             }
-            if self.turn == Some(TurnState::Once(was)) && self.cue.is_none_or(|c| c.intent() != was) {
+            if self.turn == Some(TurnState::Once(was)) && self.cue.front().is_none_or(|c| c.intent() != was) {
                 self.turn = None;
             }
         }
@@ -796,10 +897,70 @@ impl Brain {
 
     fn set_turn(&mut self, turn: TurnState) {
         self.turn = Some(turn);
+        self.drop_cues(false);
+    }
+
+    /// A harness turn, DND or quiet hours outrank a pending reflex (it would be
+    /// stale later); `once` also drops queued one-shot emotes (hidden/still).
+    fn drop_cues(&mut self, once: bool) {
+        let front = self.cue.front().copied();
+        self.cue.retain(|c| match c {
+            Cue::Reflex(_) => false,
+            Cue::Once(_) => !once,
+            Cue::Timed { .. } => true,
+        });
+        if self.cue.front().copied() != front {
+            let t = self.t;
+            self.activate_cue(t);
+        }
+    }
+
+    /// Queues a cue (R2: a cue no longer overwrites another's follow-up). A
+    /// full queue drops its oldest waiting one-shot, never the playing one: a
+    /// Say or Reminder outlives an emote. With only Timed cues waiting, an
+    /// incoming one-shot is dropped instead, and an incoming Timed cue evicts
+    /// the oldest waiting one.
+    fn push_cue(&mut self, c: Cue) {
+        if self.cue.len() >= CUE_CAP {
+            match (1..self.cue.len()).find(|&i| !matches!(self.cue[i], Cue::Timed { .. })) {
+                Some(i) => {
+                    self.cue.remove(i);
+                }
+                None if !matches!(c, Cue::Timed { .. }) => return,
+                None => {
+                    self.cue.remove(1);
+                }
+            }
+        }
+        self.cue.push_back(c);
+    }
+
+    /// The front cue starts its clock (and a Say its mouth) when it gets there.
+    fn activate_cue(&mut self, t: u64) {
+        if let Some(Cue::Timed { intent, dur, until, .. }) = self.cue.front_mut() {
+            if until.is_none() {
+                *until = Some(t + *dur);
+                let (intent, end) = (*intent, t + *dur);
+                if intent == Intent::Talk {
+                    self.talk_until(end);
+                }
+            }
+        }
+    }
+
+    /// The front Timed cue ended (time or Settled): its follow-up takes its place.
+    fn finish_timed(&mut self, then: Option<Intent>, t: u64) {
+        match then {
+            Some(i) if self.vis == Visibility::Shown => self.cue[0] = Cue::Once(i),
+            _ => {
+                self.cue.pop_front();
+                self.activate_cue(t);
+            }
+        }
     }
 
     fn desired(&self) -> Intent {
-        if let Some(c) = self.cue {
+        if let Some(c) = self.cue.front() {
             return c.intent();
         }
         match self.turn {
@@ -816,16 +977,7 @@ impl Brain {
         let chosen = if total <= 0.0 {
             "rest".to_string()
         } else {
-            let mut x = self.rng.unit() * total;
-            let mut chosen = weights.last().map(|(b, _)| b.clone()).unwrap_or_else(|| "rest".into());
-            for (b, w) in &weights {
-                if x < *w {
-                    chosen = b.clone();
-                    break;
-                }
-                x -= w;
-            }
-            chosen
+            weighted(&weights, self.rng.unit() * total)
         };
         self.recent.push_front(chosen.clone());
         self.recent.truncate(self.pack.memory.recent);
@@ -836,18 +988,22 @@ impl Brain {
     /// Effective weight of every pool entry now (0 = in cooldown / unavailable).
     fn pool_weights(&self, t: u64) -> Vec<(String, f64)> {
         let pack = &self.pack;
+        let quiet = &pack.quiet_hours;
+        let warming = !self.quiet && ((t.saturating_sub(self.started)) as f64) < pack.warmup.duration_s * 1000.0;
+        let temper = self.temper();
         pack.idle_pool
             .iter()
-            .filter(|e| !self.quiet || e.behavior == "nap" || e.behavior == "rest")
+            .filter(|e| !self.quiet || quiet.pool.contains(&e.behavior))
             .map(|e| {
                 let cooling = e.cooldown_s > 0.0
-                    && self.last_start.get(&e.behavior).is_some_and(|s| ((t - s) as f64) < e.cooldown_s * 1000.0);
-                if cooling || !pack.available(&e.behavior) {
+                    && self.last_start.get(&e.behavior).is_some_and(|s| (t.saturating_sub(*s) as f64) < e.cooldown_s * 1000.0);
+                let skipped = warming && pack.warmup.exclude.contains(&e.behavior);
+                if cooling || skipped || !pack.available(&e.behavior) {
                     return (e.behavior.clone(), 0.0);
                 }
                 let mut w = e.weight;
                 for (name, k) in &e.traits {
-                    let v = self.temperament.get(name).unwrap_or(0.5);
+                    let v = temper.get(name).unwrap_or(0.5);
                     w *= (1.0 + k * (2.0 * v - 1.0)).max(0.0);
                 }
                 for r in &self.recent {
@@ -855,8 +1011,8 @@ impl Brain {
                         w *= pack.memory.penalty;
                     }
                 }
-                if self.quiet && e.behavior == "nap" {
-                    w *= 4.0;
+                if self.quiet {
+                    w *= quiet.boost.get(&e.behavior).copied().unwrap_or(1.0);
                 }
                 (e.behavior.clone(), w)
             })
@@ -867,7 +1023,7 @@ impl Brain {
 
     fn schedule_blink(&mut self, from: u64) {
         let b = self.pack.timers.blink;
-        let mut mean = b.mean_ms as f64 * (1.0 + 0.5 * (2.0 * self.temperament.sleepiness - 1.0));
+        let mut mean = b.mean_ms as f64 * (1.0 + 0.5 * (2.0 * self.temper().sleepiness - 1.0));
         if self.vis == Visibility::Still {
             mean *= 2.0;
         }
@@ -954,6 +1110,15 @@ impl Brain {
 
     // ---- helpers ----
 
+    /// The temperament in effect: `late` adds sleepiness.
+    fn temper(&self) -> Temperament {
+        let mut t = self.temperament;
+        if self.late {
+            t.sleepiness = (t.sleepiness + crate::reflex::LATE_SLEEPINESS).min(1.0);
+        }
+        t
+    }
+
     fn clip_name(&self) -> &str {
         self.pack
             .behaviors
@@ -973,6 +1138,18 @@ impl Brain {
         self.trace.push_back(TraceLine { t_ms: t, what, intent: self.play.intent, behavior: self.play.behavior.clone(), note });
         self.trace.make_contiguous();
     }
+}
+
+/// The entry `x` (0..total) lands on. R10: rounding can run `x` past the end;
+/// the fallback is then the last entry that can play, never a weight-0 one.
+fn weighted(weights: &[(String, f64)], mut x: f64) -> String {
+    for (b, w) in weights {
+        if x < *w {
+            return b.clone();
+        }
+        x -= w;
+    }
+    weights.iter().rev().find(|(_, w)| *w > 0.0).map_or_else(|| "rest".into(), |(b, _)| b.clone())
 }
 
 #[cfg(test)]

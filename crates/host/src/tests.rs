@@ -1,4 +1,5 @@
 use std::sync::mpsc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use super::client::request;
@@ -22,6 +23,7 @@ fn start(name: &str) -> Fx {
     let tx = Mutex::new(tx);
     let host = Host::start(&dir.join("host.json"), move |e| {
         let _ = tx.lock().unwrap().send(e);
+        Ok(json!({}))
     })
     .unwrap();
     Fx { host, events, dir }
@@ -125,4 +127,134 @@ fn the_port_file_goes_away_with_the_host() {
     assert!(path.exists());
     drop(fx);
     assert!(!path.exists());
+}
+
+/// A host whose sink keeps reminders the way the bridge's agent does.
+fn start_reminders(name: &str, agent: bool) -> (Host, PathBuf, Arc<Mutex<Vec<(String, u64, String)>>>) {
+    let dir = std::env::temp_dir().join(format!("buddy-host-{name}-{}-{}", std::process::id(), random_hex(3)));
+    let store: Arc<Mutex<Vec<(String, u64, String)>>> = Arc::default();
+    let s2 = store.clone();
+    let host = Host::start(&dir.join("host.json"), move |e| {
+        if !agent {
+            return Err(Refusal::no_agent());
+        }
+        let mut s = s2.lock().unwrap();
+        match e.action {
+            Action::Remind(RemindOp::Add { at_ms, text }) => {
+                let id = format!("r_{}", random_hex(6));
+                s.push((id.clone(), at_ms, text));
+                Ok(json!({ "id": id, "atMs": at_ms, "ok": "ignored" }))
+            }
+            Action::Remind(RemindOp::List) => Ok(json!({ "reminders": s.iter().map(|(id, at, t)| json!({ "id": id, "atMs": at, "text": t })).collect::<Vec<_>>() })),
+            Action::Remind(RemindOp::Cancel { id }) => match s.iter().position(|r| r.0 == id) {
+                Some(i) => {
+                    s.remove(i);
+                    Ok(json!({}))
+                }
+                None => Err(Refusal::new(404, "not_found", "No such reminder.")),
+            },
+            _ => Ok(json!({})),
+        }
+    })
+    .unwrap();
+    (host, dir, store)
+}
+
+#[test]
+fn reminders_add_list_and_cancel_through_the_sink() {
+    let (host, dir, store) = start_reminders("remind", true);
+    let auth = format!("Bearer {}", host.user_token());
+    let h = [("Authorization", auth.as_str())];
+    let port = host.port();
+    let before = now_ms();
+    let r = request(port, "POST", "/v1/remind", &h, Some(&json!({ "inMs": 60_000, "text": " stretch " }))).unwrap();
+    assert_eq!(r.status, 200, "{:?}", r.body);
+    assert_eq!(r.body["ok"], true, "the envelope's ok wins");
+    let at = r.body["atMs"].as_u64().unwrap();
+    assert!(at >= before + 60_000 && at <= now_ms() + 60_000);
+    let id = r.body["id"].as_str().unwrap().to_string();
+    assert_eq!(store.lock().unwrap()[0].2, "stretch");
+    let l = request(port, "GET", "/v1/reminders", &h, None).unwrap();
+    assert_eq!(l.body["reminders"][0]["id"], id.as_str());
+    // HH:MM is the next such local time.
+    let r = request(port, "POST", "/v1/remind", &h, Some(&json!({ "at": "07:05", "text": "tea" }))).unwrap();
+    assert_eq!(r.status, 200, "{:?}", r.body);
+    let at = r.body["atMs"].as_u64().unwrap();
+    assert!(at > now_ms() && at <= now_ms() + 24 * 3600 * 1000);
+    assert_eq!(local_hhmm(at).as_deref(), Some("07:05"));
+
+    assert_eq!(request(port, "POST", "/v1/remind/cancel", &h, Some(&json!({ "id": id }))).unwrap().status, 200);
+    // Unknown id: the sink's 404.
+    let r = request(port, "POST", "/v1/remind/cancel", &h, Some(&json!({ "id": id }))).unwrap();
+    assert_eq!((r.status, r.body["error"]["code"].as_str()), (404, Some("not_found")));
+    drop(host);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn bad_reminders_are_usage_errors_and_no_agent_is_503() {
+    let (host, dir, store) = start_reminders("remind-bad", true);
+    let auth = format!("Bearer {}", host.user_token());
+    let h = [("Authorization", auth.as_str())];
+    let port = host.port();
+    let bad = [
+        json!({ "inMs": 0, "text": "x" }),
+        json!({ "inMs": 9_999, "text": "x" }),
+        json!({ "inMs": MAX_REMIND_MS + 1, "text": "x" }),
+        json!({ "inMs": 60_000 }),
+        json!({ "inMs": 60_000, "text": "x".repeat(MAX_REMIND_TEXT + 1) }),
+        json!({ "text": "x" }),
+        json!({ "inMs": 60_000, "at": "10:00", "text": "x" }),
+        json!({ "at": "25:00", "text": "x" }),
+        json!({ "at": "9:5", "text": "x" }),
+    ];
+    for b in bad {
+        let r = request(port, "POST", "/v1/remind", &h, Some(&b)).unwrap();
+        assert_eq!((r.status, r.body["error"]["code"].as_str()), (400, Some("usage")), "{b}");
+    }
+    assert_eq!(request(port, "POST", "/v1/remind/cancel", &h, Some(&json!({}))).unwrap().status, 400);
+    assert_eq!(request(port, "GET", "/v1/remind", &h, None).unwrap().status, 405);
+    assert!(store.lock().unwrap().is_empty());
+    // A lower floor for tests and QA.
+    host.set_min_remind_ms(1000);
+    assert_eq!(request(port, "POST", "/v1/remind", &h, Some(&json!({ "inMs": 1000, "text": "x" }))).unwrap().status, 200);
+    drop(host);
+    let _ = fs::remove_dir_all(dir);
+
+    let (host, dir, _) = start_reminders("remind-none", false);
+    let auth = format!("Bearer {}", host.user_token());
+    let r = request(host.port(), "POST", "/v1/remind", &[("Authorization", &auth)], Some(&json!({ "inMs": 60_000, "text": "x" }))).unwrap();
+    assert_eq!((r.status, r.body["error"]["code"].as_str(), r.body["ok"].as_bool()), (503, Some("no_agent"), Some(false)));
+    assert_eq!(r.body["error"]["message"], NO_AGENT);
+    drop(host);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn durations_and_times_parse_strictly() {
+    for (s, ms) in [("90s", 90_000), ("20m", 1_200_000), ("1h30m", 5_400_000), ("2d", 172_800_000), ("1d12h", 129_600_000), ("0s", 0)] {
+        assert_eq!(parse_duration(s), Some(ms), "{s}");
+    }
+    for s in ["", "20", "m", "1m1h", "1m1m", "1.5h", "-5m", "5 m", "10x", "9999999999s"] {
+        assert_eq!(parse_duration(s), None, "{s}");
+    }
+    assert_eq!(parse_hhmm("14:30"), Some((14, 30)));
+    assert_eq!(parse_hhmm("7:05"), Some((7, 5)));
+    for s in ["24:00", "12:60", "12:5", "1230", ":30", "a:bc", "123:00"] {
+        assert_eq!(parse_hhmm(s), None, "{s}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn next_local_is_today_or_tomorrow() {
+    let now = now_ms();
+    let hhmm = local_hhmm(now).unwrap();
+    let (h, m) = parse_hhmm(&hhmm).unwrap();
+    // This very minute has started: the next one is tomorrow's (give or take a DST hour).
+    let next = next_local(h, m, now).unwrap();
+    assert!(next > now + 22 * 3600 * 1000 && next <= now + 25 * 3600 * 1000, "{next} vs {now}");
+    let soon = next_local((h + 1) % 24, m, now).unwrap();
+    assert!(soon > now && soon <= now + 25 * 3600 * 1000);
+    assert_eq!(local_hhmm(soon).unwrap(), format!("{:02}:{:02}", (h + 1) % 24, m));
 }

@@ -1,0 +1,8 @@
+[
+  {"owner": "zoom.us", "pid": 812, "layer": 0, "x": 120, "y": 80, "w": 1280, "h": 800},
+  {"owner": "zoom.us", "pid": 812, "layer": 3, "x": 1250, "y": 120, "w": 240, "h": 135},
+  {"owner": "zoom.us", "pid": 812, "layer": 3, "x": 1300, "y": 700, "w": 200, "h": 40},
+  {"owner": "Code", "pid": 501, "layer": 0, "x": 0, "y": 33, "w": 1512, "h": 949},
+  {"owner": "Window Server", "pid": 160, "layer": 24, "x": 0, "y": 0, "w": 1512, "h": 33},
+  {"owner": "Dock", "pid": 300, "layer": 20, "x": 0, "y": 900, "w": 1512, "h": 82}
+]

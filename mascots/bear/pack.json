@@ -50,5 +50,7 @@
     { "behavior": "read",        "weight": 1, "cooldown_s": 300, "traits": { "curiosity": 0.5, "energy": -0.5 } },
     { "behavior": "nap",         "weight": 1, "cooldown_s": 900, "traits": { "sleepiness": 1.5, "energy": -1.0 } }
   ],
-  "memory": { "recent": 3, "penalty": 0.25 }
+  "memory": { "recent": 3, "penalty": 0.25 },
+  "quiet_hours": { "pool": ["nap", "rest"], "boost": { "nap": 4 } },
+  "warmup": { "duration_s": 180, "exclude": ["nap"] }
 }

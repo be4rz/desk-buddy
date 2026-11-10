@@ -8,6 +8,11 @@
 # directions, so all clips share one frame size and one anchor, and the rest pose renders identically everywhere.
 # Frames whose pose equals an earlier frame of the same clip are not re-rendered (listed in meta 'alias').
 # Writes DIR/<tag>_<clip>/f<NN>_yaw_<deg>.npz + meta.json.
+#
+# Stage C / face layers (run_c.sh, run_face.sh), both optional:
+#   --canvas W,H,FOOT   use this frame size and feet row (Stage A's 84,123,107) instead of the union over the blend's
+#                       clips, so Stage C frames share Stage A's frame and anchor; exits 1 if the clip leaves it.
+#   --show a,b / --hide a,b   render with these objects shown / hidden (the face-layer mouths of bear_rig_c.blend).
 import bpy, sys, os, math, json
 import numpy as np
 from mathutils import Vector, Euler, Matrix
@@ -16,6 +21,10 @@ argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
 def arg(n, d=None): return argv[argv.index(n) + 1] if n in argv else d
 RAW = arg('--raw'); TAG = arg('--tag', 'big'); CLIP = arg('--clip'); FIT = float(arg('--fit', '105'))
 FIT_YAW = float(arg('--fit-yaw', '112.5')); K = int(arg('--k', '8'))
+CANVAS = [int(x) for x in arg('--canvas').split(',')] if arg('--canvas') else None
+if CANVAS and not CLIP: raise SystemExit('render_anim.py: --canvas needs --clip')
+for n in filter(None, (arg('--show') or '').split(',')): bpy.data.objects[n].hide_render = False
+for n in filter(None, (arg('--hide') or '').split(',')): bpy.data.objects[n].hide_render = True
 ALL_YAWS = [45.0 + 45.0 * i for i in range(8)]
 ALL_YAWS = [y % 360 for y in ALL_YAWS]
 YAWS = [float(y) for y in arg('--yaws').split(',')] if arg('--yaws') else ALL_YAWS
@@ -52,17 +61,23 @@ u, v = proj(verts_world())
 PPU = (FIT - 2) / (v.max() - v.min())
 ext = dict(l=0, r=0, t=0, b=0)
 nframes = {}
-for c in CLIPS:
+for c in ([CLIP] if CANVAS else CLIPS):
     use_clip(c); a = bpy.data.actions[c]; n = int(round(a.frame_range[1])) + 1; nframes[c] = n
     for f in range(n):
         for y in ALL_YAWS:
             at(f, y); u, v = proj(verts_world())
             ext['l'] = min(ext['l'], u.min()); ext['r'] = max(ext['r'], u.max())
             ext['t'] = max(ext['t'], v.max()); ext['b'] = min(ext['b'], v.min())
-half = max(-ext['l'], ext['r']) * PPU
-W = int(math.ceil(half)) * 2 + 6
-H = int(math.ceil((ext['t'] - ext['b']) * PPU)) + 6
-FOOT = H - 3 - int(math.ceil(-ext['b'] * PPU))
+if CANVAS:
+    W, H, FOOT = CANVAS
+    m = dict(l=W / 2 + ext['l'] * PPU, r=W / 2 - ext['r'] * PPU, t=FOOT - ext['t'] * PPU, b=H - FOOT + ext['b'] * PPU)
+    if min(m.values()) < 2:   # keep room for the 1 px ink outline
+        print(f'CANVAS ERROR {CLIP}: leaves {W}x{H} (margins px {m})'); sys.exit(1)
+else:
+    half = max(-ext['l'], ext['r']) * PPU
+    W = int(math.ceil(half)) * 2 + 6
+    H = int(math.ceil((ext['t'] - ext['b']) * PPU)) + 6
+    FOOT = H - 3 - int(math.ceil(-ext['b'] * PPU))
 print(f'SIZE {TAG}: ppu {PPU:.4f}  canvas {W}x{H}  origin row {FOOT}  clips {nframes}')
 
 cd = bpy.data.cameras.new('IsoCam'); cd.type = 'ORTHO'

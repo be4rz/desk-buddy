@@ -83,6 +83,52 @@ pub struct PackMeta {
     pub temperament: Temperament,
     pub timers: Timers,
     pub capabilities: Capabilities,
+    /// The quiet-hours pool (additive to §3.3; default `nap`/`rest`, nap ×4).
+    pub quiet_hours: QuietPool,
+    /// Behaviors left out of the pool just after start (additive to §3.3).
+    pub warmup: Warmup,
+}
+
+/// `pack.json` `"quiet_hours": {"pool": [...], "boost": {behavior: ×}}`: in quiet
+/// hours the idle pool is `pool` and each `boost` entry's weight is multiplied.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct QuietPool {
+    pub pool: Vec<String>,
+    #[serde(default)]
+    pub boost: BTreeMap<String, f64>,
+}
+
+impl Default for QuietPool {
+    fn default() -> Self {
+        QuietPool { pool: vec!["nap".into(), "rest".into()], boost: BTreeMap::from([("nap".into(), 4.0)]) }
+    }
+}
+
+/// `pack.json` `"warmup": {"duration_s": 180, "exclude": [...]}`: for the first
+/// `duration_s` after the brain starts, `exclude` is out of the idle pool
+/// (quiet hours excepted), so a fresh start shows awake variety.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Warmup {
+    pub duration_s: f64,
+    #[serde(default)]
+    pub exclude: Vec<String>,
+}
+
+impl Default for Warmup {
+    fn default() -> Self {
+        Warmup { duration_s: 180.0, exclude: vec!["nap".into()] }
+    }
+}
+
+/// The optional p2 keys, read from the same text (`PackFile` ignores them).
+#[derive(Deserialize, Default)]
+struct Extras {
+    #[serde(default)]
+    quiet_hours: Option<QuietPool>,
+    #[serde(default)]
+    warmup: Option<Warmup>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -297,6 +343,7 @@ impl Loader {
             None => return Err(self.invalid(rel, "pack_version is missing or not a number")),
         }
         let file: PackFile = self.json(rel, &text)?;
+        let extras: Extras = self.json(rel, &text)?;
 
         let art_rel = PathBuf::from(&file.art_root);
         if !self.abs(&art_rel).is_dir() {
@@ -349,7 +396,23 @@ impl Loader {
             temperament: file.temperament,
             timers: file.timers,
             capabilities: file.capabilities.clone(),
+            quiet_hours: QuietPool::default(),
+            warmup: Warmup::default(),
         };
+        // the built-in defaults name only what this pack defines (a pack without
+        // nap still loads); values the pack writes itself are checked strictly
+        let defined = |b: &String| meta.behaviors.contains_key(b);
+        meta.quiet_hours = extras.quiet_hours.unwrap_or_else(|| {
+            let mut q = QuietPool::default();
+            q.pool.retain(defined);
+            q.boost.retain(|b, _| defined(b));
+            q
+        });
+        meta.warmup = extras.warmup.unwrap_or_else(|| {
+            let mut w = Warmup::default();
+            w.exclude.retain(defined);
+            w
+        });
         self.check_behaviors(&file, &mut meta)?;
         Ok(meta)
     }
@@ -583,6 +646,17 @@ impl Loader {
             if let Some(t) = e.traits.keys().find(|t| file.temperament.get(t).is_none()) {
                 return Err(self.invalid(rel, format!("idle_pool: {} has unknown trait {t}", e.behavior)));
             }
+        }
+        let q = &meta.quiet_hours;
+        let named = q.pool.iter().chain(q.boost.keys()).chain(meta.warmup.exclude.iter());
+        if let Some(b) = named.into_iter().find(|b| !meta.behaviors.contains_key(*b)) {
+            return Err(self.invalid(rel, format!("quiet_hours/warmup: undefined behavior {b}")));
+        }
+        if let Some((b, _)) = q.boost.iter().find(|(_, w)| !(**w >= 0.0)) {
+            return Err(self.invalid(rel, format!("quiet_hours: boost for {b} must be >= 0")));
+        }
+        if !(meta.warmup.duration_s >= 0.0) {
+            return Err(self.invalid(rel, "warmup: duration_s must be >= 0"));
         }
         Ok(())
     }

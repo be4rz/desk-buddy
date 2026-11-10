@@ -1,0 +1,8 @@
+[
+  {"owner": "Google Chrome", "pid": 640, "layer": 0, "x": 0, "y": 33, "w": 1512, "h": 949},
+  {"owner": "Google Chrome", "pid": 640, "layer": 101, "x": 200, "y": 70, "w": 620, "h": 40},
+  {"owner": "Google Chrome", "pid": 640, "layer": 3, "x": 900, "y": 400, "w": 320, "h": 240},
+  {"owner": "Google Chrome", "pid": 640, "layer": 3, "x": 300, "y": 450, "w": 400, "h": 60},
+  {"owner": "Google Chrome", "pid": 640, "layer": 3, "x": 180, "y": 110, "w": 520, "h": 32},
+  {"owner": "Window Server", "pid": 160, "layer": 24, "x": 0, "y": 0, "w": 1512, "h": 33}
+]

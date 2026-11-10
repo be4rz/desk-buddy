@@ -1,5 +1,6 @@
 //! The sidecar's `ev` records → `MascotEvent`s (plan §2 mapping). Only changes
-//! come out: the same event twice in a row is sent once.
+//! come out: the same event twice in a row is sent once. A fired reminder is
+//! a one-off, not a state: it always comes out, and leaves the dedupe alone.
 
 use std::collections::HashMap;
 
@@ -65,6 +66,10 @@ impl Mapper {
             }
             Some("entry") => {
                 let e = &rec["entry"];
+                if e["kind"] == "buddy.event" && e["data"]["type"] == "reminder_fired" {
+                    let (id, text) = (e["data"]["id"].as_str().unwrap_or(""), e["data"]["text"].as_str().unwrap_or(""));
+                    return (!text.is_empty()).then(|| MascotEvent::Reminder { id: id.into(), text: text.into() });
+                }
                 if e["kind"] == "buddy.event" && e["data"]["type"] == "approval_asked" {
                     if let (Some(id), Some(title)) = (e["data"]["callId"].as_str(), e["data"]["title"].as_str()) {
                         self.titled(id, title);
@@ -186,6 +191,43 @@ mod tests {
         assert_eq!(e, Some(MascotEvent::Idle));
         // Text outside a run (a late record) doesn't make it speak.
         assert_eq!(m.on_record(&json!({ "t": "ev", "kind": "text", "delta": "late" })), None);
+    }
+
+    #[test]
+    fn a_fired_reminder_maps_to_reminder_every_time_without_touching_the_dedupe() {
+        let mut m = Mapper::new();
+        assert_eq!(m.on_record(&status(json!({ "busy": false, "phase": "idle", "tools": [], "asking": [] }))), Some(MascotEvent::Idle));
+        let fired = |id: &str| json!({ "t": "ev", "kind": "entry", "entry": { "kind": "buddy.event", "data": { "type": "reminder_fired", "id": id, "text": "stretch", "atMs": 1 } } });
+        assert_eq!(m.on_record(&fired("r_1")), Some(MascotEvent::Reminder { id: "r_1".into(), text: "stretch".into() }));
+        assert_eq!(m.on_record(&fired("r_2")), Some(MascotEvent::Reminder { id: "r_2".into(), text: "stretch".into() }));
+        // Still idle as far as the dedupe knows.
+        assert_eq!(m.on_record(&status(json!({ "busy": false, "phase": "idle", "tools": [], "asking": [] }))), None);
+        // Other buddy events map to nothing.
+        let other = json!({ "t": "ev", "kind": "entry", "entry": { "kind": "buddy.event", "data": { "type": "taint_set", "source": "web_fetch" } } });
+        assert_eq!(m.on_record(&other), None);
+    }
+
+    /// `host::EMOTIONS`/`EMOTES` (what the CLI validates) are exactly the protocol's enums.
+    #[test]
+    fn the_hosts_emotion_and_emote_lists_equal_the_protocol_enums() {
+        use mascot_protocol::{EmoteName, Emotion};
+        // Exhaustive: a new variant fails to compile here until it is listed.
+        let emotion_name = |e: Emotion| match e {
+            Emotion::Neutral | Emotion::Happy | Emotion::Sad | Emotion::Surprised | Emotion::Thinking | Emotion::Sleepy => serde_json::to_value(e).unwrap().as_str().unwrap().to_string(),
+        };
+        let emote_name = |e: EmoteName| match e {
+            EmoteName::Wave | EmoteName::Nod | EmoteName::Shake | EmoteName::Jump | EmoteName::Spin => serde_json::to_value(e).unwrap().as_str().unwrap().to_string(),
+        };
+        let emotions: Vec<String> = [Emotion::Neutral, Emotion::Happy, Emotion::Sad, Emotion::Surprised, Emotion::Thinking, Emotion::Sleepy].into_iter().map(emotion_name).collect();
+        let emotes: Vec<String> = [EmoteName::Wave, EmoteName::Nod, EmoteName::Shake, EmoteName::Jump, EmoteName::Spin].into_iter().map(emote_name).collect();
+        assert_eq!(emotions, host::EMOTIONS);
+        assert_eq!(emotes, host::EMOTES);
+        for s in host::EMOTIONS {
+            assert!(serde_json::from_value::<Emotion>(json!(s)).is_ok(), "{s}");
+        }
+        for s in host::EMOTES {
+            assert!(serde_json::from_value::<EmoteName>(json!(s)).is_ok(), "{s}");
+        }
     }
 
     #[test]

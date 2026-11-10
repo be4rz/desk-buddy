@@ -123,16 +123,21 @@ impl Decision {
 pub const MODES: [&str; 3] = ["ask", "allowlist", "skip"];
 
 /// The default rules: computed, never stored, shown with `origin: "default"`.
-const DEFAULT_RULES: [(&str, &str, &str); 4] = [
+/// The `buddy` commands that drive the bear's own body and reminders run without a card, marked or not.
+const DEFAULT_RULES: [(&str, &str, &str); 8] = [
     ("d1", "deny", "Write(.buddy/**)"),
     ("d2", "deny", "Edit(.buddy/**)"),
     ("d3", "ask", "Shell(curl:*)"),
     ("d4", "ask", "Shell(wget:*)"),
+    ("d5", "allow", "Shell(buddy say:*)"),
+    ("d6", "allow", "Shell(buddy mascot emote:*)"),
+    ("d7", "allow", "Shell(buddy status:*)"),
+    ("d8", "allow", "Shell(buddy remind:*)"),
 ];
 /// Approving a command these rules ask about marks the conversation.
 const FETCH_RULES: [&str; 2] = ["d3", "d4"];
-/// The tools a child conversation may use (none yet: S2b brings the research helper).
-const CHILD_TOOLS: [&str; 1] = ["read"];
+/// The tools a child conversation (a `task` research helper) may use.
+pub const CHILD_TOOLS: [&str; 2] = ["web_fetch", "web_search"];
 const MAX_PENDING: usize = 8;
 const MAX_TAINT_SOURCES: usize = 20;
 
@@ -349,6 +354,9 @@ impl Production {
                 let tool = FileTool::of(&req.tool).unwrap();
                 Self::file(at, &rules, mode, tainted, tool, req.args["path"].as_str().unwrap_or(""))
             }
+            // Showing the model an image is reading that file.
+            "look" => Self::file(at, &rules, mode, tainted, FileTool::Read, req.args["path"].as_str().unwrap_or("")),
+            "web_fetch" | "web_search" | "task" => Self::web(mode, &req.tool, &req.args, child),
             t => Verdict::Deny(format!("“{t}” isn’t one of desk-buddy’s tools.")),
         }
     }
@@ -418,6 +426,32 @@ impl Production {
         Verdict::Ask(approval, taint)
     }
 
+    /// The web tools and `task`: allowed unless every call asks. Their results mark the conversation through
+    /// `policy.taint` when they arrive, so a card here has nothing to mark and no "Always" (asking is the mode).
+    fn web(mode: &str, tool: &str, args: &Value, child: bool) -> Verdict {
+        if mode != "ask" || child {
+            return Verdict::Allow;
+        }
+        let (title, what) = match tool {
+            "web_fetch" => ("Open a web page?".to_string(), args["url"].as_str().unwrap_or("").to_string()),
+            "web_search" => ("Search the web?".to_string(), args["query"].as_str().unwrap_or("").to_string()),
+            _ => ("Send a helper to research this?".to_string(), args["prompt"].as_str().unwrap_or("").to_string()),
+        };
+        let what: String = what.chars().take(300).collect();
+        Verdict::Ask(
+            json!({
+                "kind": "web",
+                "tool": tool,
+                "title": title,
+                "detail": "Ask every time is on.",
+                "query": what,
+                "suggestedRule": null,
+                "offerAlways": false,
+            }),
+            None,
+        )
+    }
+
     fn file(at: &AgentCtx, rules: &Rules, mode: &str, tainted: bool, tool: FileTool, path: &str) -> Verdict {
         if path.trim().is_empty() {
             return Verdict::Deny("Name a file.".into());
@@ -448,8 +482,11 @@ impl Production {
             let inside = t.inside && !own_records;
             // The bundled skills its prompt points it at hold nothing of the person's.
             let bundled = tool == FileTool::Read && at.skills_dir.as_ref().and_then(|d| d.canonicalize().ok()).is_some_and(|d| t.abs.starts_with(d));
+            // A capped tool result's full text (`.buddy/outputs/`): the sidecar wrote it, the agent can't, and it is
+            // already the conversation's own, so paging through it never asks, marked or not.
+            let capped = tool == FileTool::Read && t.inside && t.display.replace('\\', "/").to_ascii_lowercase().starts_with(".buddy/outputs/");
             // Once the conversation read the web, a read outside the folder could carry a file out: it asks.
-            if (tool == FileTool::Read && !tainted) || inside || bundled || first(&rules.allow, |p| p.matches_file(tool, &t)).is_some() {
+            if (tool == FileTool::Read && !tainted) || inside || bundled || capped || first(&rules.allow, |p| p.matches_file(tool, &t)).is_some() {
                 return Verdict::Allow;
             }
         }

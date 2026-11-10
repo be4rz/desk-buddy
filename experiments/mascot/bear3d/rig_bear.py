@@ -1,6 +1,17 @@
 # Rig the cute bear and key the Stage A clips (idle, walk, run + start/stop). The model is not changed.
 #
 #   Blender -b bear.blend -P rig_bear.py -- [--out bear_rig.blend] [--clips clips.json]
+#   Blender -b bear.blend -P rig_bear.py -- --stage c [--out bear_rig_c.blend] [--clips clips_c.json]
+#
+# --stage c (Stage C, run_c.sh) keys anim_clips.ORDER_C plus the face-layer helpers instead of the Stage A clips,
+# and changes only what the D16 face layers need (without --stage c the script behaves exactly as before):
+#   - eyes and mouth get their own bones under root that ride the body by a WHOLE-PIXEL VERTICAL shift only
+#     (no xy squash), so the eyes/mouth pixels never re-rasterise and a constant patch per direction matches;
+#   - arms also take spL/spR (sideways raise, as Stage B's spread);
+#   - extra actions: idle_ref (Stage A idle poses, eyes open, rigid eyes/mouth = verify_face.py's reference for
+#     the shipped idle), face_rest (rest pose) and face_eyes_closed (rest, eyes shut);
+#   - extra hidden meshes mouth_open / mouth_wide / tongue (face-layer states, shown only by render_anim.py --show);
+#   - clips_c.json gains per clip face_px = {eyes, mouth}: whole-pixel upward shift per frame.
 #
 # Armature 'Rig' (child of BearRoot). Every part is rigidly parented to one bone, so there is no skin
 # weighting and the face decals can't smear:
@@ -27,8 +38,11 @@ import anim_clips
 
 argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
 def arg(n, d=None): return argv[argv.index(n) + 1] if n in argv else d
-OUT = arg('--out', os.path.join(HERE, 'bear_rig.blend'))
-CLIPS_JSON = arg('--clips', os.path.join(HERE, 'clips.json'))
+STAGE = arg('--stage', 'a')
+if STAGE not in ('a', 'c'): raise SystemExit(f'rig_bear.py: --stage must be a or c, not {STAGE!r}')
+STAGE_C = STAGE == 'c'
+OUT = arg('--out', os.path.join(HERE, 'bear_rig_c.blend' if STAGE_C else 'bear_rig.blend'))
+CLIPS_JSON = arg('--clips', os.path.join(HERE, 'clips_c.json' if STAGE_C else 'clips.json'))
 FIT, FIT_YAW = 105.0, 112.5   # the cute 100 px renders: same pixel size
 
 sc = bpy.context.scene; vl = bpy.context.view_layer
@@ -77,6 +91,45 @@ BIND = {'body': 'body', 'pants': 'body', 'stitch': 'body', 'eyes': 'eyes', 'hat'
         'stem': 'clover', 'clover': 'clover', 'clover_b': 'clover', 'arm_L': 'arm_L', 'arm_R': 'arm_R',
         'ear_L': 'ear_L', 'ear_R': 'ear_R', 'foot_L': 'foot_L', 'foot_R': 'foot_R'}
 
+if STAGE_C:
+    # ---------------------------------------------------------------- Stage C: face-layer mouths + rigid face bones
+    def cast(ob, origin, direction):   # as build_bear.py
+        mi = ob.matrix_world.inverted()
+        o = mi @ Vector(origin); d = (mi.to_3x3() @ Vector(direction)).normalized()
+        ok, loc, nrm, _ = ob.ray_cast(o, d)
+        if not ok: raise RuntimeError(f'ray miss {origin} {direction}')
+        return ob.matrix_world @ loc, (ob.matrix_world.to_3x3() @ nrm).normalized()
+    def face_point(x, z): return cast(O['body'], (x, -3, z), (0, 1, 0))
+    def basis_from_normal(n, up=Vector((0, 0, 1))):
+        n = Vector(n).normalized(); ty = (up - n * up.dot(n)).normalized(); tx = ty.cross(n).normalized()
+        return Matrix((tx, ty, n)).transposed()
+    import bmesh
+    def decal(name, pid, x, z, radii, lift=0.0):
+        # a flat oval lying on the head surface (like build_bear.py's face decals), hidden from renders
+        p, n = face_point(x, z)
+        me = bpy.data.meshes.new(name); bm = bmesh.new()
+        bmesh.ops.create_uvsphere(bm, u_segments=16, v_segments=10, radius=1.0)
+        bmesh.ops.scale(bm, vec=Vector(radii), verts=bm.verts); bm.to_mesh(me); bm.free()
+        for f in me.polygons: f.use_smooth = True
+        ob = bpy.data.objects.new(name, me); col.objects.link(ob)
+        ob.matrix_world = Matrix.Translation(p + n * lift) @ basis_from_normal(n).to_4x4()
+        src = O['blush' if pid == 17 else 'mouth']
+        me.materials.append(src.data.materials[0]); ob.pass_index = pid
+        ob.hide_render = True
+        return ob
+    mz = wverts(O['mouth'])[:, 2]
+    MZ = (mz.min() + mz.max()) / 2                                    # centre height of the little "^" mouth
+    decal('mouth_open', 18, 0.0, MZ - 0.012, (0.042, 0.040, 0.012))  # small round "o"
+    decal('mouth_wide', 18, 0.0, MZ - 0.022, (0.075, 0.058, 0.012))  # big happy open mouth
+    decal('tongue', 17, 0.0, MZ - 0.048, (0.040, 0.022, 0.012), lift=0.008)   # pink tongue inside the wide mouth
+    vl.update()
+    meshes = [o for o in col.all_objects if o.type == 'MESH']
+    rest = {o.name: o.matrix_world.copy() for o in meshes}
+    mv = np.concatenate([wverts(O[n]) for n in ('mouth', 'mouth_open', 'mouth_wide', 'tongue')])
+    PIV['mouth'] = Vector(((mv[:, 0].min() + mv[:, 0].max()) / 2, mv[:, 1].mean(), (mv[:, 2].min() + mv[:, 2].max()) / 2))
+    PARENT['eyes'] = 'root'; PARENT['mouth'] = 'root'
+    for n in ('mouth', 'mouth_open', 'mouth_wide', 'tongue'): BIND[n] = 'mouth'
+
 # ------------------------------------------------------------------ armature
 arm = bpy.data.armatures.new('RigData'); rig = bpy.data.objects.new('Rig', arm); col.objects.link(rig)
 rig.parent = root; rig.matrix_world = Matrix.Identity(4)
@@ -122,7 +175,20 @@ def deltas(q):
         D['ear_' + s] = carry(PIV['ear_' + s]) @ about(PIV['ear_' + s], ry(k * q['ear' + s]))
     D['eyes'] = about(PIV['eyes'], scl(1, 1, q['blink']))
     D['clover'] = about(PIV['clover'], ry(q['clY']) @ rx(q['clX']))
+    if STAGE_C:
+        assert q['roll'] == 0 and q['lean'] == 0, 'Stage C poses keep the head upright (face patches)'
+        for s, k in (('L', 1), ('R', -1)):
+            sh = PIV['arm_' + s]
+            D['arm_' + s] = carry(sh) @ about(sh, rx(-q['arm' + s])) @ about(sh, ry(-k * q.get('sp' + s, 0.0)))
+        D['eyes'] = face_shift(PIV['eyes'], D) @ D['eyes']; D['mouth'] = face_shift(PIV['mouth'], D)
     return D
+
+def face_px(p, D):
+    """Stage C: whole screen pixels the body's motion lifts point p (the eyes / mouth shift up by this)."""
+    return int(round(((D['body'] @ p).z - p.z) / PXZ))
+
+def face_shift(p, D):
+    return Matrix.Translation((0, 0, face_px(p, D) * PXZ))
 
 def apply_pose(q):
     for name, Dm in deltas(q).items():
@@ -132,11 +198,20 @@ def apply_pose(q):
 
 # ------------------------------------------------------------------ actions
 clips = anim_clips.build(V, PXZ)
+ORDER = anim_clips.ORDER
+if STAGE_C:
+    idle = clips['idle']
+    clips = anim_clips.build_c(V, PXZ)
+    clips['idle_ref'] = dict(loop=True, root=idle['root'], next_root=idle['next_root'],
+                             frames=[dict(anim_clips.REST_C, **dict(q, blink=1.0)) for q in idle['frames']])
+    clips['face_rest'] = dict(loop=False, root=[0.0], next_root=0.0, frames=[anim_clips.PC()])
+    clips['face_eyes_closed'] = dict(loop=False, root=[0.0], next_root=0.0, frames=[anim_clips.PC(blink=0.12)])
+    ORDER = anim_clips.ORDER_C + ['idle_ref', 'face_rest', 'face_eyes_closed']
 sc.render.fps = anim_clips.FPS; sc.render.fps_base = 1
 bpy.context.preferences.edit.keyframe_new_interpolation_type = 'CONSTANT'
 rig.animation_data_create()
-meta = dict(fps=anim_clips.FPS, ppu=PPU, V=V, PXZ=PXZ, order=anim_clips.ORDER, clips={})
-for cname in anim_clips.ORDER:
+meta = dict(fps=anim_clips.FPS, ppu=PPU, V=V, PXZ=PXZ, order=ORDER, clips={})
+for cname in ORDER:
     c = clips[cname]
     act = bpy.data.actions.new(cname); act.use_fake_user = True
     rig.animation_data.action = act
@@ -147,9 +222,11 @@ for cname in anim_clips.ORDER:
                 pb.keyframe_insert(path, frame=f, group=pb.name)
     meta['clips'][cname] = dict(loop=c['loop'], n=len(c['frames']), root=c['root'] + [c['next_root']],
                                 poses=c['frames'])
+    if STAGE_C:
+        meta['clips'][cname]['face_px'] = {s: [face_px(PIV[s], deltas(q)) for q in c['frames']] for s in ('eyes', 'mouth')}
     print('CLIP', cname, len(c['frames']), 'frames')
-rig.animation_data.action = bpy.data.actions['idle']
-sc.frame_start, sc.frame_end = 0, meta['clips']['idle']['n'] - 1
+rig.animation_data.action = bpy.data.actions[ORDER[0]]
+sc.frame_start, sc.frame_end = 0, meta['clips'][ORDER[0]]['n'] - 1
 for pb in rig.pose.bones: pb.matrix_basis = Matrix.Identity(4)
 json.dump(meta, open(CLIPS_JSON, 'w'), indent=1)
 bpy.context.preferences.filepaths.save_version = 0

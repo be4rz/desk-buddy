@@ -45,23 +45,85 @@ fn asks(d: &Decision) -> &Value {
 }
 
 #[test]
-fn read_only_commands_run_and_buddy_say_asks_with_an_always_rule() {
+fn read_only_commands_and_buddy_verbs_run_and_others_ask_with_an_always_rule() {
     let fx = Fixture::new("say");
     let p = policy();
     assert_eq!(p.decide(&fx.at, &bash("c1", "ls -la && buddy status --json")), Decision::Allow);
     assert_eq!(p.decide(&fx.at, &bash("c2", "buddy --help --json")), Decision::Allow);
-    let d = p.decide(&fx.at, &bash("c3", "buddy say \"Hi!\" --emotion happy"));
+    // The bear's own verbs run by default (d5–d8).
+    for (i, cmd) in ["buddy say \"Hi!\" --emotion happy", "buddy mascot emote wave", "buddy status", "buddy remind --in 20m stretch"].iter().enumerate() {
+        assert_eq!(p.decide(&fx.at, &bash(&format!("b{i}"), cmd)), Decision::Allow, "{cmd}");
+    }
+    let d = p.decide(&fx.at, &bash("c3", "make build"));
     let a = asks(&d);
-    assert_eq!(a["title"], "Run buddy say?");
-    assert_eq!(a["suggestedRule"], "Shell(buddy say:*)");
+    assert_eq!(a["title"], "Run make?");
+    assert_eq!(a["suggestedRule"], "Shell(make:*)");
     assert_eq!(a["offerAlways"], true);
-    // Allow from now on: the rule is stored and the next say runs.
+    // Allow from now on: the rule is stored and the next make runs.
     p.ui(&fx.at, &json!({ "op": "approval_answer", "callId": "c3", "answer": "allow_always" })).unwrap();
     assert_eq!(p.wait(&fx.at, "c3")["decision"], "allow");
-    assert_eq!(p.decide(&fx.at, &bash("c4", "buddy say again")), Decision::Allow);
+    assert_eq!(p.decide(&fx.at, &bash("c4", "make again")), Decision::Allow);
     // Stored on disk, and read back by a fresh policy.
-    assert!(load(&fx.at.state_dir).rules.iter().any(|r| r.pattern == "Shell(buddy say:*)"));
-    assert_eq!(policy().decide(&fx.at, &bash("c5", "buddy say from disk")), Decision::Allow);
+    assert!(load(&fx.at.state_dir).rules.iter().any(|r| r.pattern == "Shell(make:*)"));
+    assert_eq!(policy().decide(&fx.at, &bash("c5", "make from disk")), Decision::Allow);
+}
+
+#[test]
+fn buddy_verbs_still_run_when_tainted_but_tainted_cards_offer_no_always() {
+    let fx = Fixture::new("taint-verbs");
+    let p = policy();
+    assert!(p.taint(&fx.at, "web_fetch", "https://example.com"));
+    assert!(!p.taint(&fx.at, "web_fetch", "https://example.com/2"), "already marked");
+    assert_eq!(p.decide(&fx.at, &bash("c1", "buddy say found it")), Decision::Allow);
+    assert_eq!(p.decide(&fx.at, &bash("c2", "buddy remind --in 1h tea")), Decision::Allow);
+    let a = asks(&p.decide(&fx.at, &bash("c3", "make build"))).clone();
+    assert_eq!(a["offerAlways"], false);
+    assert!(a["suggestedRule"].is_null());
+}
+
+#[test]
+fn web_tools_run_unless_ask_mode_and_children_get_only_web_tools() {
+    let fx = Fixture::new("web");
+    let p = policy();
+    let tool = |call: &str, tool: &str, args: Value| Decide { call_id: call.into(), tool: tool.into(), args, conversation: "root".into(), ..Default::default() };
+    assert_eq!(p.decide(&fx.at, &tool("w1", "web_fetch", json!({ "url": "https://example.com" }))), Decision::Allow);
+    assert_eq!(p.decide(&fx.at, &tool("w2", "web_search", json!({ "query": "otters" }))), Decision::Allow);
+    assert_eq!(p.decide(&fx.at, &tool("w3", "task", json!({ "prompt": "find otters" }))), Decision::Allow);
+    // A child (a task helper) may use the web tools and nothing else.
+    let child = |d: Decide| Decide { conversation: "child".into(), depth: 1, ..d };
+    assert_eq!(p.decide(&fx.at, &child(tool("k1", "web_fetch", json!({ "url": "https://example.com" })))), Decision::Allow);
+    assert!(matches!(p.decide(&fx.at, &child(file("k2", "read", "notes/a.md"))), Decision::Deny { .. }));
+    assert!(matches!(p.decide(&fx.at, &child(tool("k3", "task", json!({ "prompt": "x" })))), Decision::Deny { .. }));
+    // Ask mode asks for the root's web calls, never with an "Always".
+    p.ui(&fx.at, &json!({ "op": "set_mode", "mode": "ask" })).unwrap();
+    let a = asks(&p.decide(&fx.at, &tool("w4", "web_search", json!({ "query": "otters" })))).clone();
+    assert_eq!(a["kind"], "web");
+    assert_eq!(a["offerAlways"], false);
+    assert_eq!(CHILD_TOOLS, ["web_fetch", "web_search"]);
+}
+
+#[test]
+fn look_is_checked_as_a_read() {
+    let fx = Fixture::new("look");
+    let p = policy();
+    assert_eq!(p.decide(&fx.at, &file("l1", "look", "notes/shot.png")), Decision::Allow);
+    assert_eq!(p.decide(&fx.at, &file("l2", "look", "/etc/hosts")), Decision::Allow);
+    p.taint(&fx.at, "web_fetch", "u");
+    asks(&p.decide(&fx.at, &file("l3", "look", "/etc/hosts")));
+    assert_eq!(p.decide(&fx.at, &file("l4", "look", "notes/shot.png")), Decision::Allow);
+}
+
+#[test]
+fn a_capped_output_reads_back_when_tainted_but_other_buddy_files_still_ask() {
+    let fx = Fixture::new("capped");
+    let p = policy();
+    p.taint(&fx.at, "web_fetch", "u");
+    assert_eq!(p.decide(&fx.at, &file("o1", "read", ".buddy/outputs/call_1.txt")), Decision::Allow);
+    asks(&p.decide(&fx.at, &file("o2", "read", ".buddy/notes.txt")));
+    // Still never written by the agent.
+    assert!(matches!(p.decide(&fx.at, &file("o3", "write", ".buddy/outputs/call_1.txt")), Decision::Deny { .. }));
+    p.ui(&fx.at, &json!({ "op": "set_mode", "mode": "ask" })).unwrap();
+    asks(&p.decide(&fx.at, &file("o4", "read", ".buddy/outputs/call_1.txt")));
 }
 
 #[test]
@@ -152,7 +214,7 @@ fn a_damaged_policy_file_starts_marked() {
 fn wait_blocks_until_answered_and_returns_on_deny_cancel_or_release() {
     let fx = Fixture::new("wait");
     let p = Arc::new(policy());
-    asks(&p.decide(&fx.at, &bash("c1", "buddy say one")));
+    asks(&p.decide(&fx.at, &bash("c1", "make one")));
     let (p2, at2) = (p.clone(), fx.at.clone());
     let waiter = thread::spawn(move || p2.wait(&at2, "c1"));
     thread::sleep(Duration::from_millis(100));
@@ -164,8 +226,8 @@ fn wait_blocks_until_answered_and_returns_on_deny_cancel_or_release() {
     assert_eq!(p.ui(&fx.at, &json!({ "op": "approval_answer", "callId": "c1", "answer": "allow" })).unwrap_err().code, "not_found");
 
     // The same call cut off and asked again gets the same card, not a second one.
-    let first = asks(&p.decide(&fx.at, &bash("c2", "buddy say two"))).clone();
-    assert_eq!(asks(&p.decide(&fx.at, &bash("c2", "buddy say two"))), &first);
+    let first = asks(&p.decide(&fx.at, &bash("c2", "make two"))).clone();
+    assert_eq!(asks(&p.decide(&fx.at, &bash("c2", "make two"))), &first);
     assert_eq!(p.view(&fx.at)["pending"], json!(["c2"]));
 
     // Cancel withdraws the card.
@@ -176,7 +238,7 @@ fn wait_blocks_until_answered_and_returns_on_deny_cancel_or_release() {
     assert_eq!(waiter.join().unwrap()["answer"], "cancelled");
 
     // Release ends the gen's waits; the card stays for the next sidecar.
-    asks(&p.decide(&fx.at, &bash("c3", "buddy say three")));
+    asks(&p.decide(&fx.at, &bash("c3", "make three")));
     let (p2, at2) = (p.clone(), fx.at.clone());
     let waiter = thread::spawn(move || p2.wait(&at2, "c3"));
     thread::sleep(Duration::from_millis(50));
@@ -191,10 +253,10 @@ fn too_many_pending_cards_deny_and_unknown_tools_deny() {
     let fx = Fixture::new("limits");
     let p = policy();
     for i in 0..MAX_PENDING {
-        asks(&p.decide(&fx.at, &bash(&format!("c{i}"), "buddy say x")));
+        asks(&p.decide(&fx.at, &bash(&format!("c{i}"), "make x")));
     }
-    assert!(matches!(p.decide(&fx.at, &bash("c99", "buddy say x")), Decision::Deny { .. }));
-    assert!(matches!(p.decide(&fx.at, &Decide { tool: "web_fetch".into(), ..bash("w1", "") }), Decision::Deny { .. }));
+    assert!(matches!(p.decide(&fx.at, &bash("c99", "make x")), Decision::Deny { .. }));
+    assert!(matches!(p.decide(&fx.at, &Decide { tool: "frobnicate".into(), ..bash("w1", "") }), Decision::Deny { .. }));
     assert!(matches!(p.decide(&fx.at, &bash("e1", "   ")), Decision::Deny { .. }));
     let child = Decide { conversation: "child".into(), depth: 1, ..bash("k1", "ls") };
     assert!(matches!(p.decide(&fx.at, &child), Decision::Deny { .. }));
