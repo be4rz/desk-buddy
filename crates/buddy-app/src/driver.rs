@@ -150,6 +150,8 @@ pub struct App {
     bubble_loaded: bool,
     /// the last `bubble show` label logged (a new line only when mode/streaming change)
     bubble_label: Option<String>,
+    /// what the bubble showed after the last `apply` (for the answer's `Settled`)
+    bubble_mode: Option<Mode>,
     /// a brain-driven hide, for the `[buddy] hide:` line
     brain_hidden: bool,
     /// `BUDDY_STATS=1`: the mouth while talking
@@ -177,6 +179,13 @@ fn listen_poke(listening: bool, prompt_shown: bool) -> Option<Poke> {
         (true, false) => Some(Poke::PromptClosed),
         _ => None,
     }
+}
+
+/// The answer's speech bubble went (hidden, or another bubble took its place): the brain's
+/// `Settled`, so a bear answering from a station stands up (p3 desk). Not when a card replaces it
+/// (the turn goes on) or the speech is only refreshed.
+fn speech_settled(before: Option<Mode>, after: Option<Mode>) -> bool {
+    before == Some(Mode::Speech) && !matches!(after, Some(Mode::Speech | Mode::Card))
 }
 
 /// The Ask… prompt is what the bubble shows.
@@ -243,6 +252,7 @@ pub fn start(init: Init, handle: tauri::AppHandle) {
         bubble_win: None,
         bubble_loaded: false,
         bubble_label: None,
+        bubble_mode: None,
         brain_hidden: false,
         mouth_log: std::env::var_os("BUDDY_STATS").is_some(),
         last_mouth: None,
@@ -294,6 +304,12 @@ impl App {
                 self.brain.event(&ev, now);
                 let out = self.bubble.event(&ev, now);
                 self.apply(out);
+                // the turn ended seated with no answer on screen (stopped, replaced, or none): no bubble
+                // hide will come to settle it, so it settles now
+                if matches!(ev, MascotEvent::Idle) && self.bubble_mode != Some(Mode::Speech) && self.brain.holds_seat() {
+                    eprintln!("[buddy] bubble settled (no answer showing)");
+                    self.brain.event(&MascotEvent::Settled, now);
+                }
             }
             Inbox::Senses(patch) => {
                 // a patch merges over the raw senses; the brain always sees them whole, gated
@@ -642,6 +658,13 @@ fn hide_reason(s: &Senses) -> &'static str {
 impl App {
     /// Show, hide or keep what the bubble state machine decided; re-arm its hide timer.
     pub fn apply(&mut self, out: Out) {
+        let mode = self.bubble.shown().map(|m| m.mode);
+        if speech_settled(std::mem::replace(&mut self.bubble_mode, mode), mode) {
+            eprintln!("[buddy] bubble settled");
+            let now = self.now_ms();
+            self.brain.event(&MascotEvent::Settled, now);
+            self.wake();
+        }
         // the brain listens while the prompt is really up (not the setup bubble, not a kept card)
         if let Some(p) = listen_poke(self.listening, prompt_shown(&self.bubble)) {
             self.listening = p == Poke::PromptOpen;
@@ -943,6 +966,28 @@ pub fn status(s: &Senses, action: DndAct) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_answer_bubble_settles_when_it_goes_or_the_prompt_replaces_it() {
+        assert!(speech_settled(Some(Mode::Speech), None), "dismissed or timed out");
+        assert!(speech_settled(Some(Mode::Speech), Some(Mode::Prompt)), "the person clicked for a new prompt");
+        assert!(speech_settled(Some(Mode::Speech), Some(Mode::Reminder)), "a reminder took its place");
+        assert!(speech_settled(Some(Mode::Speech), Some(Mode::Error)), "an error took its place");
+        assert!(!speech_settled(Some(Mode::Speech), Some(Mode::Card)), "a card: the turn goes on");
+        assert!(!speech_settled(Some(Mode::Speech), Some(Mode::Speech)), "still talking");
+        assert!(!speech_settled(Some(Mode::Card), None), "the card's Settled comes from its answer");
+        assert!(!speech_settled(None, None));
+        // the bubble's own path: an answer, then its hide timer
+        let mut b = Bubble::new();
+        b.submitted("hi");
+        b.event(&MascotEvent::Speaking { text: "Hello.".into() }, 0);
+        b.event(&MascotEvent::Idle, 100);
+        let before = b.shown().map(|m| m.mode);
+        assert_eq!(before, Some(Mode::Speech));
+        let out = b.dismiss(200);
+        assert_eq!(out, Out::Hide);
+        assert!(speech_settled(before, b.shown().map(|m| m.mode)));
+    }
 
     #[test]
     fn listen_pokes_follow_the_prompt_on_screen() {

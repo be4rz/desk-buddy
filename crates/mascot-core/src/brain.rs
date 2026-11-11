@@ -5,12 +5,12 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 
-use mascot_protocol::pack::{Loops, Temperament, Turn};
-use mascot_protocol::{Emotion, MascotEvent};
+use mascot_protocol::pack::{ActivityKind, Loops, Temperament, Turn};
+use mascot_protocol::{Emotion, MascotEvent, WorkKind};
 use serde::{Deserialize, Serialize};
 
 use crate::body::{self, BodyReply, BodyReq, Playing, Reason, Status};
-use crate::pack::{Dir, EmoteAct, Ori, PackMeta};
+use crate::pack::{Dir, EmoteAct, Ori, PackMeta, Role};
 use crate::reflex::Reflexes;
 use crate::rng::Rng;
 
@@ -277,6 +277,9 @@ const CUE_CAP: usize = 4;
 const CATCHUP_MS: u64 = 10_000;
 /// Open eyes between the two blinks of a double blink.
 const DOUBLE_GAP_FRAMES: u64 = 2;
+/// The talk hold at a station (p3): a reply shown from the chair waits this long at most for the
+/// bubble's `Settled` before the bear stands up.
+pub const SEAT_HOLD_MS: u64 = 120_000;
 
 /// How long a `Say` / `Reminder` line holds its intent: the bubble's time.
 /// Talk (p3) uses the same number for the bubble.
@@ -332,6 +335,19 @@ struct Activity {
     for_ms: u64,
     /// When it ends; `None` = pending (asked during a turn, starts when the turn ends).
     until: Option<u64>,
+    /// Kind `work` (`computer`): starts at once even mid-turn, and a turn does not end it.
+    work: bool,
+}
+
+/// This turn's tally toward the work station (p3, `#flow-desk`): reset when a turn opens.
+#[derive(Clone, Copy, Debug, Default)]
+struct Tally {
+    /// When the turn opened.
+    open_at: u64,
+    /// Counted tool calls (`Working`, kind not `buddy` or `media`).
+    tools: u32,
+    /// DND hid the bear at the desk: no desk again this turn.
+    blocked: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -379,6 +395,11 @@ pub struct Brain {
     turn_open: bool,
     /// The prompt is open (`PromptOpen` … `PromptSent`/`PromptClosed`): the listen slot.
     listening: bool,
+    /// The turn's way to the work station.
+    tally: Tally,
+    /// The talk hold at a station: the turn ended while the bear faced the person; it stays
+    /// seated, talking, until `Settled` or this time.
+    seat_hold: Option<u64>,
     dragging: bool,
     vis: Visibility,
     quiet: bool,
@@ -437,6 +458,8 @@ impl Brain {
             user_hidden: false,
             turn_open: false,
             listening: false,
+            tally: Tally::default(),
+            seat_hold: None,
             dragging: false,
             vis: Visibility::Shown,
             quiet: false,
@@ -478,11 +501,19 @@ impl Brain {
         // a started activity ends on the next turn, whichever status opens it (a run can begin with a
         // tool or an approval card); one asked in this turn is still pending and waits for its end
         let opens_turn = matches!(ev, MascotEvent::Thinking | MascotEvent::Working { .. } | MascotEvent::AwaitingPermission { .. } | MascotEvent::Speaking { .. });
-        if opens_turn && self.activity.as_ref().is_some_and(|a| a.until.is_some()) {
+        // (a `work` activity, like the computer, keeps going through it)
+        if opens_turn && self.activity.as_ref().is_some_and(|a| a.until.is_some() && !a.work) {
             self.end_activity(t, "turn");
         }
         match ev {
             MascotEvent::Idle => {
+                // a reply shown from the chair: the bear stays there, talking, until the bubble goes
+                let replying = matches!(self.turn, Some(TurnState::Held(Intent::Talk)))
+                    || matches!(self.role(), Some(Role::Talk | Role::Ask));
+                if self.in_station() && replying {
+                    self.seat_hold = Some(t + SEAT_HOLD_MS);
+                    self.note(t, "seat", "hold".into());
+                }
                 self.turn_open = false;
                 if matches!(self.turn, Some(TurnState::Held(_))) {
                     self.turn = None;
@@ -490,15 +521,18 @@ impl Brain {
                 self.speak_len = None;
             }
             MascotEvent::Thinking => {
-                self.turn_open = true;
+                self.open_turn(t);
                 self.set_turn(TurnState::Held(Intent::Think))
             }
-            MascotEvent::Working { .. } => {
-                self.turn_open = true;
+            MascotEvent::Working { kind, .. } => {
+                self.open_turn(t);
+                if !matches!(kind, WorkKind::Buddy | WorkKind::Media) {
+                    self.tally.tools += 1;
+                }
                 self.set_turn(TurnState::Held(Intent::Work))
             }
             MascotEvent::AwaitingPermission { .. } => {
-                self.turn_open = true;
+                self.open_turn(t);
                 self.set_turn(TurnState::Held(Intent::Ask))
             }
             MascotEvent::Speaking { text } => {
@@ -507,7 +541,7 @@ impl Brain {
                     self.talk_until(t + self.pack.timers.mouth.stall_ms as u64);
                 }
                 self.speak_len = Some(len);
-                self.turn_open = true;
+                self.open_turn(t);
                 self.set_turn(TurnState::Held(Intent::Talk));
             }
             MascotEvent::Error { .. } => {
@@ -553,6 +587,9 @@ impl Brain {
             MascotEvent::Settled => {
                 if matches!(self.turn, Some(TurnState::Held(Intent::Ask | Intent::Talk))) {
                     self.turn = None;
+                }
+                if self.seat_hold.take().is_some() {
+                    self.note(t, "seat", "settled".into());
                 }
                 // cut the mouth first: a Say queued behind starts its own below
                 self.talking_until = self.talking_until.min(t);
@@ -644,6 +681,13 @@ impl Brain {
                 self.drop_cues(true);
             }
             self.note(t, "vis", format!("{was:?} -> {vis:?}"));
+            if vis == Visibility::Hidden && self.in_station() {
+                // hidden at the desk: off the set at once, standing at its exit spot; no desk again this turn
+                self.tally.blocked = self.turn_open || self.turn.is_some();
+                self.seat_hold = None;
+                self.leave_set_now();
+                self.end_behavior(t);
+            }
             if was == Visibility::Hidden {
                 // Nothing played while hidden: pick up from here.
                 self.play.frame_start = t;
@@ -680,10 +724,10 @@ impl Brain {
             Poke::PromptSent => {
                 self.listening = false;
                 // the turn starts now (no idle between listen and think); a started activity ends with it
-                if self.activity.as_ref().is_some_and(|a| a.until.is_some()) {
+                if self.activity.as_ref().is_some_and(|a| a.until.is_some() && !a.work) {
                     self.end_activity(t, "turn");
                 }
-                self.turn_open = true;
+                self.open_turn(t);
                 self.set_turn(TurnState::Held(Intent::Think));
                 self.end_listen(t);
                 self.settle(t);
@@ -910,10 +954,16 @@ impl Brain {
         }
         if (self.play.frame as usize) >= frames_n {
             self.play.frame = 0;
+            if self.in_station() {
+                self.seat_clip_end(t);
+                return;
+            }
             // A one-shot cue (e.g. Say's `thinking` follow-up) that resolves to a
             // held loop plays it once, then end_behavior consumes the cue.
             let once_cue = self.cue.front().and_then(Cue::once) == Some(self.play.intent);
-            let release = self.desired() != self.play.intent || (self.play.drag && !self.dragging) || once_cue;
+            // a long turn goes to the desk at the end of the think loop's iteration
+            let to_station = self.play.intent != Intent::Idle && self.station_to_enter().is_some_and(|s| s != self.play.behavior);
+            let release = self.desired() != self.play.intent || (self.play.drag && !self.dragging) || once_cue || to_station;
             let step_done = match &mut self.play.left {
                 None => release,
                 Some(n) => {
@@ -938,7 +988,11 @@ impl Brain {
         self.play.frame = 0;
         let want = self.desired();
         // idle plays any pool pick (`behavior_for(Idle)` is only its rest), so for idle only the intent counts
-        let moved_on = want != self.play.intent || (want != Intent::Idle && self.behavior_for(want) != self.play.behavior);
+        let moved_on = if self.in_station() {
+            self.station_to_enter() != Some(self.play.behavior.as_str())
+        } else {
+            want != self.play.intent || (want != Intent::Idle && self.behavior_for(want) != self.play.behavior)
+        };
         if moved_on || self.dragging {
             self.play.turns.clear();
             self.note(t, "turn", format!("stop at {}", self.dir.as_str()));
@@ -954,8 +1008,122 @@ impl Brain {
         }
     }
 
+    // ---- stations (p3, `#flow-desk`) ----
+
+    /// A turn (or a `Speaking`/card, or a sent prompt) opens: this turn's tally starts.
+    /// Seated after the turn, waiting for the answer bubble's `Settled` (the app sends one at Idle
+    /// when no answer is on screen: stopped, replaced or never shown).
+    pub fn holds_seat(&self) -> bool {
+        self.seat_hold.is_some()
+    }
+
+    fn open_turn(&mut self, t: u64) {
+        if !std::mem::replace(&mut self.turn_open, true) {
+            self.tally = Tally { open_at: t, tools: 0, blocked: false };
+            self.seat_hold = None;
+        }
+    }
+
+    /// The bear plays a station (approaching it, seated, or leaving it).
+    fn in_station(&self) -> bool {
+        self.pack.station(&self.play.behavior).is_some()
+    }
+
+    /// The station role playing (seated: its turns are done).
+    fn role(&self) -> Option<Role> {
+        (self.in_station() && self.play.turns.is_empty()).then(|| Role::from_step(self.play.step)).flatten()
+    }
+
+    /// The station to go to now, if any: a started station activity's, or this turn's work station
+    /// once the turn is long enough (`work.after_tools` counted tools, or one and `work.after_ms`).
+    /// Only while shown, not dragged, not listening, in a busy turn (or the activity).
+    fn station_to_enter(&self) -> Option<&str> {
+        if self.vis != Visibility::Shown || self.dragging || self.listening {
+            return None;
+        }
+        let act = self.activity.as_ref().filter(|a| a.until.is_some() && self.pack.station(&a.behavior).is_some() && self.pack.available(&a.behavior));
+        match self.desired() {
+            Intent::Do => act.map(|a| a.behavior.as_str()),
+            Intent::Think | Intent::Work => {
+                if let Some(a) = act {
+                    return Some(a.behavior.as_str());
+                }
+                let (name, w) = self.pack.work_station()?;
+                // the tally is the open turn's: after Idle it is the last turn's, and a Say's `thinking` is no turn
+                let long = self.turn_open
+                    && (self.tally.tools >= w.after_tools || (self.tally.tools >= 1 && self.t.saturating_sub(self.tally.open_at) >= w.after_ms));
+                (long && !self.tally.blocked).then_some(name)
+            }
+            _ => None,
+        }
+    }
+
+    /// What the seated bear wants (`None` = stand up), from the slots: listen, then the turn, then
+    /// the talk hold, then a station activity.
+    fn seat_want(&self) -> Option<Role> {
+        if self.vis == Visibility::Hidden || self.dragging {
+            return None;
+        }
+        // a one-shot cue (a Say's follow-up is dropped while seated) stands the bear up; a say or reminder shows in the bubble
+        if self.cue.front().is_some_and(|c| !matches!(c, Cue::Timed { .. })) {
+            return None;
+        }
+        if self.listening {
+            return Some(Role::Listen);
+        }
+        match self.turn {
+            Some(TurnState::Held(Intent::Ask)) => Some(Role::Ask),
+            Some(TurnState::Held(Intent::Talk)) => Some(Role::Talk),
+            Some(TurnState::Held(Intent::Think | Intent::Work)) => Some(Role::Loop),
+            Some(_) => None,
+            None if self.turn_open => Some(Role::Loop),
+            None if self.seat_hold.is_some_and(|h| self.t < h) => Some(Role::Talk),
+            None => self.activity.as_ref().is_some_and(|a| a.until.is_some() && a.behavior == self.play.behavior).then_some(Role::Loop),
+        }
+    }
+
+    /// A station clip (or a held loop's iteration) ended: the next role. Roles change only here,
+    /// where the art joins (swivel_in f0 = type f0 and its end = talk f0, stand f0 = talk f0).
+    fn seat_clip_end(&mut self, t: u64) {
+        let Some(role) = Role::from_step(self.play.step) else { return };
+        if role == Role::Exit {
+            self.leave_step();
+            self.seat_hold = None;
+            self.end_behavior(t);
+            return;
+        }
+        let want = self.seat_want();
+        let facing_user = |r: Role| matches!(r, Role::Talk | Role::Ask | Role::Listen);
+        let next = match (role, want) {
+            // facing the screen (type f0)
+            (Role::Enter | Role::ToScreen | Role::Loop, Some(Role::Loop)) => Role::Loop,
+            (Role::Enter | Role::ToScreen | Role::Loop, _) => Role::ToUser,
+            // facing the person (talk f0)
+            (_, Some(Role::Loop)) => Role::ToScreen,
+            (_, Some(w)) if facing_user(w) => w,
+            _ => Role::Exit,
+        };
+        if next != role || !role.holds() {
+            self.note(t, "seat", format!("{} -> {}", role.as_str(), next.as_str()));
+        }
+        self.enter_step(next.step(), t);
+    }
+
+    /// The intent a station role shows.
+    fn role_intent(role: Role) -> Intent {
+        match role {
+            Role::Talk => Intent::Talk,
+            Role::Ask => Intent::Ask,
+            Role::Listen => Intent::Listen,
+            _ => Intent::Work,
+        }
+    }
+
     /// Interrupts that happen at a frame boundary.
     fn boundary(&mut self, t: u64) {
+        if self.role().is_some() {
+            return; // seated: roles change at clip ends (seat_clip_end)
+        }
         let want = self.desired();
         if want == self.play.intent || self.dragging || !self.play.turns.is_empty() {
             return;
@@ -991,10 +1159,17 @@ impl Brain {
         if !self.play.turns.is_empty() {
             return; // still turning toward it: the turn's end checks again (turn_done)
         }
+        if self.in_station() {
+            return; // a station leaves from the clip ends (seat_clip_end)
+        }
         let pack = self.pack.clone();
-        let Some(def) = pack.behaviors.get(&self.play.behavior) else { return };
+        let Some(def) = pack.behavior(&self.play.behavior) else { return };
         let last = def.seq.len() - 1;
         let exits = def.set.is_some() || (def.exit && last > 0);
+        // a free way-in (listen_in) plays out first: its last frame is where the way out starts
+        if def.set.is_none() && exits && self.play.step < last && def.seq[self.play.step].loops == Loops::Once {
+            return; // the step's end (next_step → boundary) interrupts again
+        }
         if exits && self.play.step < last {
             self.leave_step();
             self.enter_step(last, t);
@@ -1006,7 +1181,7 @@ impl Brain {
     }
 
     fn step_loops(&self) -> Loops {
-        self.pack.behaviors.get(&self.play.behavior).and_then(|d| d.seq.get(self.play.step)).map_or(Loops::Once, |s| s.loops)
+        self.pack.behavior(&self.play.behavior).and_then(|d| d.seq.get(self.play.step)).map_or(Loops::Once, |s| s.loops)
     }
 
     fn leave_step(&mut self) {
@@ -1021,7 +1196,7 @@ impl Brain {
     }
 
     fn next_step(&mut self, t: u64) {
-        let n = self.pack.behaviors.get(&self.play.behavior).map_or(0, |d| d.seq.len());
+        let n = self.pack.behavior(&self.play.behavior).map_or(0, |d| d.seq.len());
         if self.play.step + 1 < n {
             self.enter_step(self.play.step + 1, t);
             self.boundary(t);
@@ -1031,10 +1206,20 @@ impl Brain {
     }
 
     fn enter_step(&mut self, step: usize, t: u64) {
-        let loops = self.pack.behaviors[&self.play.behavior].seq[step].loops;
+        let Some(loops) = self.pack.behavior(&self.play.behavior).and_then(|d| d.seq.get(step)).map(|s| s.loops) else {
+            // start() only plays a behavior it found, so this is a broken invariant: loud in tests, a no-op in release
+            debug_assert!(false, "enter_step: {} has no step {step}", self.play.behavior);
+            return;
+        };
         self.play.step = step;
         self.play.frame = 0;
         self.play.frame_start = t;
+        if self.in_station() {
+            let role = Role::from_step(step).unwrap_or(Role::Loop);
+            self.play.intent = Self::role_intent(role);
+            self.play.left = if role.holds() { None } else { Some(1) };
+            return;
+        }
         self.play.left = match loops {
             Loops::Once => Some(1),
             // an activity holds its loop until it ends
@@ -1079,8 +1264,11 @@ impl Brain {
 
     fn start(&mut self, behavior: &str, intent: Intent, t: u64) {
         let pack = self.pack.clone();
-        let Some(def) = pack.behaviors.get(behavior) else { return };
+        let Some(def) = pack.behavior(behavior) else { return };
         let was_set = self.play.ori.is_some();
+        if pack.station(behavior).is_none() {
+            self.seat_hold = None;
+        }
         self.play = Play::new(intent, behavior, t);
         let first = pack.clips.get(&def.seq[0].clip);
         let mut ori = None;
@@ -1211,7 +1399,7 @@ impl Brain {
 
     fn leave_set_now(&mut self) {
         if let Some(ori) = self.play.ori {
-            let exit = self.pack.behaviors.get(&self.play.behavior).and_then(|d| d.seq.last()).and_then(|s| self.pack.clips.get(&s.clip));
+            let exit = self.pack.behavior(&self.play.behavior).and_then(|d| d.seq.last()).and_then(|s| self.pack.clips.get(&s.clip));
             if let Some(h) = exit.and_then(|c| c.handoff.get(&ori)) {
                 self.dir = h.facing;
             }
@@ -1277,7 +1465,7 @@ impl Brain {
     fn finish_timed(&mut self, then: Option<Intent>, t: u64) {
         match then {
             // the follow-up would stand a seated activity up: dropped
-            Some(i) if self.vis == Visibility::Shown && !self.act_holds() => self.cue[0] = Cue::Once(i),
+            Some(i) if self.vis == Visibility::Shown && !self.act_holds() && !self.in_station() => self.cue[0] = Cue::Once(i),
             _ => {
                 self.cue.pop_front();
                 self.activate_cue(t);
@@ -1288,7 +1476,7 @@ impl Brain {
     fn desired(&self) -> Intent {
         if let Some(c) = self.cue.front() {
             // a set activity keeps its seat through a say or reminder (the bubble shows it)
-            if !(self.act_holds() && matches!(c, Cue::Timed { .. })) {
+            if !((self.act_holds() || self.in_station()) && matches!(c, Cue::Timed { .. })) {
                 return c.intent();
             }
         }
@@ -1308,11 +1496,16 @@ impl Brain {
         self.play.intent == Intent::Do
             && self.play.turns.is_empty()
             && self.activity.as_ref().is_some_and(|a| a.until.is_some() && a.behavior == self.play.behavior)
-            && self.pack.behaviors.get(&self.play.behavior).is_some_and(|d| d.set.is_some() || d.exit)
+            && self.pack.behavior(&self.play.behavior).is_some_and(|d| d.set.is_some() || d.exit)
     }
 
     /// The behavior an intent plays now: an activity's or a gesture's own, else the pack's.
     fn behavior_for(&self, want: Intent) -> String {
+        if matches!(want, Intent::Think | Intent::Work | Intent::Do) {
+            if let Some(s) = self.station_to_enter() {
+                return s.to_string();
+            }
+        }
         match want {
             Intent::Do => self.activity.as_ref().map_or_else(|| "rest".to_string(), |a| a.behavior.clone()),
             Intent::Emote => match self.cue.front() {
@@ -1374,7 +1567,10 @@ impl Brain {
                     return BodyReply { status: Some(Status::Refused), activity: Some(name.clone()), reason: Some(reason), message: reason.message().into(), ..BodyReply::default() };
                 }
                 let behavior = pack.first_available(&a.plays).unwrap_or("rest").to_string();
-                let queued = self.turn.is_some() || self.turn_open;
+                // `work` only means something for a station activity (a free one keeps the pastime rules)
+                let work = a.kind == ActivityKind::Work && a.station.is_some();
+                // a work activity (the computer) starts at once, even mid-turn
+                let queued = !work && (self.turn.is_some() || self.turn_open);
                 // the same activity again: a new end time, the clips go on (a pending one: a new length)
                 if let Some(cur) = self.activity.as_mut().filter(|cur| cur.name == *name) {
                     cur.for_ms = for_ms;
@@ -1397,7 +1593,7 @@ impl Brain {
                 if let Some(old) = self.activity.take() {
                     self.note(t, "activity", format!("end {} (replaced)", old.name));
                 }
-                self.activity = Some(Activity { name: name.clone(), behavior, for_ms, until });
+                self.activity = Some(Activity { name: name.clone(), behavior, for_ms, until, work });
                 self.note(t, "activity", format!("{} {name}", if queued { "queue" } else { "start" }));
                 if playing {
                     self.interrupt(t);
@@ -1429,7 +1625,7 @@ impl Brain {
                 if let Some(reason) = self.gate() {
                     return BodyReply { status: Some(Status::Refused), emote: Some(name.clone()), reason: Some(reason), message: reason.message().into(), ..BodyReply::default() };
                 }
-                if self.act_holds() {
+                if self.act_holds() || self.in_station() {
                     // it would stand the bear up from its seat only to sit back down
                     let reason = Reason::Busy;
                     return BodyReply { status: Some(Status::Refused), emote: Some(name.clone()), reason: Some(reason), message: reason.message().into(), ..BodyReply::default() };
@@ -1598,8 +1794,12 @@ impl Brain {
         self.mouth_at = t + self.pack.timers.mouth.frame_ms.max(1) as u64;
     }
 
+    /// The face layers cover what shows: a free clip in this dir, or a set clip in this ori (`set_clips`).
     fn face_here(&self) -> bool {
-        self.play.ori.is_none() && self.pack.face.as_ref().is_some_and(|f| f.covers(self.clip_name(), self.dir))
+        self.pack.face.as_ref().is_some_and(|f| match self.play.ori {
+            None => f.covers(self.clip_name(), self.dir),
+            Some(o) => self.play.turns.is_empty() && f.set_face(self.clip_name(), o).is_some(),
+        })
     }
 
     fn eyes(&self) -> EyeState {
@@ -1636,8 +1836,7 @@ impl Brain {
             }
         }
         self.pack
-            .behaviors
-            .get(&self.play.behavior)
+            .behavior(&self.play.behavior)
             .and_then(|d| d.seq.get(self.play.step))
             .map_or("idle", |s| s.clip.as_str())
     }
@@ -1670,3 +1869,7 @@ fn weighted(weights: &[(String, f64)], mut x: f64) -> String {
 #[cfg(test)]
 #[path = "brain_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "brain_desk_tests.rs"]
+mod desk_tests;

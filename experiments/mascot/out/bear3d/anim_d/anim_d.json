@@ -1,0 +1,509 @@
+{
+ "note": "Stage D desk station clips (desk_sit -> desk_type (loop) -> desk_swivel_in -> desk_talk / desk_ask (loop) -> desk_swivel_out -> desk_type, or desk_stand from the talk pose). Stage B format: each frame is the WHOLE set (desk, computer, chair + bear) baked on one canvas; anchor = pixel of the set origin (the desk footprint centre on the floor). ori A is the default placement, ori B its true 3D mirror (light unchanged, not a sprite flip; the bear in it is the real bear in the mirrored pose). Hand-off: desk_sit frame 0 and desk_stand's last frame are pixel-identical to the props-only frame + the Stage A idle sprite (frame 0) at handoff.px from the anchor, facing handoff.facing. Joins (identical frames): desk_sit last = desk_type 0 = desk_swivel_in 0 = desk_swivel_out last; desk_swivel_in last = desk_talk 0 = desk_ask 0 = desk_swivel_out 0 = desk_stand 0. desk_talk / desk_ask: body SE (A) / SW (B), head turned to S: face layers from face.json set_clips (patch dir in face_patch_dir and there).",
+ "sorting": "As Stage B: outside these clips draw the props (props_d/*.png or desk_<ori>.png) and the free bear as separate sprites sorted by floor depth; from the first to the last frame of a desk clip hide them and draw the baked frame at the set anchor. At the hand-off spot the bear is in front of every prop pixel.",
+ "fps": 12,
+ "ppu": 40.0719967705934,
+ "sets": {
+  "desk": {
+   "A": {
+    "frame_w": 108,
+    "frame_h": 142,
+    "anchor": [
+     74,
+     100
+    ],
+    "props_frame": "../props_d/desk_A.png",
+    "orientation": "desk long axis along world X, chair on its SW side; the bear types facing NE, talks with body SE and head S",
+    "seat_px": [
+     -36,
+     0
+    ]
+   },
+   "B": {
+    "frame_w": 108,
+    "frame_h": 142,
+    "anchor": [
+     34,
+     100
+    ],
+    "props_frame": "../props_d/desk_B.png",
+    "orientation": "mirror of A: chair on the desk's SE side; the bear types facing NW, talks with body SW and head S",
+    "seat_px": [
+     36,
+     0
+    ]
+   }
+  }
+ },
+ "anims": {
+  "desk_sit": {
+   "set": "desk",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 20,
+   "files": {
+    "A": "desk_sit_A.png",
+    "B": "desk_sit_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      0.9882,
+      -1.0588
+     ],
+     "px": [
+      -2,
+      29
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      1.0588,
+      -0.9882
+     ],
+     "px": [
+      2,
+      29
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "desk_type"
+  },
+  "desk_type": {
+   "set": "desk",
+   "loop": true,
+   "fps": 12,
+   "frames_n": 16,
+   "files": {
+    "A": "desk_type_A.png",
+    "B": "desk_type_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "desk_type, desk_swivel_in or desk_stand via desk_swivel_in"
+  },
+  "desk_swivel_in": {
+   "set": "desk",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 6,
+   "files": {
+    "A": "desk_swivel_in_A.png",
+    "B": "desk_swivel_in_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "desk_talk or desk_ask"
+  },
+  "desk_talk": {
+   "set": "desk",
+   "loop": true,
+   "fps": 12,
+   "frames_n": 20,
+   "files": {
+    "A": "desk_talk_A.png",
+    "B": "desk_talk_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "desk_talk, desk_ask, desk_swivel_out or desk_stand",
+   "face_patch_dir": "S"
+  },
+  "desk_ask": {
+   "set": "desk",
+   "loop": true,
+   "fps": 12,
+   "frames_n": 20,
+   "files": {
+    "A": "desk_ask_A.png",
+    "B": "desk_ask_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "desk_ask, desk_talk, desk_swivel_out or desk_stand",
+   "face_patch_dir": "S"
+  },
+  "desk_swivel_out": {
+   "set": "desk",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 6,
+   "files": {
+    "A": "desk_swivel_out_A.png",
+    "B": "desk_swivel_out_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "desk_type"
+  },
+  "desk_stand": {
+   "set": "desk",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 16,
+   "files": {
+    "A": "desk_stand_A.png",
+    "B": "desk_stand_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "end",
+     "frame": 15,
+     "pos_world": [
+      0.9882,
+      -1.0588
+     ],
+     "px": [
+      -2,
+      29
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "end",
+     "frame": 15,
+     "pos_world": [
+      1.0588,
+      -0.9882
+     ],
+     "px": [
+      2,
+      29
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "Stage A idle (rest pose, same spot and facing)"
+  }
+ }
+}

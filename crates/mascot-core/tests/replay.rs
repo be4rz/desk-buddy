@@ -28,7 +28,7 @@ fn library_run_matches_the_golden_log() {
     let got = replay::to_jsonl(&replay::run(p.clone(), &tl));
     assert_eq!(got, std::fs::read_to_string(fixture("day.seed7.jsonl")).unwrap());
     let behaviors: std::collections::BTreeSet<String> = replay::run(p, &tl).into_iter().map(|l| l.behavior).collect();
-    for b in ["rest", "look_around", "wander", "dash", "nap", "read", "hold"] {
+    for b in ["rest", "look_around", "wander", "dash", "nap", "read", "hold", "desk"] {
         assert!(behaviors.contains(b), "the day shows {b}");
     }
 }

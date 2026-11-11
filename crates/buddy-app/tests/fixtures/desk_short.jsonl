@@ -1,0 +1,7 @@
+// Design #ex-desk: a short job stays standing. 1 counted tool at 800 ms, the answer at 2 s: never set "desk".
+{"at_ms": 0, "poke": "prompt_sent"}
+{"at_ms": 0, "event": {"type": "thinking"}}
+{"at_ms": 800, "event": {"type": "working", "kind": "shell", "tool": "ls"}}
+{"at_ms": 2000, "event": {"type": "speaking", "text": "Done."}}
+{"at_ms": 3000, "event": {"type": "idle"}}
+{"at_ms": 5000, "event": {"type": "settled"}}

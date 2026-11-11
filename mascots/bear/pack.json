@@ -11,6 +11,7 @@
     { "kind": "stage_b", "path": "anim_b/anim_b.json", "props": "props/props.json" },
     { "kind": "stage_a", "path": "anim_c/anim_c.json", "optional": true },
     { "kind": "stage_a", "path": "anim_l/anim_l.json", "optional": true },
+    { "kind": "stage_b", "path": "anim_d/anim_d.json", "props": "props_d/props_d.json", "optional": true },
     { "kind": "face",    "path": "face/face.json",     "optional": true }
   ],
   "capabilities": { "blink": true, "lip_sync": true, "look_at": "body" },
@@ -20,6 +21,14 @@
     "mouth": { "frame_ms": 167, "stall_ms": 400 }
   },
   "turning": { "ccw": "turn_ccw", "cw": "turn_cw" },
+  "stations": {
+    "desk": { "set": "desk",
+              "enter": "desk_sit", "loop": "desk_type",
+              "to_user": "desk_swivel_in", "talk": "desk_talk", "ask": "desk_ask",
+              "listen": "desk_talk",
+              "to_screen": "desk_swivel_out", "exit": "desk_stand" }
+  },
+  "work": { "station": "desk", "after_ms": 4000, "after_tools": 2 },
   "behaviors": {
     "rest":        { "seq": [{ "clip": "idle", "loops": [1, 3] }] },
     "look_around": { "seq": [{ "clip": "idle", "loops": [1, 1] }], "turn": "random" },
@@ -60,7 +69,8 @@
     "default_for_s": 120, "max_for_s": 1800,
     "activities": {
       "read": { "plays": ["read"], "kind": "pastime", "about": "sit down and read a book" },
-      "nap":  { "plays": ["nap"],  "kind": "pastime", "about": "get into bed and sleep" }
+      "nap":  { "plays": ["nap"],  "kind": "pastime", "about": "get into bed and sleep" },
+      "computer": { "station": "desk", "kind": "work", "about": "sit at the desk and use the computer" }
     },
     "emotes": {
       "wave":  { "intent": "wave",  "about": "a happy little wave" },

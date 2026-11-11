@@ -246,8 +246,13 @@ impl Art {
                 sets.insert((name.clone(), *ori), SetArt { anchor: so.anchor, props, handoff_px });
             }
         }
-        let behavior_set =
-            pack.behaviors.iter().filter_map(|(b, d)| d.set.clone().map(|s| (b.clone(), s))).collect();
+        // set behaviors and stations (their synthesized behavior is named after the station)
+        let behavior_set = pack
+            .behaviors
+            .iter()
+            .filter_map(|(b, d)| d.set.clone().map(|s| (b.clone(), s)))
+            .chain(pack.stations.iter().map(|(n, st)| (n.clone(), st.file.set.clone())))
+            .collect();
         let face = face::load(pack)?;
         Ok(Art {
             w,
@@ -349,7 +354,11 @@ pub fn compose(art: &Art, show: &Show, view: &View, out: &mut Canvas) {
         if let Some((sa, ori)) = set {
             if let Some(f) = clip.oris.get(&ori).and_then(|v| v.get(frame)) {
                 let (sx, sy) = (ax - sa.handoff_px[0], ay - sa.handoff_px[1]);
-                blit(out, f, sx - sa.anchor[0], sy - sa.anchor[1]);
+                let (ox, oy) = (sx - sa.anchor[0], sy - sa.anchor[1]);
+                blit(out, f, ox, oy);
+                if let Some(face) = &art.face {
+                    face::draw_set(face, &show.clip, ori, frame, eyes_name(show.eyes), mouth_name(show.mouth), out, ox, oy);
+                }
             }
         }
     } else {

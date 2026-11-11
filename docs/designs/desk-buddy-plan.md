@@ -517,8 +517,8 @@ animation plugs into it.
 | # | Step | Status | Builds on |
 |---|---|---|---|
 | A1 | **Body tools + system prompt** (code only) | ✅ built (`buddy mascot do\|stop\|list\|emote`, pack `body` block) | p3 harness |
-| A2 | **Listen:** face the user on click | 🟨 brain built (prompt pokes, listen slot, turn planner, face v2 `patch_dirs`); art (`anim_l`) pending | A1 |
-| A3 | **Working animations** for long turns | ⬜ | A1, A2 |
+| A2 | **Listen:** face the user on click | ✅ built (prompt pokes, listen slot, turn planner, face v2 `patch_dirs`, `anim_l` listen + turn clips) | A1 |
+| A3 | **Working animations** for long turns | ✅ built (desk station: pack `stations` + `work`, seated turns, seated `talk`/`ask` with face v2 `set_clips`, `buddy mascot do computer`, `anim_d` desk set) | A1, A2 |
 | A4 | **Idle life:** fidgets and postures | ⬜ | A2's turn-in-place clip |
 | A5 | **Real clips for the borrowed intents** | ⬜ | A1 |
 | A6 | **Desktop reactions, prop activities, rare surprises** | ⬜ | A4 |

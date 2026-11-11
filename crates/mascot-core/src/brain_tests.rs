@@ -1347,7 +1347,7 @@ fn unknown_names_are_errors_before_the_gates() {
     b.senses(&Senses { dnd_toggle: true, ..Senses::default() }, 0);
     let r = do_(&mut b, "juggle", None, 10);
     assert_eq!(r.error.as_deref(), Some("unknown activity \"juggle\""));
-    assert_eq!(r.have, Some(vec!["read".to_string(), "nap".to_string()]));
+    assert_eq!(r.have, Some(vec!["read".to_string(), "nap".to_string(), "computer".to_string()]));
     assert_eq!(r.status, None);
     let r = b.body(&BodyReq::Emote { name: "explode".into() }, 10);
     assert_eq!(r.error.as_deref(), Some("unknown emote \"explode\""));
@@ -1363,7 +1363,7 @@ fn stop_list_and_the_duration_cap() {
     assert_eq!(v["activities"][1]["name"], "nap");
     assert_eq!(v["emotes"][0], json!({ "name": "wave", "about": "a happy little wave" }));
     assert_eq!((v["maxForS"].clone(), v["playing"].clone()), (json!(1800), Value::Null));
-    assert!(l.message.starts_with("Activities:\n  read      sit down and read a book (default 2m)\n  nap       get into bed and sleep (default 2m)\nEmotes:\n  wave      a happy little wave"), "{}", l.message);
+    assert!(l.message.starts_with("Activities:\n  read      sit down and read a book (default 2m)\n  nap       get into bed and sleep (default 2m)\n  computer  sit at the desk and use the computer (default 2m)\nEmotes:\n  wave      a happy little wave"), "{}", l.message);
     let r = do_(&mut b, "nap", Some(9_000_000), 10);
     assert_eq!(r.for_ms, Some(1_800_000), "capped at max_for_s");
     let v = serde_json::to_value(b.body(&BodyReq::List, 20)).unwrap();
@@ -1500,7 +1500,7 @@ fn bad_body_entries_are_reported_and_refused() {
                 "Bad Name": { "plays": ["read"], "about": "bad name" },
                 "long": { "plays": ["read"], "about": "x".repeat(121) },
                 "loud": { "plays": ["read"], "about": "Shouty start." },
-                "desk": { "station": "desk", "about": "use the computer" } },
+                "garage": { "station": "garage", "about": "fix the car" } },
             "emotes": { "boom": { "intent": "explode", "about": "boom" },
                 "ponder": { "intent": "think", "about": "a long think" },
                 "loaf": { "intent": "idle", "about": "do nothing" },
@@ -1518,7 +1518,7 @@ fn bad_body_entries_are_reported_and_refused() {
         "activities.Bad Name: a name is 1-32",
         "activities.long: about is longer than 120",
         "activities.loud: about starts lower-case",
-        "activities.desk: unknown station desk",
+        "activities.garage: unknown station garage",
         "emotes.boom: unknown intent explode",
         "emotes.ponder: ",
         "emotes.loaf: intent idle is not a gesture",
@@ -1549,6 +1549,7 @@ Activities (`buddy mascot do <name> [--for 5m]`; they start after your reply and
 last 2m unless you give --for, at most 30m; `buddy mascot stop` ends one):
 - read: sit down and read a book
 - nap: get into bed and sleep
+- computer: sit at the desk and use the computer
 
 Emotes (`buddy mascot emote <name>`; a short gesture during your reply):
 - wave: a happy little wave
@@ -1558,10 +1559,11 @@ Emotes (`buddy mascot emote <name>`; a short gesture during your reply):
 - spin: a twirl
 
 When to use them:
-- If the user asks you to read, nap or do another listed activity, run the command
+- If the user asks you to read, nap, computer or do another listed activity, run the command
   and say so briefly.
 - Use at most one emote per reply, only when it matches the mood. Most short
   replies need none.
+- You go to the desk by yourself during long jobs; do not call it for that.
 - If a reply says \"refused\" (do not disturb or quiet hours), tell the user you
   cannot right now; do not pretend.
 - `buddy mascot list` shows this list.
@@ -1908,7 +1910,13 @@ fn ac6_face_v2_without_the_anim_l_source_still_loads() {
 
     // nothing optional missing: an unknown face clip is still an error
     t.edit(|v| {
-        let srcs: Vec<Value> = v["sources"].as_array().unwrap().iter().filter(|s| !s["path"].as_str().unwrap().contains("anim_l")).cloned().collect();
+        let srcs: Vec<Value> = v["sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|s| !s["path"].as_str().unwrap().contains("anim_l") && !s["path"].as_str().unwrap().contains("anim_d"))
+            .cloned()
+            .collect();
         v["sources"] = json!(srcs);
     });
     let e = t.load().expect_err("unknown clip listen");

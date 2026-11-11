@@ -15,6 +15,6 @@ pub use brain::{
     bubble_ms, AppCategory, Brain, BrainConfig, DndAction, EyeState, FrontApp, Intent, LocalTime, MouthState, NowPlaying, Placement, Poke,
     Senses, Show, TraceLine, Visibility, WinRect,
 };
-pub use pack::{load, load_report, ActivityMeta, BodyMeta, EmoteAct, EmoteMeta, ClipMeta, Dir, FaceMeta, Handoff, Ori, PackError, PackMeta, QuietPool, SetMeta, StripRef, Warmup};
+pub use pack::{load, load_report, ActivityMeta, BodyMeta, EmoteAct, EmoteMeta, ClipMeta, Dir, FaceMeta, Handoff, Ori, PackError, PackMeta, QuietPool, Role, SetFace, SetMeta, StationMeta, StripRef, Warmup};
 pub use reflex::Reflexes;
 pub use rng::Rng;

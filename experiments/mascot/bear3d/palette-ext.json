@@ -4,5 +4,7 @@
   "fabric_quilt": ["#4d5b85", "#7183b3", "#98abd6", "#bccbea", "#dbe4f5"],
   "fabric_cream": ["#8c8270", "#bcae95", "#dccfb4", "#efe6d0", "#faf5e8"],
   "fabric_sage":  ["#4f6656", "#789580", "#9fb9a2", "#c4d8c2", "#e0ece0"],
-  "fabric_rose":  ["#7c4a5c", "#a96c80", "#cf95a4", "#e8bcc4", "#f5dade"]
+  "fabric_rose":  ["#7c4a5c", "#a96c80", "#cf95a4", "#e8bcc4", "#f5dade"],
+  "toy_plastic":  ["#6e5462", "#a77f86", "#d6ab9f", "#f0d3bd", "#fcefdc"],
+  "screen":       ["#3d5866", "#5b8c8f", "#88c2b4", "#bde6d2", "#e8fbee"]
 }

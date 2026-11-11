@@ -380,6 +380,49 @@ pub struct TurningFile {
     pub cw: String,
 }
 
+/// `pack.json` `"stations"` (p3, `#pack-stations`): a set with role clips the brain plays while the
+/// bear works there. Optional; clips not rendered yet leave the station unplayable (the bear stands).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct StationFile {
+    pub set: String,
+    /// Walks in from the hand-off spot and sits (its `handoff` is `at: start`).
+    pub enter: String,
+    /// The work loop (typing).
+    #[serde(rename = "loop")]
+    pub work_loop: String,
+    /// Swivels to face the person.
+    pub to_user: String,
+    pub talk: String,
+    pub ask: String,
+    /// The listen pose; absent = `talk`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub listen: Option<String>,
+    /// Swivels back to the screen.
+    pub to_screen: String,
+    /// Stands up and steps back to the hand-off spot (its `handoff` is `at: end`).
+    pub exit: String,
+}
+
+/// `pack.json` `"work"` (p3): when a turn goes to a station.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct WorkFile {
+    pub station: String,
+    #[serde(default = "after_ms")]
+    pub after_ms: u64,
+    #[serde(default = "after_tools")]
+    pub after_tools: u32,
+}
+
+fn after_ms() -> u64 {
+    4000
+}
+
+fn after_tools() -> u32 {
+    2
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct StageAFrame {
     pub dur: u32,
@@ -489,6 +532,18 @@ pub struct FaceFile {
     /// A clip or dir without an entry draws its own dir's patches.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub patch_dirs: BTreeMap<String, BTreeMap<String, String>>,
+    /// v2 (p3): set clip → ori → the patch dir and the slot positions on the set frame (top-left).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub set_clips: BTreeMap<String, BTreeMap<String, SetFaceDef>>,
+}
+
+/// One ori of a set clip's face (`#face-v2` `set_clips`): `{"patch": "S", "eyes": [...], "mouth": [...]}`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct SetFaceDef {
+    pub patch: String,
+    /// Slot → top-left per frame, on the set clip's frame.
+    #[serde(flatten)]
+    pub slots: BTreeMap<String, Vec<[i32; 2]>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -520,5 +575,20 @@ mod tests {
         assert!(serde_json::from_str::<StepDef>(r#"{"clip":"idle","loops":"forever"}"#).is_err());
         let back = serde_json::to_value(StepDef { clip: "x".into(), loops: Loops::Hold }).unwrap();
         assert_eq!(back, serde_json::json!({ "clip": "x", "loops": "hold" }));
+    }
+
+    #[test]
+    fn stations_work_and_set_faces_parse() {
+        let st: StationFile = serde_json::from_value(serde_json::json!({ "set": "desk", "enter": "desk_sit", "loop": "desk_type",
+            "to_user": "desk_swivel_in", "talk": "desk_talk", "ask": "desk_ask", "listen": "desk_talk",
+            "to_screen": "desk_swivel_out", "exit": "desk_stand" }))
+        .unwrap();
+        assert_eq!((st.work_loop.as_str(), st.listen.as_deref()), ("desk_type", Some("desk_talk")));
+        let w: WorkFile = serde_json::from_value(serde_json::json!({ "station": "desk" })).unwrap();
+        assert_eq!((w.after_ms, w.after_tools), (4000, 2));
+        assert!(serde_json::from_value::<WorkFile>(serde_json::json!({ "station": "desk", "after": 1 })).is_err());
+        let f: SetFaceDef = serde_json::from_value(serde_json::json!({ "patch": "S", "eyes": [[1, 2]], "mouth": [[3, 4]] })).unwrap();
+        assert_eq!(f.patch, "S");
+        assert_eq!(f.slots["mouth"], vec![[3, 4]]);
     }
 }

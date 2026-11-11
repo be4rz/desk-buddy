@@ -116,8 +116,14 @@ fn lint_on_the_bear_has_no_errors() {
     let errs: Vec<_> = r.issues.iter().filter(|i| i.severity == "error").collect();
     assert_eq!(r.errors, 0, "{errs:#?}");
     assert!(r.files > 100);
-    // the only warnings are the walk/run cycles' sub-pixel root motion (anim_l/ has every turn clip)
-    assert!(r.issues.iter().all(|i| i.code == "non_integer_root"), "{:#?}", r.issues);
+    // the only warnings are the walk/run cycles' sub-pixel root motion (anim_l/ has every turn clip),
+    // and the desk station until anim_d/ is rendered (p3 desk-art)
+    let desk_art = s.pack.available("desk");
+    assert!(
+        r.issues.iter().all(|i| i.code == "non_integer_root" || (!desk_art && i.code == "station_art_missing" && i.detail.starts_with("station desk:"))),
+        "{:#?}",
+        r.issues
+    );
 }
 
 #[test]

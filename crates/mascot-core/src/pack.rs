@@ -6,8 +6,8 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use mascot_protocol::pack::{
-    ActivityKind, BehaviorDef, BodyEntry, BodyFile, Capabilities, FaceFile, Memory, PackFile, PoolEntry, PropsFile, SourceKind, StageAFile, StageBFile, Temperament,
-    Timers, TurningFile, PACK_VERSION,
+    ActivityKind, BehaviorDef, BodyEntry, BodyFile, Capabilities, FaceFile, Loops, Memory, PackFile, PoolEntry, PropsFile, SourceKind, StageAFile, StageBFile,
+    StationFile, StepDef, Temperament, Timers, TurningFile, WorkFile, PACK_VERSION,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -118,6 +118,90 @@ pub struct PackMeta {
     /// `pack.json` `"turning"` (p2): the clips facing changes play. `None`, or clips that are not
     /// there (art not rendered yet), and facing changes snap.
     pub turning: Option<TurningFile>,
+    /// `pack.json` `"stations"` (p3): by name. Declared stations whose art is not loaded are kept
+    /// (names only, like `turning`); `available(name)` says whether one can play.
+    pub stations: BTreeMap<String, StationMeta>,
+    /// `pack.json` `"work"` (p3): when a long turn goes to a station. `None` = never.
+    pub work: Option<WorkFile>,
+}
+
+/// A station (`#pack-stations`): its role clips, played as one synthesized behavior whose step
+/// index is the role ([`Role`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct StationMeta {
+    pub file: StationFile,
+    /// `set` = the station's set; seq = enter, loop, to_user, talk, ask, listen, to_screen, exit.
+    pub behavior: BehaviorDef,
+}
+
+/// A station role: the step of its synthesized behavior.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Role {
+    Enter = 0,
+    Loop = 1,
+    ToUser = 2,
+    Talk = 3,
+    Ask = 4,
+    Listen = 5,
+    ToScreen = 6,
+    Exit = 7,
+}
+
+impl Role {
+    pub const ALL: [Role; 8] = [Role::Enter, Role::Loop, Role::ToUser, Role::Talk, Role::Ask, Role::Listen, Role::ToScreen, Role::Exit];
+
+    pub fn step(self) -> usize {
+        self as usize
+    }
+
+    pub fn from_step(i: usize) -> Option<Role> {
+        Role::ALL.get(i).copied()
+    }
+
+    /// The loops a role holds (until the brain moves on); the rest play once.
+    pub fn holds(self) -> bool {
+        matches!(self, Role::Loop | Role::Talk | Role::Ask | Role::Listen)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Role::Enter => "enter",
+            Role::Loop => "loop",
+            Role::ToUser => "to_user",
+            Role::Talk => "talk",
+            Role::Ask => "ask",
+            Role::Listen => "listen",
+            Role::ToScreen => "to_screen",
+            Role::Exit => "exit",
+        }
+    }
+}
+
+impl StationMeta {
+    pub fn new(file: StationFile) -> StationMeta {
+        let clips = [
+            &file.enter,
+            &file.work_loop,
+            &file.to_user,
+            &file.talk,
+            &file.ask,
+            file.listen.as_ref().unwrap_or(&file.talk),
+            &file.to_screen,
+            &file.exit,
+        ];
+        let seq = Role::ALL
+            .iter()
+            .zip(clips)
+            .map(|(r, c)| StepDef { clip: c.clone(), loops: if r.holds() { Loops::Hold } else { Loops::Once } })
+            .collect();
+        let behavior = BehaviorDef { set: Some(file.set.clone()), seq, turn: None, exit: false };
+        StationMeta { file, behavior }
+    }
+
+    /// The clip a role plays.
+    pub fn clip(&self, role: Role) -> &str {
+        &self.behavior.seq[role.step()].clip
+    }
 }
 
 /// The pack's body: activities (`buddy mascot do`) and emotes (`buddy mascot emote`).
@@ -154,6 +238,8 @@ pub struct ActivityMeta {
     pub plays: Vec<String>,
     pub kind: ActivityKind,
     pub about: String,
+    /// A station activity (`computer`): `plays` is `[station]`, its synthesized behavior.
+    pub station: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -232,6 +318,10 @@ struct Extras {
     body: Option<BodyFile>,
     #[serde(default)]
     turning: Option<TurningFile>,
+    #[serde(default)]
+    stations: BTreeMap<String, StationFile>,
+    #[serde(default)]
+    work: Option<WorkFile>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -315,6 +405,17 @@ pub struct FaceMeta {
     pub clips: BTreeMap<String, BTreeMap<Dir, BTreeMap<String, Vec<[i32; 2]>>>>,
     /// v2: clip → body dir → the dir whose patches it draws (`listen`: the head turned to the camera).
     pub patch_dirs: BTreeMap<String, BTreeMap<Dir, Dir>>,
+    /// v2 (p3): set clip → ori → the patch dir and slot positions on the set frame.
+    pub set_clips: BTreeMap<String, BTreeMap<Ori, SetFace>>,
+}
+
+/// The face of one set clip in one ori (`#face-v2` `set_clips`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SetFace {
+    /// The dir whose patches it draws (the head turned to the camera: `S`).
+    pub patch: Dir,
+    /// Slot → top-left per frame, on the set clip's frame.
+    pub slots: BTreeMap<String, Vec<[i32; 2]>>,
 }
 
 impl FaceMeta {
@@ -326,6 +427,11 @@ impl FaceMeta {
     /// The dir whose patches this clip draws when the body faces `dir` (itself unless `patch_dirs` says).
     pub fn patch_dir(&self, clip: &str, dir: Dir) -> Dir {
         self.patch_dirs.get(clip).and_then(|m| m.get(&dir)).copied().unwrap_or(dir)
+    }
+
+    /// The face of a set clip in this ori, if the face layers cover it.
+    pub fn set_face(&self, clip: &str, ori: Ori) -> Option<&SetFace> {
+        self.set_clips.get(clip).and_then(|m| m.get(&ori))
     }
 }
 
@@ -383,6 +489,22 @@ impl PackMeta {
         self.clips.get(name).filter(|c| c.set.is_none() && c.dirs.contains_key(&from)).map(|c| c.name.as_str())
     }
 
+    /// A behavior by name: a pack behavior, or a station's synthesized one.
+    pub fn behavior(&self, name: &str) -> Option<&BehaviorDef> {
+        self.behaviors.get(name).or_else(|| self.stations.get(name).map(|s| &s.behavior))
+    }
+
+    /// The station `name`, if it is one.
+    pub fn station(&self, name: &str) -> Option<&StationMeta> {
+        self.stations.get(name)
+    }
+
+    /// The station long turns go to, when its art is there.
+    pub fn work_station(&self) -> Option<(&str, &WorkFile)> {
+        let w = self.work.as_ref()?;
+        self.available(&w.station).then_some((w.station.as_str(), w))
+    }
+
     /// The first available behavior of a fallback chain.
     pub fn first_available<'a>(&self, chain: &'a [String]) -> Option<&'a str> {
         chain.iter().find(|b| self.available(b)).map(String::as_str)
@@ -391,7 +513,7 @@ impl PackMeta {
     /// Every clip it names exists (free clips in at least `S`, set clips in
     /// both orientations, in its set) and its set exists.
     pub fn available(&self, behavior: &str) -> bool {
-        let Some(b) = self.behaviors.get(behavior) else { return false };
+        let Some(b) = self.behavior(behavior) else { return false };
         if let Some(set) = &b.set {
             if !self.sets.contains_key(set) {
                 return false;
@@ -538,8 +660,11 @@ impl Loader {
             body: BodyMeta { default_for_s: 120, max_for_s: 1800, activities: Vec::new(), emotes: Vec::new() },
             body_issues: Vec::new(),
             turning: None,
+            stations: BTreeMap::new(),
+            work: None,
         };
         meta.turning = self.check_turning(extras.turning, &meta.clips)?;
+        self.check_stations(extras.stations, extras.work, &mut meta)?;
         // the built-in defaults name only what this pack defines (a pack without
         // nap still loads); values the pack writes itself are checked strictly
         let defined = |b: &String| meta.behaviors.contains_key(b);
@@ -707,12 +832,16 @@ impl Loader {
             f.clips.retain(|c, _| clips.contains_key(c));
             let kept: Vec<String> = f.clips.keys().cloned().collect();
             f.patch_dirs.retain(|c, _| kept.contains(c));
+            f.set_clips.retain(|c, _| clips.contains_key(c));
         }
         if !(1..=2).contains(&f.face_version) {
             return Err(self.invalid(rel, format!("face_version {} is not supported (this build reads 1 and 2)", f.face_version)));
         }
         if f.face_version == 1 && !f.patch_dirs.is_empty() {
             return Err(self.invalid(rel, "patch_dirs needs face_version 2"));
+        }
+        if f.face_version == 1 && !f.set_clips.is_empty() {
+            return Err(self.invalid(rel, "set_clips needs face_version 2"));
         }
         let dir_of = |d: &str| Dir::parse(d).ok_or_else(|| self.invalid(rel, format!("unknown direction {d:?}")));
         let dirs = f.dirs.iter().map(|d| dir_of(d)).collect::<Result<Vec<_>, _>>()?;
@@ -785,7 +914,37 @@ impl Loader {
             }
             fclips.insert(clip, m);
         }
-        Ok(FaceMeta { dirs, layers, clips: fclips, patch_dirs })
+        let mut set_clips = BTreeMap::new();
+        for (clip, by_ori) in f.set_clips {
+            let Some(c) = clips.get(&clip).filter(|c| c.set.is_some()) else { return Err(self.invalid(rel, format!("set_clips: {clip} is not a set clip"))) };
+            let mut m = BTreeMap::new();
+            for (o, sf) in by_ori {
+                let at = format!("set_clips: {clip} {o}");
+                let ori = Ori::parse(&o).filter(|ori| c.oris.contains_key(ori)).ok_or_else(|| self.invalid(rel, format!("{at}: the clip has no ori {o}")))?;
+                let patch = dir_of(&sf.patch)?;
+                for (slot, states) in NEEDED {
+                    if !sf.slots.contains_key(slot) {
+                        return Err(self.invalid(rel, format!("{at}: no {slot} positions")));
+                    }
+                    for st in states {
+                        if !layers.get(slot).and_then(|m: &BTreeMap<String, BTreeMap<Dir, FaceLayer>>| m.get(*st)).is_some_and(|m| m.contains_key(&patch)) {
+                            return Err(self.invalid(rel, format!("{at}: no {slot} {st} layer for {}", patch.as_str())));
+                        }
+                    }
+                }
+                for (slot, pos) in &sf.slots {
+                    if !f.slots.contains_key(slot) {
+                        return Err(self.invalid(rel, format!("{at}: unknown slot {slot}")));
+                    }
+                    if pos.len() != c.frames_n() {
+                        return Err(self.invalid(rel, format!("{at} {slot}: {} positions for {} frames", pos.len(), c.frames_n())));
+                    }
+                }
+                m.insert(ori, SetFace { patch, slots: sf.slots });
+            }
+            set_clips.insert(clip, m);
+        }
+        Ok(FaceMeta { dirs, layers, clips: fclips, patch_dirs, set_clips })
     }
 
     /// The `turning` block: names only (clips not rendered yet are fine: the brain snaps), but a
@@ -803,6 +962,55 @@ impl Loader {
             }
         }
         Ok(Some(t))
+    }
+
+    /// `stations` + `work` (p3). A station whose set is not loaded (art not rendered yet) is kept as
+    /// a name only: it never plays. One whose set is there must be complete.
+    fn check_stations(&self, stations: BTreeMap<String, StationFile>, work: Option<WorkFile>, meta: &mut PackMeta) -> Result<(), PackError> {
+        let rel = Path::new("pack.json");
+        for (name, f) in stations {
+            let at = format!("stations: {name}");
+            if meta.behaviors.contains_key(&name) {
+                return Err(self.invalid(rel, format!("{at}: a behavior has the same name")));
+            }
+            let st = StationMeta::new(f);
+            if meta.sets.contains_key(&st.file.set) {
+                for role in Role::ALL {
+                    let clip = st.clip(role);
+                    let Some(c) = meta.clips.get(clip) else { return Err(self.invalid(rel, format!("{at}: {} clip {clip} is missing", role.as_str()))) };
+                    if c.set.as_deref() != Some(st.file.set.as_str()) {
+                        return Err(self.invalid(rel, format!("{at}: {} clip {clip} is not in set {}", role.as_str(), st.file.set)));
+                    }
+                    for ori in [Ori::A, Ori::B] {
+                        if !c.oris.contains_key(&ori) {
+                            return Err(self.invalid(rel, format!("{at}: {} clip {clip} has no ori {ori:?}", role.as_str())));
+                        }
+                        let want = match role {
+                            Role::Enter => Some(true),
+                            Role::Exit => Some(false),
+                            _ => None,
+                        };
+                        if let Some(at_start) = want {
+                            if c.handoff.get(&ori).map(|h| h.at_start) != Some(at_start) {
+                                let w = if at_start { "start" } else { "end" };
+                                return Err(self.invalid(rel, format!("{at}: {} clip {clip} needs a hand-off at {w} for ori {ori:?}", role.as_str())));
+                            }
+                        }
+                    }
+                }
+            }
+            meta.stations.insert(name, st);
+        }
+        if let Some(w) = &work {
+            if !meta.stations.contains_key(&w.station) {
+                return Err(self.invalid(rel, format!("work: unknown station {}", w.station)));
+            }
+            if w.after_tools == 0 {
+                return Err(self.invalid(rel, "work: after_tools must be at least 1"));
+            }
+        }
+        meta.work = work;
+        Ok(())
     }
 
     fn check_behaviors(&self, file: &PackFile, meta: &mut PackMeta) -> Result<(), PackError> {
@@ -933,15 +1141,22 @@ fn check_body(b: BodyFile, meta: &mut PackMeta) {
             continue;
         }
         if let Some(st) = &e.station {
-            // stations arrive with the room (p3); none exist yet
-            issues.push(format!("{at}: unknown station {st}"));
+            if !meta.stations.contains_key(st) {
+                issues.push(format!("{at}: unknown station {st}"));
+                continue;
+            }
+            // a declared station whose art is not rendered yet can't play: left out (studio lint warns)
+            if meta.available(st) {
+                let a = ActivityMeta { plays: vec![st.clone()], kind: e.kind.unwrap_or_default(), about: e.about.trim().to_string(), station: Some(st.clone()) };
+                body.activities.push((name.clone(), a));
+            }
             continue;
         }
         let plays = e.plays.clone().unwrap_or_default();
         if !chain(&at, &plays, meta, &mut issues) {
             continue;
         }
-        body.activities.push((name.clone(), ActivityMeta { plays, kind: e.kind.unwrap_or_default(), about: e.about.trim().to_string() }));
+        body.activities.push((name.clone(), ActivityMeta { plays, kind: e.kind.unwrap_or_default(), about: e.about.trim().to_string(), station: None }));
     }
     for (name, e) in &b.emotes {
         if !common("emotes", name, e, &mut issues) {

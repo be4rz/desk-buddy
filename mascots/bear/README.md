@@ -16,9 +16,9 @@ toy-like.
 ## How the pack works
 
 - **Sources** (paths relative to `art_root`): Stage A free clips `anim/anim.json`, Stage B
-  sets `anim_b/anim_b.json` + `props/props.json`. Three sources are optional:
-  `anim_c/anim_c.json` (new free clips), `anim_l/anim_l.json` (listen and turn clips, p2) and
-  `face/face.json` (face layers). If an optional source is missing, it is skipped. If it is
+  sets `anim_b/anim_b.json` + `props/props.json`. Four sources are optional:
+  `anim_c/anim_c.json` (new free clips), `anim_l/anim_l.json` (listen and turn clips, p2),
+  `anim_d/anim_d.json` + `props_d/props_d.json` (the desk set, p3) and `face/face.json` (face layers). If an optional source is missing, it is skipped. If it is
   present but broken, the pack doesn't load.
 - **Behaviors** are clip sequences. A behavior is *available* when every clip it names
   exists: a free clip in at least `S`, a set clip in both orientations A and B.
@@ -35,6 +35,21 @@ toy-like.
   the bear 45° (Stage A clips with `"turn_steps": 1` for ccw, `-1` for cw, in all 8 dirs). Every
   facing change the brain makes (listen, a set's approach, `look_around`, `wander`) plays them,
   shortest way first. Clips not rendered yet: the bear snaps (lint warns `turn_clips_missing`).
+- **Stations** (p3): `"stations": {"desk": {...}}` turns a Stage B set into a place the bear
+  works from. Each names its `set` and one set clip per role: `enter` (the sit, hand-off at its
+  start), `loop` (typing, held), `to_user` (swivel to the person), `talk`, `ask`, `listen`
+  (held; `listen` defaults to `talk`), `to_screen` (swivel back) and `exit` (stand up, hand-off at
+  its end). Every role clip must be in the set, in both oris. A station is a behavior of its
+  own name (no behavior may share it); it plays only while its set is loaded, so until
+  `anim_d/` exists the bear thinks and answers standing (lint warns `station_art_missing`).
+- **Work** (p3): `"work": {"station": "desk", "after_ms": 4000, "after_tools": 2}`. A turn goes
+  to the station once it has run `after_tools` counted tools, or 1 counted tool and `after_ms`
+  have passed since the turn began. Counted = every tool except `buddy …` (body, say, widgets)
+  and media. It is seated until the turn ends: a card is `ask` from the chair (`to_user` first,
+  `to_screen` back to `loop` when it settles), the answer is `talk` with the mouth layers. It
+  stands (`exit`) after the answer bubble goes (`Settled`), or 120 s after the turn's end. An
+  error, a drag or a do-not-disturb hide stands it at once; after a hide it stays standing for
+  the rest of that turn. A click while seated listens from the chair.
 - **Errors** are one line: `pack <dir>: <path>: <what>`, e.g.
   `pack /nonexistent: pack.json: not found`.
 
@@ -60,6 +75,10 @@ leave the pack.
   a chain must be available. A pack with no `body` gets the default block (`read`, `nap` and
   the five intent emotes, minus any it can't play). `buddy studio lint` lists each problem
   as a `bad_body` error, and the app refuses such a pack.
+- A `"station": "<name>"` activity (the bear's `computer`, `kind: "work"`) sits at that station
+  at once, even mid-turn (a work activity is never queued), and types there for its time. A turn
+  doesn't end it: a reply is still answered from the chair, then back to typing. A click ends
+  it (the bear listens from the chair). Until the station's art is loaded it isn't listed.
 - Do-not-disturb, quiet hours and the tray's hide refuse `do` and `emote` (status
   `refused`, nothing plays); `stop` and `list` always answer.
 
@@ -97,6 +116,10 @@ pixel-identical. Eyes and mouth are **opaque patches** drawn over it:
 - v2 (`"face_version": 2`, p2) adds `patch_dirs[clip][body dir] = patch dir`: a clip whose head
   turns to the camera draws another dir's patches at its own positions. `listen`: S→S, SE→S,
   SW→S, E→SE, W→SW. v1 files still load.
+- v2 also adds `set_clips[clip][ori] = {"patch": <dir>, <slot>: [[x, y], …]}` for set clips the
+  bear talks in (`desk_talk`, `desk_ask`): the patch dir's layers (the desk's are `S`, the head
+  turned to the camera), drawn at one top-left per frame measured on the set clip's frame. Counts
+  equal the clip's `frames_n`; only set clips may be listed.
 - Invariant (`verify_face.py`): body ∘ default eyes ∘ default mouth at those positions ==
   body, pixel for pixel.
 

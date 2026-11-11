@@ -16,6 +16,11 @@
 //! - `bad_anchor`: an anchor outside its frame.
 //! - `missing_face_pos`: face positions whose count isn't the clip's frame count, or a face
 //!   clip/dir/slot without a layer patch.
+//! - `station_art_missing` (warn): pack.json declares a station (`stations`) whose set art isn't
+//!   loaded (an optional source not rendered yet): the bear thinks and answers standing, and the
+//!   station's activities aren't offered. Its `work` block then does nothing either.
+//! - Set faces (face v2 `set_clips`) are checked like `face.clips`: `missing_face_pos` when a count
+//!   isn't the set clip's frame count or the patch dir has no layer for a slot.
 //! - `bad_body`: a problem in pack.json's `body` block (activities and emotes), one per entry, from
 //!   `pack::load_report` (the app refuses such a pack).
 
@@ -214,6 +219,16 @@ pub fn lint(pack: &PackMeta) -> Report {
             }
         }
     }
+    // stations: declared, but their set's art not loaded (the loader checked the rest)
+    for (sname, st) in &pack.stations {
+        if !pack.available(sname) {
+            let mut d = format!("station {sname}: set {} isn't loaded (an optional source not rendered yet?); turns and answers stay standing", st.file.set);
+            if pack.work.as_ref().is_some_and(|w| &w.station == sname) {
+                d.push_str(", and `work` does nothing");
+            }
+            r.push(issue("station_art_missing", "warn", "pack.json", d));
+        }
+    }
     // a behavior's free clips in every direction idle has
     let idle_dirs: Vec<Dir> = pack.clips.get("idle").map(|c| c.dirs.keys().copied().collect()).unwrap_or_else(|| vec![Dir::S]);
     let mut used = BTreeSet::new();
@@ -282,6 +297,22 @@ pub fn lint(pack: &PackMeta) -> Report {
                 }
             }
         }
+        for (cname, oris) in &face.set_clips {
+            let n = pack.clips.get(cname).map(|c| c.durs_ms.len());
+            for (o, sf) in oris {
+                for (slot, pos) in &sf.slots {
+                    let what = format!("set_clips {cname} {} {slot}", crate::frames::ori_str(*o));
+                    match n {
+                        None => r.push(issue("missing_face_pos", "error", "face/face.json", format!("{what}: no such clip"))),
+                        Some(n) if pos.len() != n => r.push(issue("missing_face_pos", "error", "face/face.json", format!("{what}: {} positions for {n} frames", pos.len()))),
+                        _ => {}
+                    }
+                    if !face.layers.get(slot).is_some_and(|st| st.values().any(|m| m.contains_key(&sf.patch))) {
+                        r.push(issue("missing_face_pos", "error", "face/face.json", format!("{what}: no {slot} patch for {}", sf.patch.as_str())));
+                    }
+                }
+            }
+        }
     }
     r
 }
@@ -309,6 +340,52 @@ mod tests {
         let bad: Vec<_> = r.issues.iter().filter(|i| i.code == "bad_body").map(|i| (i.severity, i.file.as_str(), i.detail.as_str())).collect();
         assert_eq!(bad, vec![("error", "pack.json", "body: activities.juggle: unknown behavior \"juggle\"")]);
         assert!(r.errors >= 1);
+    }
+
+    /// p3 desk: the bear plays its desk (no warning); the bear without the `anim_d` source declares
+    /// a desk it can't play (warn); the desk fixture plays it; a set face whose count is off is an error.
+    #[test]
+    fn stations_without_art_warn_and_set_faces_are_counted() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let bear = mascot_core::pack::load_report(&root.join("mascots/bear")).unwrap();
+        assert!(bear.available("desk"));
+        assert!(!lint(&bear).issues.iter().any(|i| i.code == "station_art_missing"));
+        // the same pack over an art folder without anim_d/ (the optional source missing: links to the rest)
+        let bear_dir = root.join("mascots/bear");
+        let mut v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(bear_dir.join("pack.json")).unwrap()).unwrap();
+        let art = bear_dir.join(v["art_root"].as_str().unwrap());
+        for p in v["palettes"].as_array_mut().unwrap() {
+            *p = bear_dir.join(p.as_str().unwrap()).to_string_lossy().into();
+        }
+        let tmp = std::env::temp_dir().join(format!("lint-no-anim-d-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join("art")).unwrap();
+        for e in std::fs::read_dir(&art).unwrap() {
+            let e = e.unwrap();
+            if e.file_name() != "anim_d" {
+                std::os::unix::fs::symlink(e.path(), tmp.join("art").join(e.file_name())).unwrap();
+            }
+        }
+        v["art_root"] = "art".into();
+        std::fs::write(tmp.join("pack.json"), serde_json::to_string(&v).unwrap()).unwrap();
+        let bear = mascot_core::pack::load_report(&tmp).unwrap();
+        let _ = std::fs::remove_dir_all(&tmp);
+        assert!(!bear.available("desk"));
+        let r = lint(&bear);
+        let st: Vec<_> = r.issues.iter().filter(|i| i.code == "station_art_missing").map(|i| (i.severity, i.detail.as_str())).collect();
+        assert_eq!(st.len(), 1, "{st:?}");
+        assert_eq!(st[0].0, "warn");
+        assert!(st[0].1.starts_with("station desk: set desk isn't loaded") && st[0].1.ends_with("`work` does nothing"), "{}", st[0].1);
+        let mut desk = mascot_core::pack::load_report(&root.join("crates/mascot-core/tests/fixtures/desk_pack")).unwrap();
+        let r = lint(&desk);
+        assert!(!r.issues.iter().any(|i| i.code == "station_art_missing" || i.code == "missing_face_pos"), "{:?}", r.issues);
+        assert_eq!(r.errors, 0, "{:?}", r.issues.iter().filter(|i| i.severity == "error").collect::<Vec<_>>());
+        let face = desk.face.as_mut().unwrap();
+        face.set_clips.get_mut("desk_talk").unwrap().get_mut(&mascot_core::Ori::A).unwrap().slots.get_mut("mouth").unwrap().pop();
+        let r = lint(&desk);
+        let bad: Vec<_> = r.issues.iter().filter(|i| i.code == "missing_face_pos").map(|i| i.detail.as_str()).collect();
+        assert_eq!(bad.len(), 1, "{bad:?}");
+        assert!(bad[0].starts_with("set_clips desk_talk A mouth: 15 positions for 16 frames"), "{}", bad[0]);
     }
 
     #[test]

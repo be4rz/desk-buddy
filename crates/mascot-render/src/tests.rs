@@ -162,6 +162,7 @@ fn face_patches_draw_at_their_frame_positions() {
         layers,
         clips: BTreeMap::from([("idle".to_string(), BTreeMap::from([(Dir::S, slots)]))]),
         patch_dirs: BTreeMap::new(),
+        set_clips: BTreeMap::new(),
     });
     let art = Art::load(&p).unwrap();
     let c0 = &p.clips["idle"];
@@ -285,4 +286,59 @@ fn hit_mask_agrees_with_hit() {
     for (i, &m) in mask.iter().enumerate() {
         assert_eq!(m, hit(&out, i % out.w, i / out.w));
     }
+}
+
+/// Desk (p3): face v2 `set_clips` — a seated desk_talk frame draws the named patch dir's layers
+/// at the set_clips positions, measured from the baked set frame's top-left; desk_type (no
+/// set face) stays the baked frame.
+#[test]
+fn desk_talk_draws_the_set_face_on_the_set_frame() {
+    let p = mascot_core::pack::load(&repo().join("crates/mascot-core/tests/fixtures/desk_pack")).expect("desk fixture loads");
+    let art = Art::load(&p).unwrap();
+    let face = p.face.as_ref().unwrap();
+    let [ax, ay] = art.anchor();
+    for (clip, ori) in [("desk_talk", Ori::A), ("desk_talk", Ori::B), ("desk_ask", Ori::A)] {
+        let so = &p.sets["desk"].oris[&ori];
+        let h = handoff_px(&p, "desk", ori).expect("desk hand-off");
+        let (ox, oy) = (ax - h[0] - so.anchor[0], ay - h[1] - so.anchor[1]);
+        let sf = face.set_face(clip, ori).expect("set face");
+        let f = 5;
+        let mut out = art.canvas();
+        let mut s = show("desk", clip, Dir::S, Some(ori), f as u16);
+        s.eyes = EyeState::Closed;
+        s.mouth = MouthState::Wide;
+        compose(&art, &s, &BARE, &mut out);
+        for (slot, state) in [("eyes", "closed"), ("mouth", "wide")] {
+            let at = sf.slots[slot][f];
+            let layer = &face.layers[slot][state][&sf.patch];
+            let (w, hh, rgba) = read_png(&layer.file).unwrap();
+            let mut opaque = 0;
+            for y in 0..hh {
+                for x in 0..w {
+                    let o = (y * w + x) * 4;
+                    if rgba[o + 3] == 255 {
+                        opaque += 1;
+                        assert_eq!(px(&out, ox + at[0] + x as i32, oy + at[1] + y as i32), [rgba[o], rgba[o + 1], rgba[o + 2], 255], "{clip} {ori:?} {slot}: pixel ({x},{y})");
+                    }
+                }
+            }
+            assert!(opaque > 0, "{clip} {ori:?} {slot}");
+        }
+        // the default face (open, closed) on a talk frame changes the baked frame only inside the patches
+        let mut plain = art.canvas();
+        compose(&art, &show("desk", clip, Dir::S, Some(ori), f as u16), &BARE, &mut plain);
+        assert_ne!(plain, out, "{clip} {ori:?}: the face state shows");
+    }
+    // desk_type has no set face: eyes/mouth states do not change it
+    let mut a = art.canvas();
+    let mut b = art.canvas();
+    compose(&art, &show("desk", "desk_type", Dir::S, Some(Ori::A), 3), &BARE, &mut a);
+    let mut s = show("desk", "desk_type", Dir::S, Some(Ori::A), 3);
+    s.mouth = MouthState::Wide;
+    s.eyes = EyeState::Closed;
+    compose(&art, &s, &BARE, &mut b);
+    assert_eq!(a, b);
+    let so = &p.sets["desk"].oris[&Ori::A];
+    let h = handoff_px(&p, "desk", Ori::A).unwrap();
+    assert_frame_at(&a, &p.clips["desk_type"].oris[&Ori::A].file, so.frame_w, so.frame_h, 3, so.anchor, [ax - h[0], ay - h[1]]);
 }

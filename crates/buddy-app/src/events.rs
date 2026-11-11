@@ -151,5 +151,80 @@ mod tests {
         let after = log.iter().find(|l| l.t_ms > 307_000 && l.behavior != "read").expect("then idle again");
         assert_eq!(after.intent, Intent::Idle);
     }
-}
 
+    fn desk_replay(file: &str, pack_dir: &str, seed: u64, until: u64) -> Vec<mascot_core::replay::LogLine> {
+        use mascot_core::{pack, replay};
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let items = load(&dir.join("tests/fixtures").join(file)).unwrap();
+        let p = std::sync::Arc::new(pack::load(&dir.join(pack_dir)).unwrap_or_else(|e| panic!("{e}")));
+        let tl = replay::Timeline { timeline_version: replay::TIMELINE_VERSION, seed, duration_ms: until, start_local: "10:00".into(), weekday: 2, items };
+        replay::run(p, &tl)
+    }
+
+    const DESK_PACK: &str = "../mascot-core/tests/fixtures/desk_pack";
+    const BEAR: &str = "../../mascots/bear";
+
+    fn clips<'a>(log: impl IntoIterator<Item = &'a mascot_core::replay::LogLine>) -> Vec<&'a str> {
+        let mut v: Vec<&str> = Vec::new();
+        for l in log {
+            if v.last() != Some(&l.clip.as_str()) {
+                v.push(&l.clip);
+            }
+        }
+        v
+    }
+
+    /// AC8–AC10: `desk_long` on the desk fixture: seated from desk_sit to desk_stand in one ori, the card
+    /// and the answer from the chair (mouth on desk_talk), up only after the answer bubble's Settled at 20 s.
+    #[test]
+    fn the_desk_long_fixture_sits_answers_from_the_chair_and_stands_on_settled() {
+        use mascot_core::{Intent, MouthState};
+        for seed in [7, 8] {
+            let log = desk_replay("desk_long.jsonl", DESK_PACK, seed, 26_000);
+            let c = clips(&log);
+            let want = ["desk_sit", "desk_type", "desk_swivel_in", "desk_ask", "desk_swivel_out", "desk_type", "desk_swivel_in", "desk_talk", "desk_stand"];
+            let mut it = c.iter();
+            assert!(want.iter().all(|w| it.any(|x| x == w)), "seed {seed}: {c:?}");
+            let i0 = log.iter().position(|l| l.clip == "desk_sit").unwrap();
+            let i1 = log.iter().rposition(|l| l.clip == "desk_stand").unwrap();
+            assert!((4000..6000).contains(&log[i0].t_ms), "seed {seed}: sat at {}", log[i0].t_ms);
+            let ori = log[i0].ori;
+            assert!(ori.is_some() && log[i0..=i1].iter().all(|l| l.ori == ori && l.behavior == "desk" && l.clip != "think"), "seed {seed}: {c:?}");
+            assert!(log.iter().any(|l| l.clip == "desk_talk" && l.mouth != MouthState::Closed), "seed {seed}: no mouth");
+            assert!(log[i1].t_ms >= 20_000, "seed {seed}: stood before Settled");
+            assert_eq!(log.last().map(|l| (l.ori, l.intent)), Some((None, Intent::Idle)));
+        }
+    }
+
+    /// AC8: `desk_short` never shows set desk; the long job on the bear stays standing until its anim_d exists.
+    #[test]
+    fn the_desk_short_fixture_and_a_pack_without_desk_art_stay_standing() {
+        let log = desk_replay("desk_short.jsonl", DESK_PACK, 7, 10_000);
+        assert!(log.iter().all(|l| l.behavior != "desk" && l.ori.is_none()), "{:?}", clips(&log));
+        assert!(clips(&log).contains(&"talk"));
+        let bear = mascot_core::pack::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join(BEAR)).unwrap();
+        let log = desk_replay("desk_long.jsonl", BEAR, 7, 26_000);
+        let c = clips(&log);
+        if bear.available("desk") {
+            assert!(c.contains(&"desk_sit") && c.contains(&"desk_stand"), "{c:?}");
+        } else {
+            assert!(log.iter().all(|l| l.behavior != "desk"), "{c:?}");
+            assert!(c.contains(&"think") && c.contains(&"ask") && c.contains(&"talk"), "{c:?}");
+        }
+    }
+
+    /// AC5: `desk_click`: the click while typing listens from the chair; closed, it types on; up after Settled.
+    #[test]
+    fn the_desk_click_fixture_listens_from_the_chair() {
+        use mascot_core::Intent;
+        let log = desk_replay("desk_click.jsonl", DESK_PACK, 7, 24_000);
+        let c = clips(&log);
+        let during: Vec<_> = log.iter().filter(|l| (7000..11_000).contains(&l.t_ms)).collect();
+        assert!(during.iter().all(|l| l.behavior == "desk" && l.ori.is_some()), "{c:?}");
+        assert!(during.iter().any(|l| l.intent == Intent::Listen && l.clip == "desk_talk"), "{c:?}");
+        let after = clips(log.iter().filter(|l| (11_000..16_000).contains(&l.t_ms)));
+        assert!(after.contains(&"desk_swivel_out") && after.contains(&"desk_type"), "{after:?}");
+        let stand = log.iter().find(|l| l.clip == "desk_stand").expect("stands").t_ms;
+        assert!(stand >= 19_000, "after Settled: {stand}");
+    }
+}

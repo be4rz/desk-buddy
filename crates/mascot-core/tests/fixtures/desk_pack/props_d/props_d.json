@@ -1,0 +1,160 @@
+{
+ "note": "desk_pack stand-in (make.py): the read set's props.",
+ "ppu": 40.0719967705934,
+ "props": {
+  "table": {
+   "A": {
+    "file": "table_A.png",
+    "size": [
+     66,
+     64
+    ],
+    "anchor": [
+     33,
+     50
+    ],
+    "offset_px_in_set": [
+     0,
+     0
+    ],
+    "layer_key": "table_0"
+   },
+   "B": {
+    "file": "table_B.png",
+    "size": [
+     66,
+     64
+    ],
+    "anchor": [
+     33,
+     50
+    ],
+    "offset_px_in_set": [
+     0,
+     0
+    ],
+    "layer_key": "table_0"
+   },
+   "footprint_world": {
+    "x": [
+     -0.65,
+     0.65
+    ],
+    "y": [
+     -0.65,
+     0.65
+    ],
+    "note": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    0,
+    0,
+    0
+   ],
+   "set": "desk"
+  },
+  "pouf": {
+   "A": {
+    "file": "pouf_A.png",
+    "size": [
+     38,
+     31
+    ],
+    "anchor": [
+     19,
+     23
+    ],
+    "offset_px_in_set": [
+     -37,
+     -19
+    ],
+    "layer_key": "pouf_0"
+   },
+   "B": {
+    "file": "pouf_B.png",
+    "size": [
+     38,
+     31
+    ],
+    "anchor": [
+     19,
+     23
+    ],
+    "offset_px_in_set": [
+     37,
+     -19
+    ],
+    "layer_key": "pouf_0"
+   },
+   "footprint_world": {
+    "x": [
+     -0.46,
+     0.46
+    ],
+    "y": [
+     -0.46,
+     0.46
+    ],
+    "note": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    -1.3234,
+    0.0176,
+    0
+   ],
+   "set": "desk"
+  },
+  "book": {
+   "A": {
+    "file": "book_A.png",
+    "size": [
+     33,
+     22
+    ],
+    "anchor": [
+     24,
+     10
+    ],
+    "offset_px_in_set": [
+     -6,
+     -38
+    ],
+    "layer_key": "book_c0_l-1"
+   },
+   "B": {
+    "file": "book_B.png",
+    "size": [
+     33,
+     22
+    ],
+    "anchor": [
+     9,
+     10
+    ],
+    "offset_px_in_set": [
+     6,
+     -38
+    ],
+    "layer_key": "book_c0_l-1"
+   },
+   "footprint_world": {
+    "on": "table",
+    "x": [
+     -0.33,
+     0.33
+    ],
+    "y": [
+     -0.5,
+     0.5
+    ],
+    "note": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    -0.2222,
+    0.0105,
+    1.0
+   ],
+   "set": "desk"
+  }
+ }
+}

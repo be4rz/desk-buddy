@@ -4,23 +4,23 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use mascot_core::pack::{FaceMeta, Ori, SetFace};
 use mascot_core::{Dir, PackMeta};
 
 use crate::{blit, read_png, Canvas, RenderError, Sprite};
 
-/// `patches[(slot, state, dir)]`, `pos[(clip, dir)][slot][frame]` (top-left on the body frame),
-/// `patch_dirs[clip][body dir]` = the dir whose patches it draws (face v2; absent = its own).
-#[derive(Default)]
+/// `patches[(slot, state, dir)]`, `pos[(clip, dir)][slot][frame]` (top-left on the body frame);
+/// `meta` says which dir's patches a clip draws (face v2 `patch_dirs`) and holds the set clips' faces.
 pub(crate) struct FaceArt {
     pub patches: HashMap<(String, String, Dir), Sprite>,
     pub pos: HashMap<(String, Dir), BTreeMap<String, Vec<[i32; 2]>>>,
-    pub patch_dirs: BTreeMap<String, BTreeMap<Dir, Dir>>,
+    pub meta: FaceMeta,
 }
 
 /// Decode the pack's face patches; `None` when the pack has no face source.
 pub(crate) fn load(pack: &PackMeta) -> Result<Option<FaceArt>, RenderError> {
     let Some(face) = &pack.face else { return Ok(None) };
-    let mut art = FaceArt::default();
+    let mut art = FaceArt { patches: HashMap::new(), pos: HashMap::new(), meta: face.clone() };
     for (slot, states) in &face.layers {
         for (state, dirs) in states {
             for (dir, layer) in dirs {
@@ -40,7 +40,6 @@ pub(crate) fn load(pack: &PackMeta) -> Result<Option<FaceArt>, RenderError> {
             art.pos.insert((clip.clone(), *dir), slots.clone());
         }
     }
-    art.patch_dirs = face.patch_dirs.clone();
     Ok(Some(art))
 }
 
@@ -48,7 +47,19 @@ pub(crate) fn load(pack: &PackMeta) -> Result<Option<FaceArt>, RenderError> {
 pub(crate) fn draw(face: &FaceArt, clip: &str, dir: Dir, frame: usize, eyes: &str, mouth: &str, out: &mut Canvas, ox: i32, oy: i32) {
     let Some(pos) = face.pos.get(&(clip.to_string(), dir)) else { return };
     // positions are the body dir's; the sprite is the head's (a listen head turned to the camera)
-    let patch_dir = face.patch_dirs.get(clip).and_then(|m| m.get(&dir)).copied().unwrap_or(dir);
+    draw_slots(face, pos, face.meta.patch_dir(clip, dir), frame, eyes, mouth, out, ox, oy);
+}
+
+/// A set clip's face (`set_clips`, p3): the `patch` dir's sprites at positions on the set frame,
+/// whose top-left is (`ox`, `oy`).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn draw_set(face: &FaceArt, clip: &str, ori: Ori, frame: usize, eyes: &str, mouth: &str, out: &mut Canvas, ox: i32, oy: i32) {
+    let Some(SetFace { patch, slots }) = face.meta.set_face(clip, ori) else { return };
+    draw_slots(face, slots, *patch, frame, eyes, mouth, out, ox, oy);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_slots(face: &FaceArt, pos: &BTreeMap<String, Vec<[i32; 2]>>, patch_dir: Dir, frame: usize, eyes: &str, mouth: &str, out: &mut Canvas, ox: i32, oy: i32) {
     for (slot, state) in [("eyes", eyes), ("mouth", mouth)] {
         let Some(p) = pos.get(slot).and_then(|v| v.get(frame)) else { continue };
         let Some(s) = face.patches.get(&(slot.to_string(), state.to_string(), patch_dir)) else { continue };

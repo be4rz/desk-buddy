@@ -1,0 +1,428 @@
+{
+ "note": "desk_pack stand-in (make.py): frames of the real read set.",
+ "fps": 12,
+ "ppu": 40.0719967705934,
+ "sets": {
+  "desk": {
+   "A": {
+    "frame_w": 138,
+    "frame_h": 152,
+    "anchor": [
+     102,
+     135
+    ],
+    "props_frame": "../props_d/desk_A.png",
+    "orientation": "desk_pack stand-in: the read set (A)"
+   },
+   "B": {
+    "frame_w": 138,
+    "frame_h": 152,
+    "anchor": [
+     35,
+     135
+    ],
+    "props_frame": "../props_d/desk_B.png",
+    "orientation": "desk_pack stand-in: the read set (B)"
+   }
+  }
+ },
+ "anims": {
+  "desk_sit": {
+   "set": "desk",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 12,
+   "files": {
+    "A": "desk_sit_A.png",
+    "B": "desk_sit_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "handoff": {
+    "A": {
+     "at": "start",
+     "frame": 0,
+     "px": [
+      -70,
+      -3
+     ],
+     "facing": "SE"
+    },
+    "B": {
+     "at": "start",
+     "frame": 0,
+     "px": [
+      70,
+      -3
+     ],
+     "facing": "SW"
+    }
+   }
+  },
+  "desk_type": {
+   "set": "desk",
+   "loop": true,
+   "fps": 12,
+   "frames_n": 24,
+   "files": {
+    "A": "desk_type_A.png",
+    "B": "desk_type_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ]
+  },
+  "desk_swivel_in": {
+   "set": "desk",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 6,
+   "files": {
+    "A": "desk_swivel_in_A.png",
+    "B": "desk_swivel_in_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ]
+  },
+  "desk_talk": {
+   "set": "desk",
+   "loop": true,
+   "fps": 12,
+   "frames_n": 16,
+   "files": {
+    "A": "desk_talk_A.png",
+    "B": "desk_talk_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ]
+  },
+  "desk_ask": {
+   "set": "desk",
+   "loop": true,
+   "fps": 12,
+   "frames_n": 16,
+   "files": {
+    "A": "desk_ask_A.png",
+    "B": "desk_ask_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ]
+  },
+  "desk_swivel_out": {
+   "set": "desk",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 6,
+   "files": {
+    "A": "desk_swivel_out_A.png",
+    "B": "desk_swivel_out_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ]
+  },
+  "desk_stand": {
+   "set": "desk",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 11,
+   "files": {
+    "A": "desk_stand_A.png",
+    "B": "desk_stand_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "handoff": {
+    "A": {
+     "at": "end",
+     "frame": 10,
+     "px": [
+      -70,
+      -3
+     ],
+     "facing": "SE"
+    },
+    "B": {
+     "at": "end",
+     "frame": 10,
+     "px": [
+      70,
+      -3
+     ],
+     "facing": "SW"
+    }
+   }
+  }
+ }
+}
