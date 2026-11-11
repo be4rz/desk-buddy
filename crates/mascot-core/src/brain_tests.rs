@@ -24,6 +24,14 @@ fn bear() -> Arc<PackMeta> {
     Arc::new(pack::load(&bear_dir()).unwrap_or_else(|e| panic!("{e}")))
 }
 
+/// The bear with no `turning` block: facing changes snap, so a set starts on the tick it is
+/// chosen (for tests of other mechanics; turning has its own tests).
+fn bear_snapping() -> Arc<PackMeta> {
+    let mut p = (*bear()).clone();
+    p.turning = None;
+    Arc::new(p)
+}
+
 /// The bear as it was before the art round: a temp pack holding only the
 /// Stage A/B/props art, without `anim_c/` and `face/`. Keep the `TempPack`
 /// alive while the pack is used.
@@ -551,7 +559,7 @@ fn held_intents_end_on_settled_and_idle() {
 
 #[test]
 fn harness_interrupts_a_set_behavior_through_its_exit_clip() {
-    let p = bear();
+    let p = bear_snapping();
     let mut b = brain_with(p, 5);
     b.start("nap", Intent::Idle, 0);
     assert!(b.tick(0).cut);
@@ -925,7 +933,7 @@ fn timeline(start: &str, duration_ms: u64, items: Vec<crate::replay::Item>) -> c
 }
 
 fn sense_item(at_ms: u64, patch: Value) -> crate::replay::Item {
-    crate::replay::Item { at_ms, event: None, senses: Some(serde_json::from_value(patch).unwrap()), poke: None }
+    crate::replay::Item { at_ms, event: None, senses: Some(serde_json::from_value(patch).unwrap()), poke: None, face: None }
 }
 
 /// Times at which the log enters `intent`.
@@ -1025,7 +1033,7 @@ fn r2_a_new_say_replaces_the_queued_line_and_the_queue_is_bounded() {
 
 #[test]
 fn r7_a_same_ms_tick_repeats_no_cut_or_motion() {
-    let mut b = brain_with(bear(), 1);
+    let mut b = brain_with(bear_snapping(), 1);
     b.tick(0);
     b.start("nap", Intent::Idle, 0);
     b.dirty = true;
@@ -1315,7 +1323,7 @@ fn gates_refuse_do_and_emote_and_nothing_plays() {
     ] {
         let mut b = brain_with(bear(), 14);
         b.senses(&senses, 0);
-        b.set_user_hidden(hidden);
+        b.set_user_hidden(hidden, 0);
         let r = do_(&mut b, "read", None, 100);
         assert_eq!((r.status, r.reason), (Some(Status::Refused), Some(reason)), "{senses:?} hidden={hidden}");
         assert_eq!(r.message, reason.message());
@@ -1413,18 +1421,6 @@ fn dnd_or_quiet_hours_end_an_activity() {
     b.senses(&Senses { fullscreen: true, ..Senses::default() }, 8000);
     assert_eq!(b.playing(), None);
     assert_eq!(b.tick(8000).visibility, Visibility::Hidden);
-}
-
-#[test]
-fn a_say_outranks_the_activity_which_resumes_after_it() {
-    let mut b = brain_with(bear(), 20);
-    do_(&mut b, "read", Some(120_000), 0);
-    run_until(&mut b, 0, 8000);
-    b.event(&MascotEvent::Say { text: "Tea time!".into(), emotion: None }, 8000);
-    let shows = run_until(&mut b, 8000, 20_000);
-    let talk = shows.iter().position(|(_, s)| s.intent == Intent::Talk).expect("talks");
-    assert!(shows[talk..].iter().any(|(_, s)| s.intent == Intent::Do && s.clip == "sit_down"), "reads again after");
-    assert!(b.playing().is_some());
 }
 
 /// A pack with its own body: an activity that plays a free one-shot, and a `plays` emote.
@@ -1659,4 +1655,363 @@ fn list_text_says_what_plays_now() {
     run_until(&mut b, 1000, 1100);
     let m = b.body(&BodyReq::List, 61_000).message;
     assert!(m.starts_with("Now: read (4m left)\n"), "{m}");
+}
+
+// ---- listen + turns (p2 listen-brain, AC5–AC7) ----
+
+fn listen_pack() -> Arc<PackMeta> {
+    Arc::new(pack::load(&repo().join("crates/mascot-core/tests/fixtures/listen_pack")).unwrap_or_else(|e| panic!("{e}")))
+}
+
+/// The listen fixture with only `rest` in its idle pool, so idle never turns on its own.
+fn listen_pack_still_idle() -> Arc<PackMeta> {
+    let mut p = (*listen_pack()).clone();
+    p.idle_pool.retain(|e| e.behavior == "rest");
+    Arc::new(p)
+}
+
+/// Consecutive shows collapsed to (clip, dir) segments.
+fn segments(shows: &[(u64, Show)]) -> Vec<(String, Dir)> {
+    let mut out: Vec<(String, Dir)> = Vec::new();
+    for (_, s) in shows {
+        if out.last().is_none_or(|l| l.0 != s.clip || l.1 != s.dir) {
+            out.push((s.clip.clone(), s.dir));
+        }
+    }
+    out
+}
+
+/// Every facing change happens as a turn clip ends: the show before it plays a turn clip
+/// from the old dir, and the new dir is exactly one step on.
+fn assert_turns_only(shows: &[(u64, Show)], ctx: &str) {
+    for w in shows.windows(2) {
+        let (a, b) = (&w[0].1, &w[1].1);
+        if a.dir != b.dir {
+            let by = match a.clip.as_str() {
+                "turn_ccw" => 1,
+                "turn_cw" => -1,
+                other => panic!("{ctx}: dir {:?} -> {:?} at {} without a turn clip (was {other})", a.dir, b.dir, w[1].0),
+            };
+            assert_eq!(a.dir.step(by), b.dir, "{ctx}: one step a turn");
+        }
+    }
+}
+
+/// Clicks from `from`, opens the prompt, closes it at 6 s; returns the shows up to 9 s.
+fn listen_from(p: &Arc<PackMeta>, from: Dir, seed: u64) -> Vec<(u64, Show)> {
+    let mut b = brain_with(p.clone(), seed);
+    b.face(from, 0);
+    b.poke(Poke::Click, 100);
+    b.poke(Poke::PromptOpen, 100);
+    let mut shows = run_until(&mut b, 100, 6000);
+    b.poke(Poke::PromptClosed, 6000);
+    shows.extend(run_until(&mut b, 6000, 9000));
+    shows
+}
+
+#[test]
+fn ac6_listen_from_each_of_the_8_dirs_turns_the_exact_path() {
+    let p = listen_pack_still_idle();
+    assert!(p.turning.is_some());
+    for from in Dir::ALL {
+        for seed in [1, 2, 3, 4] {
+            let shows = listen_from(&p, from, seed);
+            let ctx = format!("from {from:?} seed {seed}");
+            assert_turns_only(&shows, &ctx);
+            let seg = segments(&shows);
+            let start = seg.iter().position(|s| s.0 != "idle").unwrap_or_else(|| panic!("{ctx}: never listens: {seg:?}"));
+            let lin = seg.iter().position(|s| s.0 == "listen_in").unwrap_or_else(|| panic!("{ctx}: {seg:?}"));
+            let turns: Vec<&(String, Dir)> = seg[start..lin].iter().collect();
+            let to = seg[lin].1;
+            let want: Vec<(&str, Dir)> = match from {
+                Dir::NE => vec![("turn_cw", Dir::NE)],
+                Dir::NW => vec![("turn_ccw", Dir::NW)],
+                Dir::N if to == Dir::E => vec![("turn_cw", Dir::N), ("turn_cw", Dir::NE)],
+                Dir::N => vec![("turn_ccw", Dir::N), ("turn_ccw", Dir::NW)],
+                _ => vec![],
+            };
+            let got: Vec<(&str, Dir)> = turns.iter().map(|s| (s.0.as_str(), s.1)).collect();
+            assert_eq!(got, want, "{ctx}: path");
+            assert_eq!(to, from.listen_target().unwrap_or(to), "{ctx}: listen dir");
+            assert!(matches!(to, Dir::S | Dir::SE | Dir::E | Dir::W | Dir::SW), "{ctx}");
+            let rest: Vec<&str> = seg[lin..].iter().map(|s| s.0.as_str()).collect();
+            assert_eq!(&rest[..4], ["listen_in", "listen", "listen_out", "idle"], "{ctx}");
+            assert!(seg[lin..lin + 4].iter().all(|s| s.1 == to), "{ctx}: listens facing {to:?}");
+            // held until the prompt closed
+            let out_at = shows.iter().find(|(_, s)| s.clip == "listen_out").unwrap().0;
+            assert!(out_at >= 6000 && out_at < 6200, "{ctx}: listen_out at {out_at}");
+        }
+    }
+    // N's two ways both come up over seeds (seeded tie-break)
+    let tos: std::collections::BTreeSet<Dir> = (0..16)
+        .map(|s| segments(&listen_from(&p, Dir::N, s)).iter().find(|x| x.0 == "listen_in").unwrap().1)
+        .collect();
+    assert_eq!(tos, [Dir::E, Dir::W].into_iter().collect());
+}
+
+#[test]
+fn ac6_prompt_sent_goes_from_listen_straight_to_think() {
+    let mut b = brain_with(listen_pack(), 3);
+    b.face(Dir::S, 0);
+    b.poke(Poke::PromptOpen, 100);
+    run_until(&mut b, 100, 3000);
+    assert_eq!(b.tick(3000).clip, "listen");
+    b.poke(Poke::PromptSent, 3000);
+    b.event(&MascotEvent::Thinking, 3000);
+    let shows = run_until(&mut b, 3000, 5000);
+    let out = shows.iter().position(|(_, s)| s.clip == "listen_out").expect("listen_out");
+    let after: Vec<Intent> = shows[out..].iter().map(|(_, s)| s.intent).filter(|i| *i != Intent::Listen).collect();
+    assert!(!after.is_empty() && after.iter().all(|i| *i == Intent::Think), "no idle between: {after:?}");
+}
+
+#[test]
+fn ac6_prompt_sent_without_a_thinking_event_still_thinks() {
+    let mut b = brain_with(listen_pack(), 3);
+    b.face(Dir::SE, 0);
+    b.poke(Poke::PromptOpen, 100);
+    run_until(&mut b, 100, 2000);
+    b.poke(Poke::PromptSent, 2000);
+    let shows = run_until(&mut b, 2000, 4000);
+    assert_eq!(shows.last().unwrap().1.intent, Intent::Think);
+    b.event(&MascotEvent::Idle, 4000);
+    let shows = run_until(&mut b, 4000, 6000);
+    assert_eq!(shows.last().unwrap().1.intent, Intent::Idle);
+}
+
+#[test]
+fn ac6_closed_while_turning_ends_at_the_current_dir() {
+    let mut b = brain_with(listen_pack_still_idle(), 1);
+    b.face(Dir::N, 0);
+    b.poke(Poke::PromptOpen, 100);
+    let mut shows = run_until(&mut b, 100, 200);
+    assert!(shows.last().unwrap().1.clip.starts_with("turn_"), "{:?}", segments(&shows));
+    b.poke(Poke::PromptClosed, 200);
+    shows.extend(run_until(&mut b, 200, 3000));
+    assert_turns_only(&shows, "closed mid-turn");
+    let seg = segments(&shows);
+    assert!(seg.iter().all(|s| !s.0.starts_with("listen")), "{seg:?}");
+    let last = seg.last().unwrap();
+    assert_eq!(last.0, "idle");
+    assert!(matches!(last.1, Dir::NE | Dir::NW), "one step on, then idle there: {seg:?}");
+}
+
+#[test]
+fn ac6_a_click_alone_does_not_listen() {
+    // the driver posts no PromptOpen when a card is up: the click alone plays no listen
+    let mut b = brain_with(listen_pack_still_idle(), 2);
+    b.face(Dir::NE, 0);
+    b.poke(Poke::Click, 100);
+    let shows = run_until(&mut b, 100, 4000);
+    assert!(shows.iter().all(|(_, s)| s.intent != Intent::Listen && !s.clip.starts_with("turn_")), "{:?}", segments(&shows));
+}
+
+#[test]
+fn ac6_dnd_still_opens_no_listen_clip_and_hidden_plays_nothing() {
+    let mut b = Brain::new(listen_pack(), BrainConfig { seed: 4, temperament: None, dnd_action: DndAction::Still }, 0);
+    b.face(Dir::NE, 0);
+    b.senses(&Senses { dnd_toggle: true, ..Senses::default() }, 50);
+    b.poke(Poke::Click, 100);
+    b.poke(Poke::PromptOpen, 100);
+    let shows = run_until(&mut b, 100, 4000);
+    assert!(shows.iter().all(|(_, s)| s.intent != Intent::Listen && s.clip == "idle" && s.frame == 0 && s.dir == Dir::NE), "pinned");
+    b.poke(Poke::PromptClosed, 4000);
+    assert_eq!(b.tick(4100).clip, "idle");
+
+    let mut b = brain_with(listen_pack(), 4);
+    b.senses(&Senses { dnd_toggle: true, ..Senses::default() }, 50);
+    b.poke(Poke::PromptOpen, 100);
+    let shows = run_until(&mut b, 100, 4000);
+    assert!(shows.iter().all(|(_, s)| s.visibility == Visibility::Hidden && s.intent != Intent::Listen));
+}
+
+#[test]
+fn ac6_quiet_hours_still_listen() {
+    let mut b = brain_with(listen_pack(), 5);
+    b.face(Dir::W, 0);
+    b.senses(&Senses { quiet_hours: true, ..Senses::default() }, 50);
+    b.poke(Poke::PromptOpen, 100);
+    let shows = run_until(&mut b, 100, 2000);
+    assert!(shows.iter().any(|(_, s)| s.clip == "listen" && s.dir == Dir::W), "{:?}", segments(&shows));
+}
+
+#[test]
+fn ac6_without_turning_the_bear_snaps_and_still_listens() {
+    let mut p = (*listen_pack_still_idle()).clone();
+    p.turning = None;
+    let p = Arc::new(p);
+    for from in Dir::ALL {
+        let shows = listen_from(&p, from, 6);
+        let seg = segments(&shows);
+        assert!(seg.iter().all(|s| !s.0.starts_with("turn_")), "{from:?}: {seg:?}");
+        let lin = seg.iter().find(|s| s.0 == "listen_in").unwrap_or_else(|| panic!("{from:?}: {seg:?}"));
+        assert_eq!(Some(lin.1), from.listen_target().or(Some(lin.1)), "{from:?}");
+    }
+    // the real bear without its turning block: it snaps NE → E and listens with the real clips
+    let mut b = brain_with(bear_snapping(), 6);
+    b.face(Dir::NE, 0);
+    b.poke(Poke::PromptOpen, 100);
+    let shows = run_until(&mut b, 100, 2000);
+    assert!(segments(&shows).iter().all(|s| !s.0.starts_with("turn_")), "{:?}", segments(&shows));
+    let last = &shows.last().unwrap().1;
+    assert_eq!((last.intent, last.dir, last.clip.as_str()), (Intent::Listen, Dir::E, "listen"));
+}
+
+#[test]
+fn ac6_the_real_bear_turns_from_every_facing_and_listens() {
+    let p = bear();
+    assert!(p.turn_clip(Dir::NE, -1).is_some() && p.turn_clip(Dir::NW, 1).is_some(), "the bear has anim_l");
+    for from in Dir::ALL {
+        let mut b = brain_with(p.clone(), 6);
+        b.face(from, 0);
+        b.poke(Poke::Click, 100);
+        b.poke(Poke::PromptOpen, 100);
+        let shows = run_until(&mut b, 100, 6000);
+        let seg = segments(&shows);
+        let back = matches!(from, Dir::N | Dir::NE | Dir::NW);
+        assert_eq!(seg.iter().any(|s| s.0.starts_with("turn_")), back, "{from:?}: {seg:?}");
+        let last = &shows.last().unwrap().1;
+        let want = from.listen_target().map_or(vec![Dir::E, Dir::W], |d| vec![d]);
+        assert!(last.intent == Intent::Listen && last.clip == "listen" && want.contains(&last.dir), "{from:?}: {seg:?}");
+    }
+}
+
+#[test]
+fn idle_pool_behaviors_finish_their_turn_on_the_real_bear() {
+    // look_around / wander turn first; the turn must not end them (idle resolves to `rest`)
+    let mut b = brain_with(bear(), 1);
+    b.start("look_around", Intent::Idle, 0);
+    let shows = run_until(&mut b, 0, 3000);
+    assert!(shows.iter().any(|(_, s)| s.behavior == "look_around" && s.clip == "idle"), "{:?}", segments(&shows));
+}
+
+/// A v2 face naming `listen` while the optional `anim_l` source is missing: the pack still loads
+/// (listen falls back to `rest`, the bear snaps); the same face with no optional source missing
+/// still rejects an unknown clip.
+#[test]
+fn ac6_face_v2_without_the_anim_l_source_still_loads() {
+    let t = TempPack::new("face-v2-no-anim-l");
+    t.add_anim_c();
+    t.add_face();
+    let path = t.root.join("art/face/face.json");
+    let mut f: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    f["face_version"] = json!(2);
+    let pos: Vec<Value> = (0..16).map(|_| json!([30, 40])).collect();
+    f["clips"]["listen"] = json!({ "E": { "eyes": pos, "mouth": pos } });
+    f["patch_dirs"] = json!({ "listen": { "E": "SE" } });
+    std::fs::write(&path, serde_json::to_string(&f).unwrap()).unwrap();
+    assert!(!t.root.join("art/anim_l").exists());
+    let p = t.load().unwrap_or_else(|e| panic!("{e}"));
+    let face = p.face.as_ref().expect("the face still loads");
+    assert!(!face.clips.contains_key("listen"));
+    assert_eq!(face.patch_dir("listen", Dir::E), Dir::E, "its patch_dirs went with it");
+    assert_eq!(p.resolve(Intent::Listen), p.resolve(Intent::Idle), "listen falls back to rest");
+
+    // nothing optional missing: an unknown face clip is still an error
+    t.edit(|v| {
+        let srcs: Vec<Value> = v["sources"].as_array().unwrap().iter().filter(|s| !s["path"].as_str().unwrap().contains("anim_l")).cloned().collect();
+        v["sources"] = json!(srcs);
+    });
+    let e = t.load().expect_err("unknown clip listen");
+    assert!(e.to_string().contains("unknown clip listen"), "{e}");
+}
+
+#[test]
+fn ac6_old_face_v1_loads_with_no_patch_dirs() {
+    let t = TempPack::new("face-v1");
+    t.add_anim_c();
+    t.add_face();
+    let p = t.load().unwrap_or_else(|e| panic!("{e}"));
+    let f = p.face.as_ref().expect("a v1 face");
+    assert!(f.patch_dirs.is_empty());
+    assert_eq!(f.patch_dir("idle", Dir::E), Dir::E);
+    let l = listen_pack();
+    let f = l.face.as_ref().unwrap();
+    assert_eq!(f.patch_dir("listen", Dir::E), Dir::SE);
+    assert_eq!(f.patch_dir("listen", Dir::SW), Dir::S);
+    assert_eq!(f.patch_dir("idle", Dir::E), Dir::E);
+}
+
+#[test]
+fn ac5_click_and_prompt_outrank_a_started_activity() {
+    let mut b = brain_with(bear(), 13);
+    do_(&mut b, "read", None, 0);
+    run_until(&mut b, 0, 8000);
+    assert!(b.playing().is_some_and(|p| !p.pending));
+    b.poke(Poke::Click, 8000);
+    b.poke(Poke::PromptOpen, 8000);
+    assert_eq!(b.playing(), None);
+    let shows = run_until(&mut b, 8000, 12_000);
+    assert_eq!(shows[0].1.clip, "stand_up");
+    assert_eq!(shows.last().unwrap().1.intent, Intent::Listen, "then listens");
+}
+
+#[test]
+fn priority_a_do_from_the_sent_turn_queues_and_starts_after_idle() {
+    let mut b = brain_with(bear(), 7);
+    b.poke(Poke::PromptOpen, 0);
+    run_until(&mut b, 0, 1000);
+    b.poke(Poke::PromptSent, 1000);
+    assert_eq!(do_(&mut b, "read", None, 1200).status, Some(Status::Queued));
+    b.event(&MascotEvent::Idle, 3000);
+    let shows = run_until(&mut b, 3000, 6000);
+    assert!(shows.iter().any(|(_, s)| s.clip == "sit_down"));
+}
+
+#[test]
+fn turning_packs_turn_for_look_around_and_without_turning_nothing_turns() {
+    // (the day.seed7 golden proves a pack without turn clips replays byte-identically)
+    let p = listen_pack();
+    let mut b = brain_with(p.clone(), 9);
+    let shows = run_until(&mut b, 0, 120_000);
+    assert_turns_only(&shows, "idle day");
+    assert!(shows.iter().any(|(_, s)| s.behavior == "look_around" && s.clip.starts_with("turn_")), "look_around turns");
+    let mut np = (*p).clone();
+    np.turning = None;
+    let mut b2 = brain_with(Arc::new(np), 9);
+    let shows2 = run_until(&mut b2, 0, 120_000);
+    assert!(shows2.iter().all(|(_, s)| !s.clip.starts_with("turn_")));
+}
+
+// ---- p1 leftovers ----
+
+#[test]
+fn leftover_hiding_from_the_tray_ends_the_activity_with_its_exit_step() {
+    let mut b = brain_with(bear(), 13);
+    do_(&mut b, "read", None, 0);
+    run_until(&mut b, 0, 8000);
+    b.set_user_hidden(true, 8000);
+    assert_eq!(b.playing(), None);
+    assert!(activity_notes(&b).iter().any(|n| n == "end read (hidden)"), "{:?}", activity_notes(&b));
+    run_until(&mut b, 8000, 12_000);
+    b.set_user_hidden(false, 12_000);
+    let shows = run_until(&mut b, 12_000, 20_000);
+    assert!(shows.iter().all(|(_, s)| s.intent != Intent::Do), "not still reading when shown again");
+}
+
+#[test]
+fn leftover_a_say_during_a_set_activity_keeps_the_seat() {
+    let mut b = brain_with(bear(), 20);
+    do_(&mut b, "read", Some(120_000), 0);
+    run_until(&mut b, 0, 8000);
+    b.event(&MascotEvent::Say { text: "Tea time!".into(), emotion: Some(Emotion::Happy) }, 8000);
+    let shows = run_until(&mut b, 8000, 20_000);
+    assert!(shows.iter().all(|(_, s)| s.intent == Intent::Do && s.clip == "read"), "{:?}", segments(&shows));
+    let e = b.body(&BodyReq::Emote { name: "wave".into() }, 20_000);
+    assert_eq!((e.status, e.reason), (Some(Status::Refused), Some(Reason::Busy)));
+    let shows = run_until(&mut b, 20_000, 22_000);
+    assert!(shows.iter().all(|(_, s)| s.clip == "read"));
+}
+
+#[test]
+fn leftover_a_repeated_do_only_moves_the_deadline() {
+    let mut b = brain_with(bear(), 13);
+    do_(&mut b, "read", Some(60_000), 0);
+    run_until(&mut b, 0, 8000);
+    let until = b.playing().unwrap().until_ms.unwrap();
+    let r = do_(&mut b, "read", Some(60_000), 8000);
+    assert_eq!(r.status, Some(Status::Started));
+    assert_eq!(b.playing().unwrap().until_ms, Some(68_000));
+    assert!(until < 68_000);
+    let shows = run_until(&mut b, 8000, 20_000);
+    assert!(shows.iter().all(|(_, s)| s.clip == "read"), "no restart: {:?}", segments(&shows));
 }

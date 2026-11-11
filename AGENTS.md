@@ -86,8 +86,14 @@ and talks through speech bubbles, powered by an LLM.
   Stage C (needs `bear.blend` + `out/bear3d/anim/`): `sh run_c.sh` (`rig_bear.py --stage c` → `bear_rig_c.blend` +
   `clips_c.json`; think/talk/ask loop + oops/happy/celebrate one-shot in Stage A's 84×123 frame → `out/bear3d/anim_c/`,
   ~7 min) → `sh run_face.sh` (D16 face layers → `out/bear3d/face/`, ~40 s; ends with `verify_face.py`).
+  Stage L (needs `bear.blend`, `out/bear3d/anim/` and `face/`): `sh run_l.sh` (`rig_bear.py --stage l`: Stage C rig +
+  a `head` bone twisting the whole round head mass, rig in a temp dir → `clips_l.json`; listen_in/listen/listen_out for
+  S SE E W SW (head turns 45° toward the camera) + turn_ccw/turn_cw for 8 dirs → `out/bear3d/anim_l/`, then
+  `face_l.py` makes `face/face.json` v2 (additive: `clips.listen` + `patch_dirs`), ~2 min). `python3 verify_l.py`
+  (`--self-test`, exit 1 = works): hand-offs = idle frame 0, alpha, palette, 1 px ink outline. Sheet: `anim_l/sheet_listen.png`.
+  `run_c.sh` / `run_face.sh` rewrite face.json as v1: run `python3 face_l.py` after them (verify_face.py fails until then).
 - `python3 verify_b.py`: Stage B hand-off frames must be pixel-identical to props + the idle sprite; run it after any re-render.
-- `python3 verify_face.py` (`--self-test`: two in-memory mutations, each must be caught, exit 1): the face invariant
+- `python3 verify_face.py` (`--self-test`: in-memory mutations (3 with face.json v2), each must be caught, exit 1): the face invariant
   "T" (amends design §3.4). Default patches drawn at each frame's position must equal the expected frame (the anim_c
   frame; for idle the Blender reference `face/ref/idle_<dir>.png`, rigid face, no baked blink) exactly on idle's rest
   frames and on Stage C frames with arms and squash at rest (all hand-offs). Elsewhere they may differ by ≤ 16 px per
@@ -97,7 +103,7 @@ and talks through speech bubbles, powered by an LLM.
 - Pixel rules: iso 2:1 ortho camera, 8 directions, 12 fps, ppu 40.07, alpha 0/255 only, 1px ink outline, palette =
   `bear-proto/palette-bear.json` + `scene-proto/palette.json` (+ `bear3d/palette-ext.json` for furniture).
 - Preview: `python3 -m http.server 8771 --directory experiments/mascot/out`, then open
-  `bear3d/anim/preview.html`, `bear3d/anim_b/preview_b.html` or `bear3d/anim_c/preview_c.html` (Stage C + face sheets).
+  `bear3d/anim/preview.html`, `bear3d/anim_b/preview_b.html` or `bear3d/anim_c/preview_c.html` (Stage C + face sheets) or `bear3d/anim_l/preview_l.html` (listen + turns).
 
 ## Gotchas
 

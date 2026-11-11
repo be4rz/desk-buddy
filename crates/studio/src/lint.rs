@@ -8,7 +8,10 @@
 //! - `stray_pixel`: an opaque pixel with no non-transparent 8-neighbour inside its frame.
 //! - `non_integer_root` (warn): a clip/dir whose root motion has fractions (the brain keeps
 //!   the fraction, so this is allowed; it is listed so a reviewer knows).
-//! - `missing_dir`: a behavior's free clip lacks a direction `idle` has (error without `S`).
+//! - `missing_dir`: a behavior's free clip lacks a direction `idle` has (error without `S`). The
+//!   listen behavior's clips need only the front dirs (the brain turns the bear first, §1.4).
+//! - `turn_clips_missing` (warn): the pack's `turning` block names a clip it doesn't have, or one
+//!   without every direction `idle` has; those facing changes snap.
 //! - `frame_count`: a strip isn't `frames_n` frames of `frame_w x frame_h`.
 //! - `bad_anchor`: an anchor outside its frame.
 //! - `missing_face_pos`: face positions whose count isn't the clip's frame count, or a face
@@ -19,7 +22,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use mascot_core::{Dir, PackMeta};
+use mascot_core::{Dir, Intent, PackMeta};
 use serde::Serialize;
 
 /// Issues of one code reported per file at most; the rest are summed in one more line.
@@ -219,15 +222,37 @@ pub fn lint(pack: &PackMeta) -> Report {
             used.insert(st.clip.clone());
         }
     }
+    // listen plays facing the person: back views turn (or snap) to the front first
+    // (a pack without a listen behavior resolves listen to `rest`: no exemption then)
+    let lb = pack.resolve(Intent::Listen);
+    let listen: BTreeSet<&str> = if lb == pack.resolve(Intent::Idle) {
+        BTreeSet::new()
+    } else {
+        pack.behaviors.get(lb).map(|b| b.seq.iter().map(|s| s.clip.as_str()).collect()).unwrap_or_default()
+    };
     for cname in &used {
         let Some(c) = pack.clips.get(cname) else { continue };
         if c.set.is_some() {
             continue;
         }
-        let missing: Vec<&str> = idle_dirs.iter().filter(|d| !c.dirs.contains_key(d)).map(|d| d.as_str()).collect();
+        let back = |d: &Dir| listen.contains(cname.as_str()) && matches!(d, Dir::NE | Dir::N | Dir::NW);
+        let missing: Vec<&str> = idle_dirs.iter().filter(|d| !c.dirs.contains_key(d) && !back(d)).map(|d| d.as_str()).collect();
         if !missing.is_empty() {
             let sev = if c.dirs.contains_key(&Dir::S) { "warn" } else { "error" };
             r.push(issue("missing_dir", sev, cname, format!("no {}", missing.join(", "))));
+        }
+    }
+    if let Some(t) = &pack.turning {
+        for (role, name) in [("ccw", &t.ccw), ("cw", &t.cw)] {
+            match pack.clips.get(name) {
+                None => r.push(issue("turn_clips_missing", "warn", name, format!("turning {role}: no clip {name}; facing changes snap"))),
+                Some(c) => {
+                    let missing: Vec<&str> = idle_dirs.iter().filter(|d| !c.dirs.contains_key(d)).map(|d| d.as_str()).collect();
+                    if !missing.is_empty() {
+                        r.push(issue("turn_clips_missing", "warn", name, format!("turning {role}: no {}; turns from there snap", missing.join(", "))));
+                    }
+                }
+            }
         }
     }
     if let Some(face) = &pack.face {
@@ -248,9 +273,11 @@ pub fn lint(pack: &PackMeta) -> Report {
                         Some(n) if pos.len() != n => r.push(issue("missing_face_pos", "error", "face/face.json", format!("{what}: {} positions for {n} frames", pos.len()))),
                         _ => {}
                     }
-                    let has_layer = face.layers.get(slot).is_some_and(|st| st.values().any(|m| m.contains_key(d)));
+                    // v2: the clip may draw another dir's patches (patch_dirs)
+                    let pd = face.patch_dir(cname, *d);
+                    let has_layer = face.layers.get(slot).is_some_and(|st| st.values().any(|m| m.contains_key(&pd)));
                     if !has_layer {
-                        r.push(issue("missing_face_pos", "error", "face/face.json", format!("{what}: no {slot} patch for {}", d.as_str())));
+                        r.push(issue("missing_face_pos", "error", "face/face.json", format!("{what}: no {slot} patch for {}", pd.as_str())));
                     }
                 }
             }

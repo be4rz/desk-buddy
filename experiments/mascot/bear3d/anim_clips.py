@@ -260,3 +260,59 @@ def build_c(V, PXZ, HB=2.06):
 
 
 ORDER_C = ['think', 'talk', 'ask', 'oops', 'happy', 'celebrate']
+
+
+# ---------------------------------------------------------------------- Stage L (listen + turns, rig_bear.py --stage l)
+# Stage C rules plus two parameters, both 0 at rest:
+#   hy  head yaw, deg about the body's vertical axis (the axis the render yaw uses): the whole round head mass turns
+#       (rigid above the mouth, a smooth twist down to the waist band, rig_bear.py --stage l); + = counter-clockwise
+#       from above, the same sense as the direction yaw. Hold frames use exactly +-45 so the head renders exactly as
+#       the neighbouring direction's head (face patch dir: SE->S, E->SE with -45; SW->S, W->SW with +45).
+#   hb  head bob, whole pixels up (the head mass and its face; the twist band takes up the 1 px), a breath.
+#   ty  turn yaw, deg of the whole bear about the floor origin (turn clips only; their last frame is the rest pose
+#       of the next direction).
+REST_L = dict(REST_C, hy=0.0, hb=0, ty=0.0)
+
+
+def PL(**kw):
+    d = dict(REST_L); d.update(kw); return d
+
+
+# head yaw of each listen variant: _cw turns the head clockwise (-45, body SE/E), _ccw counter-clockwise (+45, SW/W),
+# _0 none (S already faces the camera; its listen is the ear perk and the breath)
+LISTEN_VARIANTS = {'cw': -45.0, 'ccw': 45.0, '0': 0.0}
+LISTEN_DIR_VARIANT = {'S': '0', 'SE': 'cw', 'E': 'cw', 'SW': 'ccw', 'W': 'ccw'}
+LISTEN_PATCH_DIR = {'S': 'S', 'SE': 'S', 'SW': 'S', 'E': 'SE', 'W': 'SW'}
+
+
+def build_l(V, PXZ):
+    clips = {}
+    for v, Y in LISTEN_VARIANTS.items():
+        perk = dict(earL=-4, earR=-4, clX=-3)
+        # listen_in (4, one-shot): the head mass yaws toward the camera, a tiny ear perk on the last frame
+        clips['listen_in_' + v] = dict(loop=False, frames=[
+            PL(), PL(hy=Y * (1 / 3), earL=1, earR=1, clX=2), PL(hy=Y * (2 / 3), earL=-1, earR=-1, clX=-1),
+            PL(hy=Y, **perk)])
+        # listen (16, loop): held yaw; a slow 1 px breath (f4-f7), soft ear wiggle (f8-f11); rest frames exact
+        H = PL(hy=Y)
+        seq = [H] * 4 + [PL(hy=Y, hb=1, earL=-1, earR=-1, clX=-2)] * 4
+        seq += [PL(hy=Y, earL=3, earR=-2, clY=3), PL(hy=Y, earL=-2, earR=3, clY=-3)] * 2
+        seq += [H] * 4
+        clips['listen_' + v] = dict(loop=True, frames=seq)
+        # listen_out (4, one-shot): the head returns to the body's facing; last frame = rest
+        clips['listen_out_' + v] = dict(loop=False, frames=[
+            PL(hy=Y * (2 / 3), earL=1, earR=1, clX=2), PL(hy=Y * (1 / 3), earL=2, earR=2, clX=1),
+            PL(earL=1, earR=1, clX=-1), PL()])
+    # turns (4, one-shot): feet shuffle, the body rotates 45 deg, a 1 px hop at f2; f0 / f3 are rest poses
+    for name, s in (('turn_ccw', 1), ('turn_cw', -1)):
+        lead, trail = ('hL', 'hR') if s > 0 else ('hR', 'hL')
+        clips[name] = dict(loop=False, frames=[
+            PL(), PL(ty=15 * s, **{lead: 2 * PXZ}, earL=1, earR=1, clY=-3 * s),
+            PL(ty=30 * s, bob=PXZ, **{lead: PXZ, trail: 3 * PXZ}, earL=-2, earR=-2, clY=3 * s),   # 1 px hop
+            PL(ty=45 * s)])
+    for c in clips.values():
+        c['root'] = [0.0] * len(c['frames']); c['next_root'] = 0.0
+    return clips
+
+
+ORDER_L = [f'{c}_{v}' for v in LISTEN_VARIANTS for c in ('listen_in', 'listen', 'listen_out')] + ['turn_ccw', 'turn_cw']

@@ -165,6 +165,23 @@ pub struct App {
     /// R-midturn: a prompt waiting for the turn it replaced to end (the flag is set on that
     /// turn's Idle or Error); a later prompt meanwhile replaces the text
     superseded: Option<(Arc<AtomicBool>, String)>,
+    /// The prompt is on screen and the brain was told (`PromptOpen` … `PromptSent`/`PromptClosed`).
+    listening: bool,
+}
+
+/// The listen poke for the brain when the bubble changed: the prompt came up, or went
+/// without being sent (✕/Esc, a card took its place). A sent prompt was told in `submit`.
+fn listen_poke(listening: bool, prompt_shown: bool) -> Option<Poke> {
+    match (listening, prompt_shown) {
+        (false, true) => Some(Poke::PromptOpen),
+        (true, false) => Some(Poke::PromptClosed),
+        _ => None,
+    }
+}
+
+/// The Ask… prompt is what the bubble shows.
+fn prompt_shown(b: &Bubble) -> bool {
+    b.shown().is_some_and(|m| m.mode == Mode::Prompt)
 }
 
 pub struct Init {
@@ -234,6 +251,7 @@ pub fn start(init: Init, handle: tauri::AppHandle) {
         on_budget: None,
         on_ask: None,
         superseded: None,
+        listening: false,
     };
     APP.with(|a| *a.borrow_mut() = Some(app));
     forward(rx, handle);
@@ -460,7 +478,8 @@ impl App {
     pub fn set_user_hidden(&mut self, h: bool) {
         self.user_hidden = h;
         // the body tools refuse with reason "hidden" while the person has hidden the bear
-        self.brain.set_user_hidden(h);
+        let now = self.now_ms();
+        self.brain.set_user_hidden(h, now);
         eprintln!("[buddy] bear visible={}", !h);
         if let Some(f) = &self.on_hidden {
             f(h);
@@ -623,6 +642,14 @@ fn hide_reason(s: &Senses) -> &'static str {
 impl App {
     /// Show, hide or keep what the bubble state machine decided; re-arm its hide timer.
     pub fn apply(&mut self, out: Out) {
+        // the brain listens while the prompt is really up (not the setup bubble, not a kept card)
+        if let Some(p) = listen_poke(self.listening, prompt_shown(&self.bubble)) {
+            self.listening = p == Poke::PromptOpen;
+            eprintln!("[buddy] poke {p:?}");
+            let now = self.now_ms();
+            self.brain.poke(p, now);
+            self.wake();
+        }
         let Some(w) = &self.bubble_win else { return };
         match out {
             Out::Show(m) => {
@@ -666,6 +693,11 @@ impl App {
     /// its late text lands in the new answer.
     pub fn submit(&mut self, text: String) {
         let midturn = self.bubble.running();
+        // sent: the brain goes from listen straight to think (not via PromptClosed)
+        self.listening = false;
+        eprintln!("[buddy] poke {:?}", Poke::PromptSent);
+        let now = self.now_ms();
+        self.brain.poke(Poke::PromptSent, now);
         // still waiting for a replaced turn (also after ■ on it): its late text stays quiet
         let out = if midturn || self.superseded.is_some() { self.bubble.supersede(&text) } else { self.bubble.submitted(&text) };
         self.apply(out);
@@ -827,6 +859,10 @@ impl App {
         eprintln!("[buddy] prompt failed: {e}");
         let out = self.bubble.failed(e.code, &e.message);
         self.apply(out);
+        // no turn will come: the bear stops thinking (PromptSent started it)
+        let now = self.now_ms();
+        self.brain.event(&MascotEvent::Idle, now);
+        self.wake();
     }
 
     /// The policy's view changed (taint, mode, rules, pending).
@@ -907,6 +943,29 @@ pub fn status(s: &Senses, action: DndAct) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn listen_pokes_follow_the_prompt_on_screen() {
+        assert_eq!(listen_poke(false, true), Some(Poke::PromptOpen));
+        assert_eq!(listen_poke(true, true), None, "still up: once");
+        assert_eq!(listen_poke(true, false), Some(Poke::PromptClosed));
+        assert_eq!(listen_poke(false, false), None);
+        // a click while a card is up keeps the card: no prompt, so no PromptOpen
+        let mut b = Bubble::new();
+        b.submitted("hi");
+        b.event(&MascotEvent::AwaitingPermission { call_id: "c1".into(), title: "Run?".into() }, 0);
+        assert_eq!(b.open_prompt(), Out::Keep);
+        assert_eq!(listen_poke(false, prompt_shown(&b)), None);
+        // the setup bubble (signed out) is not the prompt either
+        let mut b = Bubble::new();
+        b.agent(true, false, 0);
+        b.open_prompt();
+        assert!(b.is_setup());
+        assert_eq!(listen_poke(false, prompt_shown(&b)), None);
+        let mut b = Bubble::new();
+        b.open_prompt();
+        assert_eq!(listen_poke(false, prompt_shown(&b)), Some(Poke::PromptOpen));
+    }
 
     #[test]
     fn status_line_wording() {

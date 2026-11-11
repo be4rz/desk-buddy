@@ -16,15 +16,25 @@ toy-like.
 ## How the pack works
 
 - **Sources** (paths relative to `art_root`): Stage A free clips `anim/anim.json`, Stage B
-  sets `anim_b/anim_b.json` + `props/props.json`. Two sources are optional:
-  `anim_c/anim_c.json` (new free clips) and `face/face.json` (face layers). If an optional
-  source is missing, it is skipped. If it is present but broken, the pack doesn't load.
+  sets `anim_b/anim_b.json` + `props/props.json`. Three sources are optional:
+  `anim_c/anim_c.json` (new free clips), `anim_l/anim_l.json` (listen and turn clips, p2) and
+  `face/face.json` (face layers). If an optional source is missing, it is skipped. If it is
+  present but broken, the pack doesn't load.
 - **Behaviors** are clip sequences. A behavior is *available* when every clip it names
   exists: a free clip in at least `S`, a set clip in both orientations A and B.
 - **Intents** map to fallback chains. The brain plays the first available behavior. Before
   the art round, `celebrate → happy → rest` resolves to `rest`, and `think` / `talk` / `ask`
   resolve to `hold` (idle, held). Once `anim_c` exists, the same chains pick the new clips
   without any pack edit.
+- **Listen** (p2): while the Ask… prompt is open the brain plays the `listen` intent
+  (`["listen", "rest"]`): `listen_in` once, `listen` held, `listen_out` once (`"exit": true`, so
+  sending or closing plays `listen_out` at once). The listen clips exist for `S SE E W SW` only;
+  from a back view the bear turns first: NE→E, NW→W, N→E or W (seeded). Until `anim_l` exists,
+  listen is `rest` facing the person.
+- **Turning** (p2): `"turning": {"ccw": "turn_ccw", "cw": "turn_cw"}` names the clips that turn
+  the bear 45° (Stage A clips with `"turn_steps": 1` for ccw, `-1` for cw, in all 8 dirs). Every
+  facing change the brain makes (listen, a set's approach, `look_around`, `wander`) plays them,
+  shortest way first. Clips not rendered yet: the bear snaps (lint warns `turn_clips_missing`).
 - **Errors** are one line: `pack <dir>: <path>: <what>`, e.g.
   `pack /nonexistent: pack.json: not found`.
 
@@ -84,6 +94,9 @@ pixel-identical. Eyes and mouth are **opaque patches** drawn over it:
 - `layers[slot][state][dir]` = one PNG patch. `clips[clip][dir][slot]` = one integer top-left
   position per body frame (length `frames_n`), in frame pixels. This covers every free clip of
   `anim` and `anim_c`.
+- v2 (`"face_version": 2`, p2) adds `patch_dirs[clip][body dir] = patch dir`: a clip whose head
+  turns to the camera draws another dir's patches at its own positions. `listen`: S→S, SE→S,
+  SW→S, E→SE, W→SW. v1 files still load.
 - Invariant (`verify_face.py`): body ∘ default eyes ∘ default mouth at those positions ==
   body, pixel for pixel.
 

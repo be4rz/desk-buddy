@@ -2,6 +2,7 @@
 #
 #   Blender -b bear.blend -P rig_bear.py -- [--out bear_rig.blend] [--clips clips.json]
 #   Blender -b bear.blend -P rig_bear.py -- --stage c [--out bear_rig_c.blend] [--clips clips_c.json]
+#   Blender -b bear.blend -P rig_bear.py -- --stage l --out <scratch>/bear_rig_l.blend [--clips clips_l.json]
 #
 # --stage c (Stage C, run_c.sh) keys anim_clips.ORDER_C plus the face-layer helpers instead of the Stage A clips,
 # and changes only what the D16 face layers need (without --stage c the script behaves exactly as before):
@@ -13,6 +14,17 @@
 #   - extra hidden meshes mouth_open / mouth_wide / tongue (face-layer states, shown only by render_anim.py --show);
 #   - clips_c.json gains per clip face_px = {eyes, mouth}: whole-pixel upward shift per frame.
 #
+# --stage l (Stage L, run_l.sh) = everything --stage c does, keying anim_clips.ORDER_L instead, plus a head turn:
+#   - a 'head' bone under root, pivot on the body's vertical axis (the axis the render yaw turns about);
+#   - the body mesh alone is skinned to it (Armature modifier, dual quaternion so the twist keeps its volume):
+#     weight smoothstep(HEAD_Z0 -> HEAD_Z1) of the rest height, 'body' the rest. Above HEAD_Z1 (just under the mouth)
+#     the whole round head mass turns rigidly; the band down to the waist twists smoothly (no neck, no seam step);
+#     the pants, stitches and feet stay;
+#   - the face decals, eyes, mouth, beanie (with clover) and ears turn rigidly with the head (pose hy) and ride its
+#     whole-pixel bob (hb); the arms follow the twist by ARM_W of it so they stay on the belly, under the face;
+#   - the root bone takes the turn yaw ty (turn_ccw / turn_cw);
+#   - clips_l.json face_px includes the head bob.
+
 # Armature 'Rig' (child of BearRoot). Every part is rigidly parented to one bone, so there is no skin
 # weighting and the face decals can't smear:
 #   root (floor)                    root motion lives in clips.json, not in the bones (clips are in place)
@@ -39,10 +51,12 @@ import anim_clips
 argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
 def arg(n, d=None): return argv[argv.index(n) + 1] if n in argv else d
 STAGE = arg('--stage', 'a')
-if STAGE not in ('a', 'c'): raise SystemExit(f'rig_bear.py: --stage must be a or c, not {STAGE!r}')
-STAGE_C = STAGE == 'c'
+if STAGE not in ('a', 'c', 'l'): raise SystemExit(f'rig_bear.py: --stage must be a, c or l, not {STAGE!r}')
+STAGE_C = STAGE in ('c', 'l')   # Stage L builds on the Stage C rig
+STAGE_L = STAGE == 'l'
+if STAGE_L and not arg('--out'): raise SystemExit('rig_bear.py: --stage l needs --out (the Stage L rig is scratch)')
 OUT = arg('--out', os.path.join(HERE, 'bear_rig_c.blend' if STAGE_C else 'bear_rig.blend'))
-CLIPS_JSON = arg('--clips', os.path.join(HERE, 'clips_c.json' if STAGE_C else 'clips.json'))
+CLIPS_JSON = arg('--clips', os.path.join(HERE, {'a': 'clips.json', 'c': 'clips_c.json', 'l': 'clips_l.json'}[STAGE]))
 FIT, FIT_YAW = 105.0, 112.5   # the cute 100 px renders: same pixel size
 
 sc = bpy.context.scene; vl = bpy.context.view_layer
@@ -130,6 +144,15 @@ if STAGE_C:
     PARENT['eyes'] = 'root'; PARENT['mouth'] = 'root'
     for n in ('mouth', 'mouth_open', 'mouth_wide', 'tongue'): BIND[n] = 'mouth'
 
+if STAGE_L:
+    # ---------------------------------------------------------------- Stage L: the head bone and the twist band
+    HEAD_Z0, HEAD_Z1 = 0.85, 1.40     # waist band -> just under the mouth (the mouth's lowest point is ~1.44)
+    def head_w(z): return anim_clips.ease(min(max((z - HEAD_Z0) / (HEAD_Z1 - HEAD_Z0), 0.0), 1.0))
+    PIV['head'] = Vector((0, 0, HEAD_Z1)); PARENT['head'] = 'root'
+    ARM_W = head_w((PIV['arm_L'].z + 0.93) / 2)   # the twist at mid-arm (shoulder -> paw on the belly)
+    del BIND['body']                  # skinned below, not bone-parented
+    print(f'HEAD twist z {HEAD_Z0}..{HEAD_Z1}, arms follow {ARM_W:.2f}')
+
 # ------------------------------------------------------------------ armature
 arm = bpy.data.armatures.new('RigData'); rig = bpy.data.objects.new('Rig', arm); col.objects.link(rig)
 rig.parent = root; rig.matrix_world = Matrix.Identity(4)
@@ -148,6 +171,22 @@ for name, bone in BIND.items():
     ob.matrix_basis = mw
 vl.update()
 err = max(max(abs(a - b) for ra, rb in zip(o.matrix_world, rest[o.name]) for a, b in zip(ra, rb)) for o in meshes)
+if STAGE_L:
+    bo = O['body']; mw = bo.matrix_world.copy()
+    bo.parent = rig; bo.parent_type = 'OBJECT'; bo.matrix_parent_inverse = rig.matrix_world.inverted(); bo.matrix_world = mw
+    vg_b, vg_h = bo.vertex_groups.new(name='body'), bo.vertex_groups.new(name='head')
+    for vx in bo.data.vertices:
+        w = head_w((mw @ vx.co).z)
+        if w < 1: vg_b.add([vx.index], 1.0 - w, 'REPLACE')
+        if w > 0: vg_h.add([vx.index], w, 'REPLACE')
+    md = bo.modifiers.new('Rig', 'ARMATURE'); md.object = rig
+    md.use_vertex_groups = True; md.use_bone_envelopes = False; md.use_deform_preserve_volume = True
+    vl.update()
+    # the skinned body at rest must be the unrigged mesh (matrix_world alone can't see the modifier)
+    ev = bo.evaluated_get(bpy.context.evaluated_depsgraph_get()); me = ev.to_mesh()
+    assert len(me.vertices) == len(bo.data.vertices)
+    err = max(err, max((ev.matrix_world @ a.co - mw @ b.co).length for a, b in zip(me.vertices, bo.data.vertices)))
+    ev.to_mesh_clear()
 print(f'rest pose drift after rigging: {err:.2e}'); assert err < 1e-5
 
 # ------------------------------------------------------------------ pose from parameters
@@ -181,11 +220,18 @@ def deltas(q):
             sh = PIV['arm_' + s]
             D['arm_' + s] = carry(sh) @ about(sh, rx(-q['arm' + s])) @ about(sh, ry(-k * q.get('sp' + s, 0.0)))
         D['eyes'] = face_shift(PIV['eyes'], D) @ D['eyes']; D['mouth'] = face_shift(PIV['mouth'], D)
+    if STAGE_L:
+        Rh = Matrix.Translation((0, 0, q['hb'] * PXZ)) @ Matrix.Rotation(math.radians(q['hy']), 4, 'Z')
+        D['head'] = D['body'] @ Rh
+        for n in ('face', 'eyes', 'mouth', 'hat', 'ear_L', 'ear_R'): D[n] = Rh @ D[n]
+        for n in ('arm_L', 'arm_R'): D[n] = Matrix.Rotation(math.radians(q['hy'] * ARM_W), 4, 'Z') @ D[n]
+        D['root'] = Matrix.Rotation(math.radians(q['ty']), 4, 'Z')
     return D
 
-def face_px(p, D):
-    """Stage C: whole screen pixels the body's motion lifts point p (the eyes / mouth shift up by this)."""
-    return int(round(((D['body'] @ p).z - p.z) / PXZ))
+def face_px(p, D, hb=0):
+    """Stage C: whole screen pixels the body's motion lifts point p (the eyes / mouth shift up by this);
+    Stage L adds the head's whole-pixel bob hb (pose key 'hb', applied by Rh in deltas)."""
+    return int(round(((D['body'] @ p).z - p.z) / PXZ)) + int(hb)
 
 def face_shift(p, D):
     return Matrix.Translation((0, 0, face_px(p, D) * PXZ))
@@ -207,6 +253,8 @@ if STAGE_C:
     clips['face_rest'] = dict(loop=False, root=[0.0], next_root=0.0, frames=[anim_clips.PC()])
     clips['face_eyes_closed'] = dict(loop=False, root=[0.0], next_root=0.0, frames=[anim_clips.PC(blink=0.12)])
     ORDER = anim_clips.ORDER_C + ['idle_ref', 'face_rest', 'face_eyes_closed']
+if STAGE_L:
+    clips = anim_clips.build_l(V, PXZ); ORDER = anim_clips.ORDER_L
 sc.render.fps = anim_clips.FPS; sc.render.fps_base = 1
 bpy.context.preferences.edit.keyframe_new_interpolation_type = 'CONSTANT'
 rig.animation_data_create()
@@ -223,7 +271,7 @@ for cname in ORDER:
     meta['clips'][cname] = dict(loop=c['loop'], n=len(c['frames']), root=c['root'] + [c['next_root']],
                                 poses=c['frames'])
     if STAGE_C:
-        meta['clips'][cname]['face_px'] = {s: [face_px(PIV[s], deltas(q)) for q in c['frames']] for s in ('eyes', 'mouth')}
+        meta['clips'][cname]['face_px'] = {s: [face_px(PIV[s], deltas(q), q.get('hb', 0)) for q in c['frames']] for s in ('eyes', 'mouth')}
     print('CLIP', cname, len(c['frames']), 'frames')
 rig.animation_data.action = bpy.data.actions[ORDER[0]]
 sc.frame_start, sc.frame_end = 0, meta['clips'][ORDER[0]]['n'] - 1

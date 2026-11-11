@@ -1,0 +1,195 @@
+{
+ "pack_version": 1,
+ "id": "listen_pack",
+ "name": "Listen fixture",
+ "art_root": ".",
+ "palettes": [
+  "../../../../../experiments/bear-proto/palette-bear.json",
+  "../../../../../experiments/scene-proto/palette.json",
+  "../../../../../experiments/mascot/bear3d/palette-ext.json"
+ ],
+ "sources": [
+  {
+   "kind": "stage_a",
+   "path": "../../../../../experiments/mascot/out/bear3d/anim/anim.json"
+  },
+  {
+   "kind": "stage_a",
+   "path": "anim_l/anim_l.json",
+   "optional": true
+  },
+  {
+   "kind": "face",
+   "path": "face/face.json",
+   "optional": true
+  }
+ ],
+ "capabilities": {
+  "blink": true,
+  "lip_sync": true,
+  "look_at": "body"
+ },
+ "temperament": {
+  "energy": 0.5,
+  "curiosity": 0.6,
+  "shyness": 0.3,
+  "chattiness": 0.4,
+  "sleepiness": 0.5
+ },
+ "timers": {
+  "blink": {
+   "mean_ms": 4200,
+   "jitter": 0.4,
+   "closed_frames": 2,
+   "double_p": 0.15
+  },
+  "mouth": {
+   "frame_ms": 167,
+   "stall_ms": 400
+  }
+ },
+ "turning": {
+  "ccw": "turn_ccw",
+  "cw": "turn_cw"
+ },
+ "behaviors": {
+  "rest": {
+   "seq": [
+    {
+     "clip": "idle",
+     "loops": [
+      1,
+      3
+     ]
+    }
+   ]
+  },
+  "look_around": {
+   "seq": [
+    {
+     "clip": "idle",
+     "loops": [
+      1,
+      1
+     ]
+    }
+   ],
+   "turn": "random"
+  },
+  "hold": {
+   "seq": [
+    {
+     "clip": "idle",
+     "loops": "hold"
+    }
+   ]
+  },
+  "listen": {
+   "seq": [
+    {
+     "clip": "listen_in"
+    },
+    {
+     "clip": "listen",
+     "loops": "hold"
+    },
+    {
+     "clip": "listen_out"
+    }
+   ],
+   "exit": true
+  }
+ },
+ "intents": {
+  "idle": [
+   "rest"
+  ],
+  "think": [
+   "rest"
+  ],
+  "work": [
+   "rest"
+  ],
+  "talk": [
+   "rest"
+  ],
+  "ask": [
+   "rest"
+  ],
+  "oops": [
+   "rest"
+  ],
+  "happy": [
+   "rest"
+  ],
+  "celebrate": [
+   "rest"
+  ],
+  "sad": [
+   "rest"
+  ],
+  "surprised": [
+   "rest"
+  ],
+  "sleepy": [
+   "rest"
+  ],
+  "wave": [
+   "rest"
+  ],
+  "nod": [
+   "rest"
+  ],
+  "shake": [
+   "rest"
+  ],
+  "jump": [
+   "rest"
+  ],
+  "spin": [
+   "rest"
+  ],
+  "greet": [
+   "rest"
+  ],
+  "stretch": [
+   "rest"
+  ],
+  "remind": [
+   "rest"
+  ],
+  "dodge": [
+   "rest"
+  ],
+  "listen": [
+   "listen",
+   "rest"
+  ]
+ },
+ "idle_pool": [
+  {
+   "behavior": "rest",
+   "weight": 2,
+   "cooldown_s": 0
+  },
+  {
+   "behavior": "look_around",
+   "weight": 2,
+   "cooldown_s": 0
+  }
+ ],
+ "memory": {
+  "recent": 3,
+  "penalty": 0.25
+ },
+ "quiet_hours": {
+  "pool": [
+   "rest"
+  ],
+  "boost": {}
+ },
+ "warmup": {
+  "duration_s": 0,
+  "exclude": []
+ }
+}

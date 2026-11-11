@@ -116,8 +116,54 @@ fn lint_on_the_bear_has_no_errors() {
     let errs: Vec<_> = r.issues.iter().filter(|i| i.severity == "error").collect();
     assert_eq!(r.errors, 0, "{errs:#?}");
     assert!(r.files > 100);
-    // the only warnings are the walk/run cycles' sub-pixel root motion
+    // the only warnings are the walk/run cycles' sub-pixel root motion (anim_l/ has every turn clip)
     assert!(r.issues.iter().all(|i| i.code == "non_integer_root"), "{:#?}", r.issues);
+}
+
+#[test]
+fn lint_on_the_listen_fixture_takes_front_only_listen_clips_and_v2_patch_dirs() {
+    let p = mascot_core::pack::load(&root().join("crates/mascot-core/tests/fixtures/listen_pack")).unwrap();
+    let r = lint::lint(&p);
+    assert_eq!(r.errors, 0, "{:#?}", r.issues);
+    assert!(r.issues.iter().all(|i| i.code == "non_integer_root"), "no missing_dir for listen, no turn warning: {:#?}", r.issues);
+    // a turning block naming a clip the pack lacks: a warning, the pack still loads
+    let mut q = p.clone();
+    q.turning = Some(mascot_protocol::pack::TurningFile { ccw: "turn_ccw".into(), cw: "spin_cw".into() });
+    let r = lint::lint(&q);
+    let warn: Vec<_> = r.issues.iter().filter(|i| i.code == "turn_clips_missing").map(|i| (i.severity, i.file.as_str())).collect();
+    assert_eq!(warn, vec![("warn", "spin_cw")]);
+    assert_eq!(r.errors, 0);
+}
+
+/// Without a listen behavior, listen resolves to `rest`: rest's clips get no back-view exemption.
+#[test]
+fn lint_without_a_listen_behavior_still_checks_rest_back_views() {
+    let mut p = mascot_core::pack::load(&root().join("crates/mascot-core/tests/fixtures/listen_pack")).unwrap();
+    p.behaviors.remove("listen");
+    p.intents.insert(mascot_core::Intent::Listen, vec!["rest".into()]);
+    // a front-only clip in rest's seq: a real gap now
+    p.behaviors.get_mut("rest").unwrap().seq.push(mascot_protocol::pack::StepDef { clip: "listen_in".into(), loops: Default::default() });
+    let r = lint::lint(&p);
+    assert!(r.issues.iter().any(|i| i.code == "missing_dir" && i.file == "listen_in"), "{:#?}", r.issues);
+}
+
+/// p1 leftover: import pre-checks with `load_report`, so a pack whose body block has a problem
+/// (the app refuses it; lint reports it) still takes new art.
+#[test]
+fn import_into_a_pack_with_a_body_issue_still_works() {
+    let d = tmp("import-body");
+    let p = d.join("p");
+    import_blob(&p, "blob");
+    let pj = p.join("pack.json");
+    let mut v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&pj).unwrap()).unwrap();
+    v["body"] = serde_json::json!({ "activities": { "juggle": { "plays": ["juggle"], "kind": "pastime", "about": "juggle" } } });
+    std::fs::write(&pj, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+    assert!(mascot_core::pack::load(&p).is_err(), "the strict load refuses it");
+    assert!(!mascot_core::pack::load_report(&p).unwrap().body_issues.is_empty());
+    let r = import_blob(&p, "blob2");
+    assert!(!r.created_pack);
+    assert!(mascot_core::pack::load_report(&p).unwrap().clips.contains_key("blob2_walk"));
+    let _ = std::fs::remove_dir_all(&d);
 }
 
 fn import_blob(pack: &Path, name: &str) -> aseprite::Imported {

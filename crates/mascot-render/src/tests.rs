@@ -161,6 +161,7 @@ fn face_patches_draw_at_their_frame_positions() {
         dirs: vec![Dir::S],
         layers,
         clips: BTreeMap::from([("idle".to_string(), BTreeMap::from([(Dir::S, slots)]))]),
+        patch_dirs: BTreeMap::new(),
     });
     let art = Art::load(&p).unwrap();
     let c0 = &p.clips["idle"];
@@ -180,6 +181,39 @@ fn face_patches_draw_at_their_frame_positions() {
     compose(self::art(), &show("rest", "idle", Dir::N, None, 2), &BARE, &mut plain);
     assert_eq!(north, plain);
     std::fs::remove_dir_all(d).ok();
+}
+
+/// AC7: face v2 `patch_dirs` — a `listen` frame facing E draws the SE patches (the head turned
+/// toward the camera) at E's positions; the idle clip keeps its own dir's patches.
+#[test]
+fn ac7_listen_draws_the_patch_dir_at_the_body_dirs_positions() {
+    let p = mascot_core::pack::load(&repo().join("crates/mascot-core/tests/fixtures/listen_pack")).expect("listen fixture loads");
+    let art = Art::load(&p).unwrap();
+    let face = p.face.as_ref().unwrap();
+    let c0 = &p.clips["listen"];
+    let [ax, ay] = art.anchor();
+    let (ox, oy) = (ax - c0.anchor[0], ay - c0.anchor[1]);
+    for (clip, dir, patch) in [("listen", Dir::E, Dir::SE), ("listen", Dir::W, Dir::SW), ("listen", Dir::SE, Dir::S), ("idle", Dir::E, Dir::E)] {
+        let f = 3;
+        let mut out = art.canvas();
+        let mut s = show(clip, clip, dir, None, f as u16);
+        s.eyes = EyeState::Closed;
+        compose(&art, &s, &BARE, &mut out);
+        let at = face.clips[clip][&dir]["eyes"][f];
+        let layer = &face.layers["eyes"]["closed"][&patch];
+        let (w, h, rgba) = read_png(&layer.file).unwrap();
+        let mut opaque = 0;
+        for y in 0..h {
+            for x in 0..w {
+                let o = (y * w + x) * 4;
+                if rgba[o + 3] == 255 {
+                    opaque += 1;
+                    assert_eq!(px(&out, ox + at[0] + x as i32, oy + at[1] + y as i32), [rgba[o], rgba[o + 1], rgba[o + 2], 255], "{clip} {dir:?}: {patch:?} patch pixel ({x},{y})");
+                }
+            }
+        }
+        assert!(opaque > 0, "{clip} {dir:?}");
+    }
 }
 
 #[test]

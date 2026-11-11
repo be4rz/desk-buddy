@@ -2,12 +2,14 @@
 
     python3 verify_face.py [ART_DIR] [--sheet PNG]   (ART_DIR default ../out/bear3d; --sheet writes the 6 worst
                                                        frames: body | body+default | expected | residual in red)
-    python3 verify_face.py --self-test               two in-memory mutations, each must be caught (exit 1 = the
+    python3 verify_face.py --self-test               three in-memory mutations, each must be caught (exit 1 = the
                                                        checker works, exit 2 = it missed or over-reported):
       1. one opaque pixel of the default eyes patch (S) flipped: reported as exactly that patch pixel on the rest
          frames;
       2. 17 spread-out pixels inside the patch masks of one tolerated (non-rest) Stage C frame: the frame is named
-         for exceeding the 16 px bound.
+         for exceeding the 16 px bound;
+      3. (face.json v2) one body pixel under the S eyes patch on a held listen SE frame (rest pose, head turned to
+         S): reported as exactly that patch pixel on exactly that frame.
 
 Invariant "T" (amends the wording of design §3.4; agreed with the lead for this art round). Draw the default patches
 (eyes open, mouth closed) over the body frame at that frame's positions = "drawn". The expected frame is the anim_c
@@ -22,8 +24,12 @@ shipped idle re-rasterises its eyes while it breathes and bakes one blink (Stage
     feature, so a paw crossing the face or a missing / extra eye fails). Why: the eyes and mouth are rigid, but their
     1 px ink outline and the fur shade ring around them come from the surrounding scene, so a paw near the face or
     the idle breath flips a few outline / shade pixels.
+  - listen (Stage L, face.json v2): drawn with the patches of patch_dirs.listen[dir] (the head is turned 45 deg on its
+    held frames: SE->S, SW->S, E->SE, W->SW, S->S); the expected frame is the anim_l body; EXACT on the frames whose
+    pose has arms, squash and the head bob at rest (every held frame but the 1 px breath), TOLERATED on the others.
+    listen_in / listen_out (baked face) and the turns (no face) have no entries.
   - walk*/run* (head roll / lean), walk_64, N/NE/NW and the Stage B sets have no face entries.
-Also: face_version 1, dirs S SE E W SW, slots eyes [open closed] / mouth [closed open wide]; every patch and reference
+Also: face_version 1 (or 2 = v1 + clips.listen + patch_dirs.listen exactly as above), dirs S SE E W SW, slots eyes [open closed] / mouth [closed open wide]; every patch and reference
 is alpha 0/255 in pack palette colours (mascots/bear/pack.json `palettes`); all states of one slot+dir share size and
 opaque mask; one position per body frame, patch inside the frame; the covered clips are exactly idle + the six Stage C
 clips in every face dir; Stage C hand-off frames (frame 0, and the last frame of a one-shot) equal anim/idle frame 0
@@ -100,9 +106,23 @@ F = json.load(open(os.path.join(ART, 'face', 'face.json')))
 IDLE_POSES = json.load(open(os.path.join(HERE, 'clips.json')))['clips']['idle']['poses']
 C_POSES = {c: v['poses'] for c, v in json.load(open(os.path.join(HERE, 'clips_c.json')))['clips'].items() if c in C_CLIPS}
 COVER = {'idle'} | set(C_CLIPS)
+V2 = F.get('face_version') == 2
+if V2:   # Stage L: listen, with the patch dir following the turned head
+    sys.path.insert(0, HERE)
+    from anim_clips import LISTEN_DIR_VARIANT, LISTEN_PATCH_DIR
+    AL = json.load(open(os.path.join(ART, 'anim_l', 'anim_l.json')))['anims']
+    L_POSES = {d: json.load(open(os.path.join(HERE, 'clips_l.json')))['clips'][f'listen_{LISTEN_DIR_VARIANT[d]}']['poses']
+               for d in FACE_DIRS}
+    COVER |= {'listen'}
 
 
-def exact_frame(c, f):
+def patch_dir(c, d): return F.get('patch_dirs', {}).get(c, {}).get(d, d)
+
+
+def exact_frame(c, f, d=None):
+    if c == 'listen':
+        p, r = L_POSES[d][f], L_POSES[d][0]
+        return all(abs(p.get(k, 0) - r.get(k, 0)) < 1e-9 for k in REST_KEYS + ['hb', 'bob', 'hy'])
     if c == 'idle': return IDLE_POSES[f] == IDLE_POSES[0]
     p, r = C_POSES[c][f], C_POSES[c][0]
     return all(abs(p.get(k, 0) - r.get(k, 0)) < 1e-9 for k in REST_KEYS)
@@ -119,7 +139,12 @@ def pixel_rules(a, what, errors):
 def load_all():
     """structure checks + the patches and body/expected frames (in memory, so the self-test can mutate them)"""
     errors = []
-    if F.get('face_version') != 1: errors.append(f'face_version {F.get("face_version")} != 1')
+    if F.get('face_version') not in (1, 2): errors.append(f'face_version {F.get("face_version")} is not 1 or 2')
+    if V2 and F.get('patch_dirs') != {'listen': LISTEN_PATCH_DIR}:
+        errors.append(f'patch_dirs {F.get("patch_dirs")} != {{"listen": {LISTEN_PATCH_DIR}}}')
+    if not V2 and 'patch_dirs' in F: errors.append('patch_dirs in a v1 face.json')
+    if not V2 and os.path.exists(os.path.join(ART, 'anim_l', 'anim_l.json')):
+        errors.append('face.json is v1 but anim_l/ exists (run_face.sh / run_c.sh rewrite it): run python3 face_l.py')
     if F.get('dirs') != FACE_DIRS: errors.append(f'dirs {F.get("dirs")} != {FACE_DIRS}')
     for s, (states, dflt) in SLOTS.items():
         sl = F['slots'].get(s, {})
@@ -141,14 +166,14 @@ def load_all():
                 patch[(s, st, d)] = a
     body, ref = {}, {}
     for c in sorted(COVER & set(F['clips'])):
-        meta = A[c] if c == 'idle' else AC[c]
+        meta, sub = (A[c], 'anim') if c == 'idle' else (AL[c], 'anim_l') if c == 'listen' else (AC[c], 'anim_c')
         if set(F['clips'][c]) != set(FACE_DIRS): errors.append(f'{c}: face dirs {sorted(F["clips"][c])} != {FACE_DIRS}')
         for d in FACE_DIRS:
             if d not in F['clips'][c]: continue
             for s in SLOTS:
                 n = len(F['clips'][c][d].get(s, []))
                 if n != meta['frames_n']: errors.append(f'{c} {d} {s}: {n} positions for {meta["frames_n"]} frames')
-            body[(c, d)] = frames(os.path.join(ART, 'anim' if c == 'idle' else 'anim_c', meta['files'][d]), meta['frame_w'])
+            body[(c, d)] = frames(os.path.join(ART, sub, meta['files'][d]), meta['frame_w'])
             if c == 'idle':
                 ref[d] = frames(os.path.join(ART, 'face', 'ref', f'idle_{d}.png'), meta['frame_w'])
                 pixel_rules(np.concatenate(ref[d], 1), f'ref/idle_{d}.png', errors)
@@ -172,16 +197,17 @@ def check(patch, body, ref):
             drawn, owner = b.copy(), {}
             H, W = b.shape[:2]; inm = np.zeros((H, W), bool)
             for s, (_, dflt) in SLOTS.items():
-                x, y = F['clips'][c][d][s][f]; p = patch[(s, dflt, d)]; h, w = p.shape[:2]
+                pd = patch_dir(c, d)
+                x, y = F['clips'][c][d][s][f]; p = patch[(s, dflt, pd)]; h, w = p.shape[:2]
                 if x < 0 or y < 0 or x + w > W or y + h > H: tol.append((f'{lab}: {s} patch at ({x},{y}) leaves the frame', set())); continue
                 m = p[..., 3] == 255
                 drawn[y:y + h, x:x + w][m] = p[m]; inm[y:y + h, x:x + w] |= m
-                for py, px in zip(*np.nonzero(m)): owner[(y + py, x + px)] = f'{s}/{dflt}/{d} patch pixel ({px},{py})'
+                for py, px in zip(*np.nonzero(m)): owner[(y + py, x + px)] = f'{s}/{dflt}/{pd} patch pixel ({px},{py})'
             exp = ref[d][f] if c == 'idle' else b
 
             def key(y, x): return owner.get((y, x), f'{c} {d} body pixel ({x},{y}) outside the patches')
             dm = (drawn != exp).any(-1)
-            if exact_frame(c, f):
+            if exact_frame(c, f, d):
                 for want, tag in ((exp, ''), (b, ' (vs body)') if c == 'idle' else (None, None)):
                     if want is None: continue
                     for y, x in zip(*np.nonzero((drawn != want).any(-1))): exact[key(y, x)].append(lab + tag)
@@ -215,7 +241,7 @@ def table(resid):
     print('residuals on tolerated frames (bound: <= %d px/frame, inside masks + 1 px, ink/fur/blush, clusters <= %d px)'
           % (MAX_PX, MAX_CLUSTER))
     print('  %-10s %-3s %9s %8s %7s %6s' % ('clip', 'dir', 'tolerated', 'w/ resid', 'max px', 'total'))
-    for (c, d), v in sorted(resid.items(), key=lambda kv: (['idle'] + C_CLIPS).index(kv[0][0]) * 9 + FACE_DIRS.index(kv[0][1])):
+    for (c, d), v in sorted(resid.items(), key=lambda kv: (['idle'] + C_CLIPS + ['listen']).index(kv[0][0]) * 9 + FACE_DIRS.index(kv[0][1])):
         print('  %-10s %-3s %9d %8d %7d %6d' % (c, d, len(v), sum(1 for n in v if n), max(v, default=0), sum(v)))
 
 
@@ -252,7 +278,7 @@ if SELF_TEST:
     if set(ex) == {want} and not stray: print(f'  ok: reported exactly {want} on {len(ex[want])} exact frames')
     else: ok = False; print('  FAILED: exact-frame report', sorted(ex), 'stray', stray[:5])
     # case 2: 17 spread-out in-mask pixels on one tolerated Stage C frame, swapped between ink and fur only
-    c, d = 'happy', 'S'; f = next(f for f in range(len(body[(c, d)])) if not exact_frame(c, f))
+    c, d = 'happy', 'S'; f = next(f for f in range(len(body[(c, d)])) if not exact_frame(c, f, d))
     b = body[(c, d)][f].copy(); n = 0
     for s, (_, dflt) in SLOTS.items():
         x, y = F['clips'][c][d][s][f]; m = patch[(s, dflt, d)][..., 3] == 255
@@ -267,7 +293,21 @@ if SELF_TEST:
     print(f'SELF-TEST 2: {n} spread-out pixels inside the patch masks of {lab} changed in memory')
     if n == 17 and any(f'(> {MAX_PX})' in m for m in hits): print('  ok: ' + '; '.join(hits))
     else: ok = False; print('  FAILED: expected the frame to be named for > 16 px, got', hits)
-    if ok: print('SELF-TEST OK: both mutations caught; exit 1'); sys.exit(1)
+    # case 3 (v2): one body pixel under the S eyes patch on a held listen SE frame
+    if V2:
+        c, d = 'listen', 'SE'; f = next(f for f in range(len(body[(c, d)])) if exact_frame(c, f, d) and f > 0)
+        x, y = F['clips'][c][d]['eyes'][f]; m = patch[('eyes', 'open', 'S')][..., 3] == 255
+        ys, xs = np.nonzero(m); k = len(ys) // 3; py, px = int(ys[k]), int(xs[k])
+        b = body[(c, d)][f].copy(); q = b[y + py, x + px]
+        q[:3] = hx('#fbfaf8') if tuple(q[:3]) != hx('#fbfaf8') else hx('#1b1820')
+        mut = dict(body); mut[(c, d)] = list(body[(c, d)]); mut[(c, d)][f] = b
+        ex, tl, _, _ = check(patch, mut, ref)
+        want = f'eyes/open/S patch pixel ({px},{py})'
+        new_tol = [m for m, _ in tl if m not in {b for b, _ in base[1]}]
+        print(f'SELF-TEST 3: body pixel under {want} on {c} {d} f{f} changed in memory')
+        if set(ex) == {want} and ex[want] == [f'{c} {d} f{f}'] and not new_tol: print(f'  ok: reported exactly {want} on {c} {d} f{f}')
+        else: ok = False; print('  FAILED: exact-frame report', dict(ex), 'new tolerance', new_tol[:5])
+    if ok: print(f'SELF-TEST OK: all {3 if V2 else 2} mutations caught; exit 1'); sys.exit(1)
     print('SELF-TEST FAILED'); sys.exit(2)
 
 exact, tol, resid, worst = check(patch, body, ref)
@@ -279,6 +319,6 @@ if msgs:
     print('verify_face: FAIL'); [print(' ', e) for e in msgs[:60]]
     if len(msgs) > 60: print(f'  ... {len(msgs) - 60} more')
     sys.exit(1)
-ne = sum(exact_frame(c, f) for (c, d), v in body.items() for f in range(len(v)))
+ne = sum(exact_frame(c, f, d) for (c, d), v in body.items() for f in range(len(v)))
 print(f'verify_face: PASS ({len(F["clips"])} clips x {len(FACE_DIRS)} dirs, {nf} frames: {ne} exact, {nf - ne} within '
       f'the bound; hand-offs ok)')

@@ -42,6 +42,8 @@ pub enum Intent {
     Do,
     /// An emote the pack declares with `plays`: plays that behavior once. Not pack-mapped.
     Emote,
+    /// The prompt is open (p2): the bear turns its head to the person. Pack-mapped, optional.
+    Listen,
 }
 
 impl Intent {
@@ -69,6 +71,17 @@ impl Intent {
         Intent::Dodge,
     ];
 
+    /// Intents a pack may map; one it leaves out plays `default_chain`.
+    pub const OPTIONAL: [Intent; 1] = [Intent::Listen];
+
+    /// The built-in chain of an optional intent (only the names a pack defines are kept).
+    pub fn default_chain(self) -> &'static [&'static str] {
+        match self {
+            Intent::Listen => &["listen", "rest"],
+            _ => &["rest"],
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Intent::Idle => "idle",
@@ -93,12 +106,13 @@ impl Intent {
             Intent::Dodge => "dodge",
             Intent::Do => "do",
             Intent::Emote => "emote",
+            Intent::Listen => "listen",
         }
     }
 
     /// A pack-mappable intent by name (not `do` or `emote`).
     pub fn parse(s: &str) -> Option<Intent> {
-        Intent::ALL.into_iter().find(|i| i.as_str() == s)
+        Intent::ALL.into_iter().chain(Intent::OPTIONAL).find(|i| i.as_str() == s)
     }
 }
 
@@ -124,6 +138,12 @@ pub enum Poke {
     Click,
     DragStart,
     DragEnd,
+    /// The prompt really shows (the driver checks the bubble): the bear listens.
+    PromptOpen,
+    /// The person sent it: the turn starts (think) at once.
+    PromptSent,
+    /// Dismissed without sending.
+    PromptClosed,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -328,6 +348,17 @@ struct Play {
     pinned: bool,
     /// The `hold` a drag started: it ends when the drag does.
     drag: bool,
+    /// Turn steps still to play before the behavior's first step (+1 ccw, −1 cw); the front one
+    /// is playing. Empty = the behavior itself plays.
+    turns: VecDeque<i8>,
+    /// A set behavior's ori, drawn when its turns are done (no set is shown while turning).
+    ori_after: Option<Ori>,
+}
+
+impl Play {
+    fn new(intent: Intent, behavior: &str, t: u64) -> Play {
+        Play { intent, behavior: behavior.to_string(), step: 0, left: Some(1), frame: 0, frame_start: t, ori: None, pinned: false, drag: false, turns: VecDeque::new(), ori_after: None }
+    }
 }
 
 pub struct Brain {
@@ -346,6 +377,8 @@ pub struct Brain {
     /// the agent's turn is open (Thinking … Idle/Error): a pending activity waits for its end even
     /// when the bubble was dismissed (`Settled`) mid-turn
     turn_open: bool,
+    /// The prompt is open (`PromptOpen` … `PromptSent`/`PromptClosed`): the listen slot.
+    listening: bool,
     dragging: bool,
     vis: Visibility,
     quiet: bool,
@@ -396,13 +429,14 @@ impl Brain {
             cfg,
             temperament,
             t: now_ms,
-            play: Play { intent: Intent::Idle, behavior: String::new(), step: 0, left: None, frame: 0, frame_start: now_ms, ori: None, pinned: false, drag: false },
+            play: Play { left: None, ..Play::new(Intent::Idle, "", now_ms) },
             dir: Dir::S,
             turn: None,
             cue: VecDeque::new(),
             activity: None,
             user_hidden: false,
             turn_open: false,
+            listening: false,
             dragging: false,
             vis: Visibility::Shown,
             quiet: false,
@@ -635,6 +669,30 @@ impl Brain {
                 // the person's click outranks the agent's activity, started or still pending
                 self.end_activity(t, "click");
             }
+            Poke::PromptOpen => {
+                // the tray's Ask opens it without a click: the person outranks the activity all the same
+                self.end_activity(t, "prompt");
+                if !std::mem::replace(&mut self.listening, true) {
+                    self.drop_cues(false);
+                }
+                self.settle(t);
+            }
+            Poke::PromptSent => {
+                self.listening = false;
+                // the turn starts now (no idle between listen and think); a started activity ends with it
+                if self.activity.as_ref().is_some_and(|a| a.until.is_some()) {
+                    self.end_activity(t, "turn");
+                }
+                self.turn_open = true;
+                self.set_turn(TurnState::Held(Intent::Think));
+                self.end_listen(t);
+                self.settle(t);
+            }
+            Poke::PromptClosed => {
+                self.listening = false;
+                self.end_listen(t);
+                self.settle(t);
+            }
             Poke::DragStart => {
                 self.dragging = true;
                 self.drag_from = self.panel.map(|p| Placement { x: p.x, y: p.y, follow_pid: None });
@@ -844,6 +902,12 @@ impl Brain {
         let frames_n = self.clip().map_or(1, |c| c.frames_n());
         self.play.frame_start = t;
         self.play.frame += 1;
+        if !self.play.turns.is_empty() {
+            if (self.play.frame as usize) >= frames_n {
+                self.turn_done(t);
+            }
+            return;
+        }
         if (self.play.frame as usize) >= frames_n {
             self.play.frame = 0;
             // A one-shot cue (e.g. Say's `thinking` follow-up) that resolves to a
@@ -866,10 +930,34 @@ impl Brain {
         self.boundary(t);
     }
 
+    /// A turn clip ended: the bear faces one step on. Then the next step, or the behavior itself;
+    /// if what the bear wants changed meanwhile, it stops turning and ends where it faces now.
+    fn turn_done(&mut self, t: u64) {
+        let Some(by) = self.play.turns.pop_front() else { return };
+        self.dir = self.dir.step(by);
+        self.play.frame = 0;
+        let want = self.desired();
+        // idle plays any pool pick (`behavior_for(Idle)` is only its rest), so for idle only the intent counts
+        let moved_on = want != self.play.intent || (want != Intent::Idle && self.behavior_for(want) != self.play.behavior);
+        if moved_on || self.dragging {
+            self.play.turns.clear();
+            self.note(t, "turn", format!("stop at {}", self.dir.as_str()));
+            self.end_behavior(t);
+            return;
+        }
+        if self.play.turns.is_empty() {
+            if let Some(ori) = self.play.ori_after.take() {
+                self.play.ori = Some(ori);
+                self.cut = true;
+            }
+            self.enter_step(0, t);
+        }
+    }
+
     /// Interrupts that happen at a frame boundary.
     fn boundary(&mut self, t: u64) {
         let want = self.desired();
-        if want == self.play.intent || self.dragging {
+        if want == self.play.intent || self.dragging || !self.play.turns.is_empty() {
             return;
         }
         let in_hold = self.play.left.is_none();
@@ -888,9 +976,9 @@ impl Brain {
             return;
         }
         if self.play.intent == Intent::Idle || want != Intent::Idle {
-            // a held loop finishes its iteration first; an activity's hold is only waiting
-            // for its end, so a cue leaves it at the next frame
-            if in_hold && self.play.intent != Intent::Idle && self.play.intent != Intent::Do {
+            // a held loop finishes its iteration first; an activity's or listen's hold is only
+            // waiting for its end, so it leaves at the next frame
+            if in_hold && !matches!(self.play.intent, Intent::Idle | Intent::Do | Intent::Listen) {
                 return;
             }
             self.interrupt(t);
@@ -900,6 +988,9 @@ impl Brain {
     /// Leaves the current behavior now: a set behavior (or one marked `exit`) first plays
     /// its exit clip.
     fn interrupt(&mut self, t: u64) {
+        if !self.play.turns.is_empty() {
+            return; // still turning toward it: the turn's end checks again (turn_done)
+        }
         let pack = self.pack.clone();
         let Some(def) = pack.behaviors.get(&self.play.behavior) else { return };
         let last = def.seq.len() - 1;
@@ -990,28 +1081,106 @@ impl Brain {
         let pack = self.pack.clone();
         let Some(def) = pack.behaviors.get(behavior) else { return };
         let was_set = self.play.ori.is_some();
-        self.play = Play { intent, behavior: behavior.to_string(), step: 0, left: Some(1), frame: 0, frame_start: t, ori: None, pinned: false, drag: false };
+        self.play = Play::new(intent, behavior, t);
         let first = pack.clips.get(&def.seq[0].clip);
+        let mut ori = None;
+        // the facing it starts with: a set's hand-off, a random new one, or the person's (listen)
         if def.set.is_some() {
-            let ori = if self.rng.below(2) == 0 { Ori::A } else { Ori::B };
-            self.play.ori = Some(ori);
-            if let Some(h) = first.and_then(|c| c.handoff.get(&ori)) {
-                self.dir = h.facing;
+            let o = if self.rng.below(2) == 0 { Ori::A } else { Ori::B };
+            ori = Some(o);
+            if let Some(h) = first.and_then(|c| c.handoff.get(&o)) {
+                self.face_toward(&[h.facing], t);
             }
         } else if def.turn == Some(Turn::Random) {
             if let Some(c) = first {
                 let dirs: Vec<Dir> = c.dirs.keys().copied().filter(|d| *d != self.dir).collect();
                 if !dirs.is_empty() {
-                    self.dir = dirs[self.rng.below(dirs.len() as u64) as usize];
+                    let to = dirs[self.rng.below(dirs.len() as u64) as usize];
+                    self.face_toward(&[to], t);
                 }
             }
+        } else if intent == Intent::Listen {
+            match self.dir.listen_target() {
+                Some(to) => self.face_toward(&[to], t),
+                None => self.face_toward(&[Dir::E, Dir::W], t),
+            }
+        }
+        if self.play.turns.is_empty() {
+            self.play.ori = ori;
+            self.enter_step(0, t);
+        } else {
+            self.play.ori_after = ori;
         }
         if was_set != self.play.ori.is_some() {
             self.cut = true;
         }
-        self.enter_step(0, t);
         self.last_start.insert(behavior.to_string(), t);
         self.note(t, "start", String::new());
+    }
+
+    /// The prompt closed or was sent: `listen_out` now (mid-turn, the turn clip's end decides).
+    fn end_listen(&mut self, t: u64) {
+        if self.play.intent == Intent::Listen && !self.dragging {
+            self.interrupt(t);
+        }
+    }
+
+    /// Faces one of `targets` (the nearest; a tie by the seeded RNG) through the pack's turn
+    /// clips, 45° a step (§1.3), or at once when the pack has no turn clips for the way.
+    /// Without turn clips no RNG is drawn for a single target (old packs replay as before).
+    fn face_toward(&mut self, targets: &[Dir], t: u64) {
+        // (step, steps, target) for every shortest way to a target
+        let mut ways: Vec<(i8, u8, Dir)> = Vec::new();
+        for &to in targets {
+            match self.dir.ccw_to(to) {
+                0 => return, // already facing one
+                n @ 1..=3 => ways.push((1, n, to)),
+                4 => ways.extend([(1, 4, to), (-1, 4, to)]),
+                n => ways.push((-1, 8 - n, to)),
+            }
+        }
+        let fewest = ways.iter().map(|w| w.1).min().unwrap_or(0);
+        ways.retain(|w| w.1 == fewest);
+        let can = |w: &(i8, u8, Dir)| {
+            let mut d = self.dir;
+            (0..w.1).all(|_| {
+                let ok = self.pack.turn_clip(d, w.0).is_some();
+                d = d.step(w.0);
+                ok
+            })
+        };
+        let turnable: Vec<(i8, u8, Dir)> = ways.iter().copied().filter(can).collect();
+        if turnable.is_empty() {
+            let mut tos: Vec<Dir> = ways.iter().map(|w| w.2).collect();
+            tos.dedup();
+            let to = if tos.len() > 1 { tos[self.rng.below(tos.len() as u64) as usize] } else { tos[0] };
+            self.dir = to;
+            return;
+        }
+        let (by, n, to) = if turnable.len() > 1 { turnable[self.rng.below(turnable.len() as u64) as usize] } else { turnable[0] };
+        self.play.turns = std::iter::repeat_n(by, n as usize).collect();
+        self.note(t, "turn", format!("{} -> {} ({n} {})", self.dir.as_str(), to.as_str(), if by > 0 { "ccw" } else { "cw" }));
+    }
+
+    /// Replay/QA hook (`{"face": "NE"}`): faces `dir` at once; a bear in a set or turning
+    /// stands as `rest` there.
+    pub fn face(&mut self, dir: Dir, now_ms: u64) {
+        self.advance(now_ms);
+        let t = self.t;
+        self.dir = dir;
+        self.note(t, "face", dir.as_str().to_string());
+        if self.desired() == Intent::Idle && !self.dragging && !self.play.pinned {
+            self.start("rest", Intent::Idle, t);
+        } else if !self.play.turns.is_empty() {
+            // cut the turn short: the behavior itself starts here (with a set's ori)
+            self.play.turns.clear();
+            if let Some(ori) = self.play.ori_after.take() {
+                self.play.ori = Some(ori);
+                self.cut = true;
+            }
+            self.enter_step(0, t);
+        }
+        self.dirty = true;
     }
 
     fn pin(&mut self, t: u64) {
@@ -1107,7 +1276,8 @@ impl Brain {
     /// The front Timed cue ended (time or Settled): its follow-up takes its place.
     fn finish_timed(&mut self, then: Option<Intent>, t: u64) {
         match then {
-            Some(i) if self.vis == Visibility::Shown => self.cue[0] = Cue::Once(i),
+            // the follow-up would stand a seated activity up: dropped
+            Some(i) if self.vis == Visibility::Shown && !self.act_holds() => self.cue[0] = Cue::Once(i),
             _ => {
                 self.cue.pop_front();
                 self.activate_cue(t);
@@ -1117,13 +1287,28 @@ impl Brain {
 
     fn desired(&self) -> Intent {
         if let Some(c) = self.cue.front() {
-            return c.intent();
+            // a set activity keeps its seat through a say or reminder (the bubble shows it)
+            if !(self.act_holds() && matches!(c, Cue::Timed { .. })) {
+                return c.intent();
+            }
+        }
+        if self.listening && self.vis == Visibility::Shown {
+            return Intent::Listen;
         }
         match self.turn {
             Some(TurnState::Held(i) | TurnState::Once(i)) => i,
             None if self.activity.as_ref().is_some_and(|a| a.until.is_some()) => Intent::Do,
             None => Intent::Idle,
         }
+    }
+
+    /// A started activity is playing a behavior that has a way out (a set's, or `exit: true`):
+    /// out-of-turn cues must not stand it up only to sit it down again.
+    fn act_holds(&self) -> bool {
+        self.play.intent == Intent::Do
+            && self.play.turns.is_empty()
+            && self.activity.as_ref().is_some_and(|a| a.until.is_some() && a.behavior == self.play.behavior)
+            && self.pack.behaviors.get(&self.play.behavior).is_some_and(|d| d.set.is_some() || d.exit)
     }
 
     /// The behavior an intent plays now: an activity's or a gesture's own, else the pack's.
@@ -1151,9 +1336,16 @@ impl Brain {
         r
     }
 
-    /// The person hid the bear (tray), or showed it again.
-    pub fn set_user_hidden(&mut self, hidden: bool) {
+    /// The person hid the bear (tray), or showed it again. Hiding ends the activity (its exit
+    /// step plays unseen), so it is not still going when the bear comes back.
+    pub fn set_user_hidden(&mut self, hidden: bool, now_ms: u64) {
+        self.advance(now_ms);
+        let t = self.t;
         self.user_hidden = hidden;
+        if hidden {
+            self.end_activity(t, "hidden");
+        }
+        self.settle(t);
     }
 
     fn gate(&self) -> Option<Reason> {
@@ -1183,6 +1375,22 @@ impl Brain {
                 }
                 let behavior = pack.first_available(&a.plays).unwrap_or("rest").to_string();
                 let queued = self.turn.is_some() || self.turn_open;
+                // the same activity again: a new end time, the clips go on (a pending one: a new length)
+                if let Some(cur) = self.activity.as_mut().filter(|cur| cur.name == *name) {
+                    cur.for_ms = for_ms;
+                    let started = cur.until.is_some();
+                    if started {
+                        cur.until = Some(t + for_ms);
+                    }
+                    self.note(t, "activity", format!("extend {name}"));
+                    return BodyReply {
+                        status: Some(if started { Status::Started } else { Status::Queued }),
+                        activity: Some(name.clone()),
+                        for_ms: Some(for_ms),
+                        message: body::started_msg(name, for_ms, !started),
+                        ..BodyReply::default()
+                    };
+                }
                 let until = (!queued).then_some(t + for_ms);
                 // a newer do replaces the running one: it leaves through its exit clip
                 let playing = self.play.intent == Intent::Do;
@@ -1219,6 +1427,11 @@ impl Brain {
                     return BodyReply::error(format!("unknown emote \"{name}\""), b.emote_names());
                 };
                 if let Some(reason) = self.gate() {
+                    return BodyReply { status: Some(Status::Refused), emote: Some(name.clone()), reason: Some(reason), message: reason.message().into(), ..BodyReply::default() };
+                }
+                if self.act_holds() {
+                    // it would stand the bear up from its seat only to sit back down
+                    let reason = Reason::Busy;
                     return BodyReply { status: Some(Status::Refused), emote: Some(name.clone()), reason: Some(reason), message: reason.message().into(), ..BodyReply::default() };
                 }
                 let cue = match &e.act {
@@ -1417,6 +1630,11 @@ impl Brain {
     }
 
     fn clip_name(&self) -> &str {
+        if let Some(&by) = self.play.turns.front() {
+            if let Some(c) = self.pack.turn_clip(self.dir, by) {
+                return c;
+            }
+        }
         self.pack
             .behaviors
             .get(&self.play.behavior)

@@ -10,6 +10,7 @@
     { "kind": "stage_a", "path": "anim/anim.json" },
     { "kind": "stage_b", "path": "anim_b/anim_b.json", "props": "props/props.json" },
     { "kind": "stage_a", "path": "anim_c/anim_c.json", "optional": true },
+    { "kind": "stage_a", "path": "anim_l/anim_l.json", "optional": true },
     { "kind": "face",    "path": "face/face.json",     "optional": true }
   ],
   "capabilities": { "blink": true, "lip_sync": true, "look_at": "body" },
@@ -18,6 +19,7 @@
     "blink": { "mean_ms": 4200, "jitter": 0.4, "closed_frames": 2, "double_p": 0.15 },
     "mouth": { "frame_ms": 167, "stall_ms": 400 }
   },
+  "turning": { "ccw": "turn_ccw", "cw": "turn_cw" },
   "behaviors": {
     "rest":        { "seq": [{ "clip": "idle", "loops": [1, 3] }] },
     "look_around": { "seq": [{ "clip": "idle", "loops": [1, 1] }], "turn": "random" },
@@ -31,7 +33,8 @@
     "oops":        { "seq": [{ "clip": "oops" }] },
     "happy":       { "seq": [{ "clip": "happy" }] },
     "celebrate":   { "seq": [{ "clip": "celebrate" }] },
-    "hold":        { "seq": [{ "clip": "idle", "loops": "hold" }] }
+    "hold":        { "seq": [{ "clip": "idle", "loops": "hold" }] },
+    "listen":      { "seq": [{ "clip": "listen_in" }, { "clip": "listen", "loops": "hold" }, { "clip": "listen_out" }], "exit": true }
   },
   "intents": {
     "idle": ["rest"], "think": ["think", "hold"], "work": ["think", "hold"], "talk": ["talk", "hold"],
@@ -40,7 +43,7 @@
     "sleepy": ["nap", "rest"], "wave": ["happy", "rest"], "nod": ["happy", "rest"], "shake": ["oops", "rest"],
     "jump": ["celebrate", "happy", "rest"], "spin": ["dash", "rest"], "greet": ["happy", "look_around", "rest"],
     "stretch": ["happy", "look_around", "rest"], "remind": ["ask", "look_around", "rest"],
-    "dodge": ["wander", "rest"]
+    "dodge": ["wander", "rest"], "listen": ["listen", "rest"]
   },
   "idle_pool": [
     { "behavior": "rest",        "weight": 6, "cooldown_s": 0 },

@@ -37,6 +37,9 @@ pub struct Item {
     pub senses: Option<SensesPatch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub poke: Option<Poke>,
+    /// Test/QA hook (p2): the bear faces this way at once (`Brain::face`), e.g. to click from each dir.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub face: Option<Dir>,
 }
 
 /// Every `Senses` field optional, merged over the previous senses.
@@ -148,6 +151,9 @@ pub fn run(pack: Arc<PackMeta>, tl: &Timeline) -> Vec<LogLine> {
             if let Some(p) = &it.senses {
                 p.apply(&mut senses);
                 brain.senses(&senses, t);
+            }
+            if let Some(d) = it.face {
+                brain.face(d, t);
             }
             if let Some(e) = &it.event {
                 brain.event(e, t);

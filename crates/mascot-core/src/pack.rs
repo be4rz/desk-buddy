@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use mascot_protocol::pack::{
     ActivityKind, BehaviorDef, BodyEntry, BodyFile, Capabilities, FaceFile, Memory, PackFile, PoolEntry, PropsFile, SourceKind, StageAFile, StageBFile, Temperament,
-    Timers, PACK_VERSION,
+    Timers, TurningFile, PACK_VERSION,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -32,6 +32,29 @@ impl Dir {
 
     pub fn parse(s: &str) -> Option<Dir> {
         Dir::ALL.into_iter().find(|d| d.as_str() == s)
+    }
+
+    /// One 45° step: +1 counter-clockwise (the next in `ALL`), −1 clockwise.
+    pub fn step(self, by: i8) -> Dir {
+        let i = Dir::ALL.iter().position(|d| *d == self).unwrap_or(0) as i32;
+        Dir::ALL[(i + by as i32).rem_euclid(8) as usize]
+    }
+
+    /// Steps from `self` to `to`, counter-clockwise (0..8).
+    pub fn ccw_to(self, to: Dir) -> u8 {
+        let i = |d: Dir| Dir::ALL.iter().position(|x| *x == d).unwrap_or(0) as i32;
+        (i(to) - i(self)).rem_euclid(8) as u8
+    }
+
+    /// The dir a listening bear faces (`#pack-turning`): the five front dirs stay, NE → E, NW → W;
+    /// N has two (E or W, 2 steps each), `None` here.
+    pub fn listen_target(self) -> Option<Dir> {
+        match self {
+            Dir::NE => Some(Dir::E),
+            Dir::NW => Some(Dir::W),
+            Dir::N => None,
+            d => Some(d),
+        }
     }
 
     pub fn as_str(self) -> &'static str {
@@ -92,6 +115,9 @@ pub struct PackMeta {
     /// Problems in `pack.json`'s `body` block; their entries are dropped. `load` refuses a pack
     /// with any, `load_report` keeps them for `buddy studio lint`.
     pub body_issues: Vec<String>,
+    /// `pack.json` `"turning"` (p2): the clips facing changes play. `None`, or clips that are not
+    /// there (art not rendered yet), and facing changes snap.
+    pub turning: Option<TurningFile>,
 }
 
 /// The pack's body: activities (`buddy mascot do`) and emotes (`buddy mascot emote`).
@@ -204,6 +230,8 @@ struct Extras {
     warmup: Option<Warmup>,
     #[serde(default)]
     body: Option<BodyFile>,
+    #[serde(default)]
+    turning: Option<TurningFile>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -218,6 +246,8 @@ pub struct ClipMeta {
     pub frame_h: u32,
     pub anchor: [i32; 2],
     pub durs_ms: Vec<u32>,
+    /// A turn clip's step (+1 ccw, −1 cw); 0 for every other clip.
+    pub turn_steps: i8,
     /// Free clips.
     pub dirs: BTreeMap<Dir, StripRef>,
     /// Set clips.
@@ -283,12 +313,19 @@ pub struct FaceMeta {
     pub layers: BTreeMap<String, BTreeMap<String, BTreeMap<Dir, FaceLayer>>>,
     /// Clip → dir → slot → top-left per body frame.
     pub clips: BTreeMap<String, BTreeMap<Dir, BTreeMap<String, Vec<[i32; 2]>>>>,
+    /// v2: clip → body dir → the dir whose patches it draws (`listen`: the head turned to the camera).
+    pub patch_dirs: BTreeMap<String, BTreeMap<Dir, Dir>>,
 }
 
 impl FaceMeta {
     /// Whether the face layers cover this clip in this direction.
     pub fn covers(&self, clip: &str, dir: Dir) -> bool {
         self.clips.get(clip).is_some_and(|d| d.contains_key(&dir))
+    }
+
+    /// The dir whose patches this clip draws when the body faces `dir` (itself unless `patch_dirs` says).
+    pub fn patch_dir(&self, clip: &str, dir: Dir) -> Dir {
+        self.patch_dirs.get(clip).and_then(|m| m.get(&dir)).copied().unwrap_or(dir)
     }
 }
 
@@ -337,6 +374,13 @@ impl PackMeta {
             .and_then(|chain| chain.iter().find(|b| self.available(b)))
             .map(String::as_str)
             .unwrap_or("rest")
+    }
+
+    /// The pack's turn clip for a step from `from` (`by` +1 ccw, −1 cw), if the art has it.
+    pub fn turn_clip(&self, from: Dir, by: i8) -> Option<&str> {
+        let t = self.turning.as_ref()?;
+        let name = if by > 0 { &t.ccw } else { &t.cw };
+        self.clips.get(name).filter(|c| c.set.is_none() && c.dirs.contains_key(&from)).map(|c| c.name.as_str())
     }
 
     /// The first available behavior of a fallback chain.
@@ -445,9 +489,11 @@ impl Loader {
         let mut clips = BTreeMap::new();
         let mut sets = BTreeMap::new();
         let mut faces = Vec::new();
+        let mut skipped_optional = false;
         for src in &file.sources {
             let src_rel = art_rel.join(&src.path);
             if src.optional && !self.abs(&src_rel).exists() {
+                skipped_optional = true;
                 continue;
             }
             let text = self.read(&src_rel)?;
@@ -469,7 +515,7 @@ impl Loader {
             if face.is_some() {
                 return Err(self.invalid(&rel, "only one face source is allowed"));
             }
-            face = Some(self.face(&rel, &base, f, &clips)?);
+            face = Some(self.face(&rel, &base, f, &clips, skipped_optional)?);
         }
 
         let mut meta = PackMeta {
@@ -491,7 +537,9 @@ impl Loader {
             warmup: Warmup::default(),
             body: BodyMeta { default_for_s: 120, max_for_s: 1800, activities: Vec::new(), emotes: Vec::new() },
             body_issues: Vec::new(),
+            turning: None,
         };
+        meta.turning = self.check_turning(extras.turning, &meta.clips)?;
         // the built-in defaults name only what this pack defines (a pack without
         // nap still loads); values the pack writes itself are checked strictly
         let defined = |b: &String| meta.behaviors.contains_key(b);
@@ -544,6 +592,7 @@ impl Loader {
                 frame_h: c.frame_h,
                 anchor: c.anchor,
                 durs_ms: c.frames.iter().map(|fr| fr.dur).collect(),
+                turn_steps: c.turn_steps,
                 dirs,
                 oris: BTreeMap::new(),
                 handoff: BTreeMap::new(),
@@ -639,6 +688,7 @@ impl Loader {
                 frame_h: a.map_or(0, |s| s.frame_h),
                 anchor: a.map_or([0, 0], |s| s.anchor),
                 durs_ms,
+                turn_steps: 0,
                 dirs: BTreeMap::new(),
                 oris,
                 handoff,
@@ -650,9 +700,19 @@ impl Loader {
         Ok(())
     }
 
-    fn face(&self, rel: &Path, base: &Path, f: FaceFile, clips: &BTreeMap<String, ClipMeta>) -> Result<FaceMeta, PackError> {
-        if f.face_version != 1 {
-            return Err(self.invalid(rel, format!("face_version {} is not supported (this build reads 1)", f.face_version)));
+    /// `skipped_optional`: an optional source is missing, so face positions for clips it would have
+    /// brought (e.g. `listen` without `anim_l`) are dropped instead of failing the whole pack.
+    fn face(&self, rel: &Path, base: &Path, mut f: FaceFile, clips: &BTreeMap<String, ClipMeta>, skipped_optional: bool) -> Result<FaceMeta, PackError> {
+        if skipped_optional {
+            f.clips.retain(|c, _| clips.contains_key(c));
+            let kept: Vec<String> = f.clips.keys().cloned().collect();
+            f.patch_dirs.retain(|c, _| kept.contains(c));
+        }
+        if !(1..=2).contains(&f.face_version) {
+            return Err(self.invalid(rel, format!("face_version {} is not supported (this build reads 1 and 2)", f.face_version)));
+        }
+        if f.face_version == 1 && !f.patch_dirs.is_empty() {
+            return Err(self.invalid(rel, "patch_dirs needs face_version 2"));
         }
         let dir_of = |d: &str| Dir::parse(d).ok_or_else(|| self.invalid(rel, format!("unknown direction {d:?}")));
         let dirs = f.dirs.iter().map(|d| dir_of(d)).collect::<Result<Vec<_>, _>>()?;
@@ -682,19 +742,34 @@ impl Loader {
             }
             layers.insert(slot.clone(), by_state);
         }
+        let mut patch_dirs: BTreeMap<String, BTreeMap<Dir, Dir>> = BTreeMap::new();
+        for (clip, m) in &f.patch_dirs {
+            if !f.clips.contains_key(clip) {
+                return Err(self.invalid(rel, format!("patch_dirs: {clip} has no face positions")));
+            }
+            for (body, patch) in m {
+                let (b, p) = (dir_of(body)?, dir_of(patch)?);
+                if !dirs.contains(&p) {
+                    return Err(self.invalid(rel, format!("patch_dirs: {clip} {body}: {patch} is not a face dir")));
+                }
+                patch_dirs.entry(clip.clone()).or_default().insert(b, p);
+            }
+        }
         let mut fclips = BTreeMap::new();
         for (clip, by_dir) in f.clips {
             let Some(c) = clips.get(&clip) else { return Err(self.invalid(rel, format!("clips: unknown clip {clip}"))) };
             let mut m = BTreeMap::new();
             for (d, slots) in by_dir {
                 let dir = dir_of(&d)?;
+                // the patches it draws: its own dir's, or the one patch_dirs names
+                let pd = patch_dirs.get(&clip).and_then(|m| m.get(&dir)).copied().unwrap_or(dir);
                 for (slot, states) in NEEDED {
                     if !slots.contains_key(slot) {
                         return Err(self.invalid(rel, format!("clips: {clip} {d}: no {slot} positions")));
                     }
                     for st in states {
-                        if !layers.get(slot).and_then(|m: &BTreeMap<String, BTreeMap<Dir, FaceLayer>>| m.get(*st)).is_some_and(|m| m.contains_key(&dir)) {
-                            return Err(self.invalid(rel, format!("clips: {clip} {d}: no {slot} {st} layer for {d}")));
+                        if !layers.get(slot).and_then(|m: &BTreeMap<String, BTreeMap<Dir, FaceLayer>>| m.get(*st)).is_some_and(|m| m.contains_key(&pd)) {
+                            return Err(self.invalid(rel, format!("clips: {clip} {d}: no {slot} {st} layer for {}", pd.as_str())));
                         }
                     }
                 }
@@ -710,7 +785,24 @@ impl Loader {
             }
             fclips.insert(clip, m);
         }
-        Ok(FaceMeta { dirs, layers, clips: fclips })
+        Ok(FaceMeta { dirs, layers, clips: fclips, patch_dirs })
+    }
+
+    /// The `turning` block: names only (clips not rendered yet are fine: the brain snaps), but a
+    /// turn clip that is there must be a free clip stepping the way its role says.
+    fn check_turning(&self, t: Option<TurningFile>, clips: &BTreeMap<String, ClipMeta>) -> Result<Option<TurningFile>, PackError> {
+        let rel = Path::new("pack.json");
+        let Some(t) = t else { return Ok(None) };
+        for (role, name, want) in [("ccw", &t.ccw, 1i8), ("cw", &t.cw, -1i8)] {
+            let Some(c) = clips.get(name) else { continue };
+            if c.set.is_some() {
+                return Err(self.invalid(rel, format!("turning: {role} clip {name} is a set clip")));
+            }
+            if c.turn_steps != want {
+                return Err(self.invalid(rel, format!("turning: {role} clip {name} has turn_steps {}, not {want}", c.turn_steps)));
+            }
+        }
+        Ok(Some(t))
     }
 
     fn check_behaviors(&self, file: &PackFile, meta: &mut PackMeta) -> Result<(), PackError> {
@@ -737,6 +829,13 @@ impl Loader {
         }
         if let Some(i) = Intent::ALL.iter().find(|i| !meta.intents.contains_key(i)) {
             return Err(self.invalid(rel, format!("intents: {} is missing", i.as_str())));
+        }
+        // optional intents get their built-in chain, without names this pack doesn't define
+        for i in Intent::OPTIONAL {
+            if !meta.intents.contains_key(&i) {
+                let chain: Vec<String> = i.default_chain().iter().map(|b| b.to_string()).filter(|b| meta.behaviors.contains_key(b)).collect();
+                meta.intents.insert(i, chain);
+            }
         }
         for e in &file.idle_pool {
             if !meta.behaviors.contains_key(&e.behavior) {

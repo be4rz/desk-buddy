@@ -449,7 +449,8 @@ pub fn import(file: &Path, pack_dir: &Path, prefix: &str) -> Result<Imported> {
         return Err(ctx(Error(format!("{} already exists; pick another --name", out_dir.display()))));
     }
     if existing {
-        let pack = mascot_core::pack::load(pack_dir).map_err(|e| ctx(Error(e.to_string())))?;
+        // body issues are the pack's own business (lint reports them): they must not block an import
+        let pack = mascot_core::pack::load_report(pack_dir).map_err(|e| ctx(Error(e.to_string())))?;
         if let Some(c) = clips.iter().find(|c| pack.clips.contains_key(&c.name)) {
             return Err(ctx(Error(format!("pack {} already has clip “{}”", pack.id, c.name))));
         }
@@ -541,7 +542,7 @@ pub fn import(file: &Path, pack_dir: &Path, prefix: &str) -> Result<Imported> {
         return Err(cleanup(io(&pj, e)));
     }
     let _ = std::fs::remove_dir_all(&stage);
-    if let Err(e) = mascot_core::pack::load(pack_dir) {
+    if let Err(e) = mascot_core::pack::load_report(pack_dir) {
         let _ = std::fs::remove_dir_all(&out_dir);
         match old {
             Some(o) => {

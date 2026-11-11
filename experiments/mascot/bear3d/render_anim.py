@@ -51,7 +51,10 @@ def at(frame, yaw):
 def verts_world():
     pts = []
     for o in meshes:
-        co = np.empty(len(o.data.vertices) * 3, np.float32); o.data.vertices.foreach_get('co', co)
+        skinned = any(m.type == 'ARMATURE' for m in o.modifiers)   # Stage L's body: read the deformed mesh
+        me = o.evaluated_get(bpy.context.evaluated_depsgraph_get()).to_mesh() if skinned else o.data
+        co = np.empty(len(me.vertices) * 3, np.float32); me.vertices.foreach_get('co', co)
+        if skinned: o.evaluated_get(bpy.context.evaluated_depsgraph_get()).to_mesh_clear()
         M = o.matrix_world; pts.append(co.reshape(-1, 3) @ np.array(M.to_3x3()).T + np.array(M.translation))
     return np.concatenate(pts)
 def proj(p): return p @ np.array(RIGHT), p @ np.array(UP)

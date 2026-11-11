@@ -362,6 +362,22 @@ pub struct StageAClip {
     /// Direction (`S`, `SE`, …) → strip PNG, relative to the JSON's dir.
     pub files: BTreeMap<String, String>,
     pub frames: Vec<StageAFrame>,
+    /// A turn clip (`#anim-l`): +1 = one 45° step counter-clockwise in `Dir` order, −1 = clockwise.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub turn_steps: i8,
+}
+
+fn is_zero(v: &i8) -> bool {
+    *v == 0
+}
+
+/// `pack.json` `"turning": {"ccw": "turn_ccw", "cw": "turn_cw"}` (p2): the clips the brain turns with.
+/// Optional; without it (or its clips) facing changes snap.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct TurningFile {
+    pub ccw: String,
+    pub cw: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -469,6 +485,10 @@ pub struct FaceFile {
     pub layers: BTreeMap<String, BTreeMap<String, BTreeMap<String, LayerDef>>>,
     /// Clip → dir → slot → top-left per body frame.
     pub clips: BTreeMap<String, BTreeMap<String, BTreeMap<String, Vec<[i32; 2]>>>>,
+    /// v2 (p2): clip → body dir → the dir whose patches it draws (a head turned toward the camera).
+    /// A clip or dir without an entry draws its own dir's patches.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub patch_dirs: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
