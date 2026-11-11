@@ -36,10 +36,10 @@ and talks through speech bubbles, powered by an LLM.
   `BUDDY_SENSES_LOG=1` (sense changes to stderr). Talk (p3): the speech bubble (`src/bubble/`,
   page `web/bubble/index.html`, `?mock=<state>` in a plain browser) and `harness.rs` (host API at
   `BUDDY_HOME/host.json`, policy, agent "main"); dev credential `BUDDY_FAKE_MODEL=<url>` (debug builds only).
-  Accounts (p4): tray **Sign in…** opens `src/signin/` (page `web/signin/index.html`, `?mock=<state>`);
+  Accounts (p4): tray **Accounts…** (and the agent line "Connect an AI account…" when signed out) opens `src/signin/` (page `web/signin/index.html`, `?mock=<state>`);
   keys and OAuth tokens live only in the macOS keychain (service `desk-buddy`) and Rust memory, never
   in the sidecar's or a command's env. Unprompted sense turns (`unprompted.rs`): 4 an hour, tray line
-  "Unprompted N/4 this hour". A second launch on the same `BUDDY_HOME` (lock: `BUDDY_HOME/app.lock`) logs
+  "Check-ins: N of 4 this hour". A second launch on the same `BUDDY_HOME` (lock: `BUDDY_HOME/app.lock`) logs
   `[buddy] already running (pid N)` and exits 0. Debug builds only: `ANTHROPIC_API_KEY` (session-only, never stored),
   `BUDDY_CRED_STORE=memory|fail` (no real keychain), `BUDDY_FAKE_OAUTH=1`, `BUDDY_PROMPT=<text>`,
   `BUDDY_ANSWER=allow|deny`. Real keychain test (prompts): `BUDDY_KEYCHAIN_TEST=1 cargo test -p bridge keychain`.

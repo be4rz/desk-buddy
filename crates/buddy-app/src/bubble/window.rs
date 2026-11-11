@@ -262,6 +262,22 @@ pub fn bubble_retry(win: WebviewWindow) {
     }
 }
 
+/// The prompt's "Last answer".
+#[tauri::command]
+pub fn bubble_recall(win: WebviewWindow) {
+    if mine(&win, "bubble_recall") {
+        post(Inbox::Call(Box::new(|a| a.bubble_recall())));
+    }
+}
+
+/// A finished answer's "Reply": the prompt again.
+#[tauri::command]
+pub fn bubble_reply(win: WebviewWindow) {
+    if mine(&win, "bubble_reply") {
+        post(Inbox::Call(Box::new(|a| a.open_prompt())));
+    }
+}
+
 #[tauri::command]
 pub fn reminder_snooze(win: WebviewWindow, id: String, minutes: u32) {
     if mine(&win, "reminder_snooze") {

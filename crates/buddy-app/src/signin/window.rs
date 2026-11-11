@@ -32,7 +32,7 @@ pub fn open() {
     let _ = h.run_on_main_thread(move || {
         let win = match h2.get_webview_window(LABEL) {
             Some(w) => w,
-            None => match WebviewWindowBuilder::new(&h2, LABEL, WebviewUrl::App("signin/index.html".into())).title("Sign in to a model").inner_size(460.0, 560.0).min_inner_size(380.0, 420.0).resizable(true).visible(false).build() {
+            None => match WebviewWindowBuilder::new(&h2, LABEL, WebviewUrl::App("signin/index.html".into())).title("Accounts").inner_size(460.0, 560.0).min_inner_size(380.0, 420.0).resizable(true).visible(false).build() {
                 Ok(w) => {
                     let w2 = w.clone();
                     // the red button hides it; a sign-in in progress is cancelled

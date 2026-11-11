@@ -24,6 +24,8 @@ pub struct Settings {
     pub model: Model,
     pub edges: Edges,
     pub studio: Studio,
+    /// The first-launch hello (or the setup bubble) was shown: it never repeats.
+    pub onboarded: bool,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -41,6 +43,7 @@ impl Default for Settings {
             model: Model::default(),
             edges: Edges::default(),
             studio: Studio::default(),
+            onboarded: false,
             extra: Extra::new(),
         }
     }
@@ -230,7 +233,7 @@ mod tests {
             "dnd":{"action":"hide","fullscreen":true,"screen_share":true},
             "quiet_hours":{"enabled":true,"start":"22:30","end":"07:30"},
             "attention":{"per_hour":4},"model":{"provider":"anthropic","model":"claude-sonnet-5-5"},
-            "edges":{"enabled":true},"studio":{"packs_dir":null}}"#,
+            "edges":{"enabled":true},"studio":{"packs_dir":null},"onboarded":false}"#,
         )
         .unwrap();
         assert_eq!(v, want);

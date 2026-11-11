@@ -5,7 +5,7 @@
 //!
 //! Credentials live in the OS keychain (`KeychainStore`, service `desk-buddy`) and in Rust memory;
 //! the keychain is read once at start, off the main thread (a permission dialog can hold it; the
-//! tray says "Agent: starting…" meanwhile), and a read error means no sidecar ("can't read keychain").
+//! tray says "Getting ready…" meanwhile), and a read error means no sidecar ("can't read keychain").
 //! No key ever reaches the sidecar's or a command's environment (bridge passes a fixed allowlist).
 //! The sidecar starts even with no credential (sign-in needs it), with model `null`.
 //! Debug builds only: `BUDDY_FAKE_MODEL=<url>` (the scripted fake provider, a session-only key),
@@ -54,13 +54,18 @@ pub enum AgentState {
 impl AgentState {
     pub fn line(&self) -> String {
         match self {
-            AgentState::SignedOut => "⚠ Agent: not signed in".into(),
-            AgentState::Keychain(why) => format!("⚠ Agent: can't read keychain · {why}"),
-            AgentState::Starting => "Agent: starting…".into(),
-            AgentState::Running { model } => format!("Agent: running · {model}"),
-            AgentState::Stopped => "Agent: stopped".into(),
-            AgentState::Error(e) => format!("⚠ Agent: error · {e}"),
+            AgentState::SignedOut => "Connect an AI account…".into(),
+            AgentState::Keychain(why) => format!("⚠ Can't read the keychain · {why}"),
+            AgentState::Starting => "Getting ready…".into(),
+            AgentState::Running { model } => format!("Ready · {model}"),
+            AgentState::Stopped => "Assistant stopped".into(),
+            AgentState::Error(e) => format!("⚠ Assistant problem · {e}"),
         }
+    }
+
+    /// Nothing can be asked until an account is connected (the tray line opens the Accounts window).
+    pub fn needs_account(&self) -> bool {
+        matches!(self, AgentState::SignedOut | AgentState::Keychain(_))
     }
 }
 
@@ -395,7 +400,7 @@ impl Harness {
     }
 
     /// On a background thread: read the stored credentials (a keychain dialog can hold this for as
-    /// long as it stays open; the tray says "Agent: starting…" meanwhile and the bear keeps moving),
+    /// long as it stays open; the tray says "Getting ready…" meanwhile and the bear keeps moving),
     /// then start the sidecar (it waits for `ready`), then the launch prompt.
     fn launch(self: Arc<Self>) {
         self.set_state(AgentState::Starting);
@@ -711,7 +716,7 @@ mod tests {
         let h = Harness::build(&home, &wanted(), config, None).unwrap();
         h.clone().launch();
         assert!(t.elapsed() < Duration::from_secs(2), "build and launch don't wait for the keychain");
-        assert_eq!(h.state().line(), "Agent: starting…");
+        assert_eq!(h.state().line(), "Getting ready…");
         assert!(!h.has_model(), "nothing read yet");
         assert_eq!(h.prompt("hi").unwrap_err().code, "starting", "not “sign in”: the read is still running");
         // a key saved meanwhile doesn't replace settings.model's provider, which simply hasn't loaded yet
@@ -753,7 +758,7 @@ mod tests {
         let home = home("none");
         let h = built(&home, Config::memory(MemoryStore::new()), None);
         assert!(!h.has_model());
-        assert_eq!(AgentState::SignedOut.line(), "⚠ Agent: not signed in");
+        assert_eq!(AgentState::SignedOut.line(), "Connect an AI account…");
         assert!(home.join("host.json").is_file(), "the host API is up for `buddy say`");
         let e = h.prompt("hi").unwrap_err();
         assert_eq!(e.code, "no_model");
@@ -773,7 +778,7 @@ mod tests {
         // a sidecar program is set: only the keychain error keeps it from starting
         let h = built(&home, Config::memory(MemoryStore::failing()), Some(PathBuf::from("/nonexistent/buddy-agent")));
         assert_eq!(h.state(), AgentState::Keychain("access denied".into()));
-        assert_eq!(h.state().line(), "⚠ Agent: can't read keychain · access denied");
+        assert_eq!(h.state().line(), "⚠ Can't read the keychain · access denied");
         assert!(!h.agent().is_running());
         assert_eq!(h.agent().gen(), 0, "no start was even tried");
         let e = h.prompt("hi").unwrap_err();
@@ -808,8 +813,11 @@ mod tests {
 
     #[test]
     fn agent_lines_match_the_prototype() {
-        assert_eq!(AgentState::Running { model: "claude-sonnet-5-5".into() }.line(), "Agent: running · claude-sonnet-5-5");
-        assert_eq!(AgentState::Stopped.line(), "Agent: stopped");
-        assert!(AgentState::Error("crashed".into()).line().starts_with("⚠ Agent: error"));
+        assert_eq!(AgentState::Running { model: "claude-sonnet-5-5".into() }.line(), "Ready · claude-sonnet-5-5");
+        assert_eq!(AgentState::Stopped.line(), "Assistant stopped");
+        assert!(AgentState::Error("crashed".into()).line().starts_with("⚠ Assistant problem"));
+        // only a missing account makes the line a way in
+        assert!(AgentState::SignedOut.needs_account() && AgentState::Keychain("x".into()).needs_account());
+        assert!(!AgentState::Starting.needs_account() && !AgentState::Stopped.needs_account());
     }
 }

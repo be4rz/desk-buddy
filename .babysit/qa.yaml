@@ -36,7 +36,7 @@ services:
     start: cargo build -p host --bin buddy && BUDDY_HOME=<tmp> BUDDY_FAKE_MODEL=http://127.0.0.1:<p> BUDDY_PROMPT="<prompt>" BUDDY_ANSWER=allow BUDDY_STATS=1 cargo run -p buddy-app
   accounts:
     cwd: .
-    # keychain credentials, Sign in… window, unprompted budget (p4); tests use MemoryStore + the fake model/OAuth only
+    # keychain credentials, Accounts window, unprompted budget (p4); tests use MemoryStore + the fake model/OAuth only
     check: cargo test -p bridge -p buddy-app -p mascot-protocol -p mascot-core && (cd agent && bun test test/scenarios/auth.test.ts)
     # debug build; no real keychain: BUDDY_CRED_STORE=memory (or =fail for the keychain-error path)
     start: BUDDY_HOME=<tmp> BUDDY_CRED_STORE=memory BUDDY_FAKE_OAUTH=1 BUDDY_FAKE_MODEL=http://127.0.0.1:<p> BUDDY_STATS=1 cargo run -p buddy-app
@@ -69,7 +69,7 @@ flows: >-
   primary: BUDDY_STATS=1 BUDDY_EVENTS=crates/buddy-app/tests/fixtures/events.jsonl BUDDY_DUMP=$TMPDIR/dump cargo run -p buddy-app
   for 60 s: the bear appears (menu-bar accessory, no Dock icon), stderr logs "[buddy] intent …" for the brain's
   intents from the events, idle CPU < 1% in the stats lines, dumps show more than one behavior (Pillow contact sheet);
-  tray: Zoom ×1/×2/×3 (persisted to BUDDY_HOME/settings.json), Hide/Show bear, Move to next display, Quit desk-buddy;
+  tray: Size ▸ Small/Medium/Large (persisted to BUDDY_HOME/settings.json), Hide/Show bear, Move to next display, Quit desk-buddy;
   error: BUDDY_PACK=/nonexistent cargo run -p buddy-app exits 1 with "[buddy] cannot load mascot pack";
   error: a corrupt BUDDY_HOME/settings.json → defaults, settings.json.bad kept, tray shows "⚠ Settings reset (see settings.json.bad)";
   senses: BUDDY_STATS=1 BUDDY_SENSES_LOG=1 cargo run -p buddy-app for 60 s prints "[buddy] senses {…}" lines (frontmost,
@@ -83,11 +83,11 @@ flows: >-
   and "[buddy] mouth Open/Wide/Closed" (BUDDY_STATS) while talking; `BUDDY_HOME=<tmp> buddy say "hello" --emotion happy` from a plain terminal exits 0
   and logs "[buddy] host say user (happy)"; parity: web/bubble/index.html?mock=<state> against the parent prototype's #bubble-* ids;
   talk error: BUDDY_ANSWER=deny → no "[buddy] host say"; app down → buddy say exits 1 "desk-buddy isn't running"; a model error → "bubble show error";
-  no key → "⚠ Agent: not signed in" and a prompt shows the no_model error; SIGTERM (also after kill -9 of the sidecar) removes host.json;
-  accounts: tray Sign in… → fake-oauth → "Signed in"; Add key stores to the keychain (MemoryStore in tests) and the field clears;
+  no key → tray "Connect an AI account…" (opens Accounts) and a prompt shows the setup bubble ("Set up…" opens Accounts); SIGTERM (also after kill -9 of the sidecar) removes host.json;
+  accounts: tray Accounts… → fake-oauth → "Signed in"; Add key stores to the keychain (MemoryStore in tests) and the field clears;
   parity: web/signin/index.html?mock=signin|signin-code|signin-error|signin-done|signin-signed-out against #signin, #signin-error, #signin-done,
   tray #tray-budget / #tray-budget-paused; a second launch logs "[buddy] already running (pid N)" and exits 0;
-  accounts error: BUDDY_CRED_STORE=fail → tray "⚠ Agent: can't read keychain · …" line and no sidecar start; a wrong OAuth code → #signin-error (invalid_grant);
+  accounts error: BUDDY_CRED_STORE=fail → tray "⚠ Can't read the keychain · …" line and no sidecar start; a wrong OAuth code → #signin-error (invalid_grant);
   a 5th sense candidate in an hour sends no prompt and stays 4/4; no key in ps eww of the sidecar or a command's env;
   release build: no BUDDY_CRED_STORE / BUDDY_FAKE_OAUTH / fake-oauth / ANTHROPIC_API_KEY strings in target/release/buddy-app;
   widgets: `buddy widget open browser <fixture url>` then `buddy browser snapshot|click e1|type e2 … --enter` (the ignored

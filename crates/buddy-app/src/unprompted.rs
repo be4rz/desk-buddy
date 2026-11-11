@@ -93,8 +93,8 @@ impl Unprompted {
     /// unprompted turns are off now, if they are.
     pub fn line(&self, now: u64, paused: Option<&str>) -> String {
         match paused {
-            Some(why) => format!("Unprompted paused ({why})"),
-            None => format!("Unprompted {}/{} this hour", self.used(now), self.budget.per_hour()),
+            Some(why) => format!("Check-ins paused ({why})"),
+            None => format!("Check-ins: {} of {} this hour", self.used(now), self.budget.per_hour()),
         }
     }
 }
@@ -161,7 +161,7 @@ mod tests {
         assert_eq!(sent, [true, true, true, true, false], "the 5th in the hour sends no prompt");
         let now = 4 * 12 * MIN + 10 * MIN + 1_000;
         assert_eq!(u.used(now), 4);
-        assert_eq!(u.line(now, None), "Unprompted 4/4 this hour");
+        assert_eq!(u.line(now, None), "Check-ins: 4 of 4 this hour");
     }
 
     #[test]
@@ -180,11 +180,11 @@ mod tests {
         assert_eq!(u.used(50 * MIN + 2_000), 0);
         let u = Unprompted::new(4);
         let mut s = Senses::default();
-        assert_eq!(u.line(0, paused(&s)), "Unprompted 0/4 this hour");
+        assert_eq!(u.line(0, paused(&s)), "Check-ins: 0 of 4 this hour");
         s.dnd_toggle = true;
-        assert_eq!(u.line(0, paused(&s)), "Unprompted paused (do not disturb)");
+        assert_eq!(u.line(0, paused(&s)), "Check-ins paused (do not disturb)");
         s.quiet_hours = true;
-        assert_eq!(u.line(0, paused(&s)), "Unprompted paused (quiet hours)");
+        assert_eq!(u.line(0, paused(&s)), "Check-ins paused (quiet hours)");
     }
 
     #[test]

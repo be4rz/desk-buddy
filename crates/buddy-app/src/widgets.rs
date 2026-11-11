@@ -505,6 +505,6 @@ mod acl {
         let studio: std::collections::BTreeSet<String> = build.iter().filter(|c| c.starts_with("studio_")).cloned().collect();
         assert_eq!(studio.len(), 10);
         assert_eq!(studio, lists[1], "`--studio` registers exactly the studio commands");
-        assert_eq!(build.len(), 30);
+        assert_eq!(build.len(), 32);
     }
 }

@@ -1,8 +1,8 @@
-/* The speech bubble (design §4.8). Tokens and classes from the parent prototype.html
-   (`#bubble-*`); the tokens come from the pack palettes. Bear-owned UI: the same in light and dark. */
+/* The speech bubble (design §4.8). Tokens from the parent prototype.html (`#bubble-*`), which
+   come from the pack palettes. Bear-owned UI: the same in light and dark. */
 :root {
   --ink: #1b1820; --ink-2: #2a2530;
-  --paper: #fbfaf8; --paper-2: #f1eff4; --fur-3: #b9b3cb; --fur-4: #8a83a0;
+  --paper: #fbfaf8; --paper-2: #f1eff4; --fur-3: #b9b3cb; --fur-4: #8a83a0; --fur-5: #6a6480;
   --teal: #4f8a83; --teal-l: #a9dccf; --teal-d: #2f5a58;
   --hat: #8b78ad; --hat-l: #d3c6ea; --hat-d: #5a4a72;
   --blush: #e8a9b2; --rose-d: #5e3f4e;
@@ -12,37 +12,83 @@
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; -webkit-user-select: none; user-select: none; }
-@keyframes blink { 50% { opacity: 0; } }
+@keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75%, 100% { content: "..."; } }
+@keyframes pop { from { opacity: 0; transform: translateY(4px) scale(.98); } }
 
 /* room for the tail (10px) and the drop shadow (3px) around the 290px bubble */
 #root { width: 306px; padding: 4px 8px 14px; }
 html[data-side="below"] #root { padding: 14px 8px 4px; }
 #root:empty { padding: 0; height: 0; }
 
-.bubble { position: relative; width: 290px; max-width: 100%; background: var(--paper); color: var(--ink); border: 2px solid var(--ink); border-radius: 12px; padding: 10px 12px; font: 14px/1.45 var(--sans); box-shadow: 0 3px 0 rgba(27,24,32,.35); }
+.bubble { position: relative; width: 290px; max-width: 100%; background: var(--paper); color: var(--ink); border: 2px solid var(--ink); border-radius: 12px; padding: 10px 12px; font: 14px/1.45 var(--sans); box-shadow: 0 3px 0 rgba(27,24,32,.35); animation: pop .12s ease-out; }
 .bubble::after { content: ""; position: absolute; left: 50%; bottom: -10px; width: 14px; height: 14px; background: var(--paper); border-right: 2px solid var(--ink); border-bottom: 2px solid var(--ink); transform: translateX(-50%) rotate(45deg); }
 html[data-side="below"] .bubble::after { bottom: auto; top: -10px; border: 0; border-left: 2px solid var(--ink); border-top: 2px solid var(--ink); }
-.bubble .meta { display: flex; justify-content: space-between; align-items: center; font: 11px var(--mono); color: var(--fur-4); margin-bottom: 4px; }
-.bubble .x { border: 0; background: none; font: 14px var(--sans); color: var(--fur-4); cursor: pointer; padding: 0 2px; }
-.caret { display: inline-block; width: 7px; height: 14px; background: var(--ink); vertical-align: -2px; animation: blink 1s steps(1) infinite; }
-.bubble textarea { width: 100%; resize: none; border: 1.5px solid var(--fur-3); border-radius: 8px; padding: 7px 9px; font: 14px var(--sans); color: var(--ink); background: #fff; min-height: 58px; -webkit-user-select: text; user-select: text; }
-.bubble textarea:focus { outline: 2px solid var(--hat); border-color: var(--hat); }
-.row { display: flex; gap: 6px; align-items: center; justify-content: flex-end; margin-top: 8px; flex-wrap: wrap; }
-.hint { font-size: 11px; color: var(--fur-4); margin-right: auto; }
-.btn { font: 600 13px var(--sans); border-radius: 7px; border: 1.5px solid var(--ink); background: var(--paper); color: var(--ink); padding: 5px 11px; cursor: pointer; box-shadow: 0 2px 0 var(--ink); }
-.btn.primary { background: var(--teal); color: var(--paper); }
-.btn.danger { background: var(--rose-d); color: var(--paper); }
-.btn[disabled] { opacity: .45; cursor: not-allowed; box-shadow: none; }
+
+/* the top line: what this bubble is, and its close / stop */
+.head { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 24px; margin: -2px -4px 4px 0; }
+.head-r { display: flex; align-items: center; gap: 2px; flex: none; }
+.title { font-weight: 700; }
+.count { font-size: 12px; color: var(--fur-5); padding-right: 4px; }
+.x { width: 24px; height: 24px; border: 0; border-radius: 6px; background: none; font: 13px var(--sans); color: var(--fur-5); cursor: pointer; padding: 0; flex: none; }
+.x:hover { background: var(--paper-2); color: var(--ink); }
+/* a plain line (an answer, a `buddy say`): no top line, the ✕ sits in the corner */
+.bubble.plain > .x { position: absolute; top: 4px; right: 4px; }
+.bubble.plain > .text { padding-right: 18px; }
+
+.status { display: inline-flex; font: 600 12px var(--sans); color: var(--teal-d); background: var(--teal-l); border-radius: 999px; padding: 2px 9px; min-width: 0; }
+.status-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dots { width: 1.1em; flex: none; }
+.dots::after { content: "..."; animation: dots 1.2s steps(1) infinite; }
+
+.bubble textarea { display: block; width: 100%; resize: none; border: 1.5px solid var(--fur-3); border-radius: 8px; padding: 7px 9px; font: 14px/1.4 var(--sans); color: var(--ink); background: #fff; min-height: 56px; max-height: 150px; -webkit-user-select: text; user-select: text; }
+.bubble textarea::placeholder { color: var(--fur-4); }
+.bubble textarea:focus { outline: 2px solid var(--hat); outline-offset: 0; border-color: var(--hat); }
+
+.row { display: flex; gap: 6px; align-items: center; justify-content: flex-end; margin: 9px 0 3px; flex-wrap: wrap; }
+/* three answers on one line of the 266px card */
+.bubble[data-mode="card"] .row, .bubble[data-mode="reminder"] .row { flex-wrap: nowrap; }
+.bubble[data-mode="card"] .row .btn, .bubble[data-mode="reminder"] .row .btn { padding: 4px 8px; font-size: 12.5px; white-space: nowrap; }
+.row .gap { flex: 1; }
+.hint { font-size: 11px; color: var(--fur-5); margin-right: auto; }
+.btn { font: 600 13px var(--sans); border-radius: 7px; border: 1.5px solid var(--ink); background: var(--paper); color: var(--ink); padding: 4px 11px; min-height: 28px; cursor: pointer; box-shadow: 0 2px 0 var(--ink); }
+.btn:active:not([disabled]) { transform: translateY(2px); box-shadow: none; }
+.btn.primary { background: var(--teal); color: #fff; }
+.btn.danger { background: var(--paper); color: var(--rose-d); border-color: var(--rose-d); box-shadow: 0 2px 0 var(--rose-d); }
+.btn.ghost { border-color: transparent; box-shadow: none; background: none; color: var(--hat-d); padding: 2px 7px; min-height: 24px; font-size: 12px; }
+.btn.ghost:hover { background: var(--paper-2); }
+.btn.ghost:active:not([disabled]) { transform: none; }
+.btn.stop { color: var(--rose-d); }
+.btn[disabled] { opacity: .45; cursor: default; box-shadow: none; }
+.btn:focus-visible, .x:focus-visible { outline: 2px solid var(--hat); outline-offset: 2px; }
+
 .card-title { font-weight: 700; margin: 2px 0 4px; }
 .cmd { font: 12px/1.4 var(--mono); background: var(--ink-2); color: var(--paper-2); border-radius: 6px; padding: 6px 8px; margin: 6px 0; overflow-wrap: anywhere; -webkit-user-select: text; user-select: text;
   /* a long command scrolls: the answer buttons stay in the window */
   white-space: pre-wrap; max-height: calc(12px * 1.4 * 10); overflow-y: auto; }
-.note { font-size: 12px; border-radius: 6px; padding: 5px 8px; margin-top: 6px; }
+.note { font-size: 12px; line-height: 1.4; border-radius: 6px; padding: 5px 8px; margin-top: 6px; overflow-wrap: anywhere; }
 .note.taint { background: var(--sun-l); color: var(--rose-d); border: 1px solid var(--sun); }
-.note.err { background: #f8d4dc; color: var(--rose-d); border: 1px solid var(--blush); }
-.pill { display: inline-block; font: 600 10px var(--mono); padding: 1px 6px; border-radius: 999px; background: var(--hat-l); color: var(--hat-d); }
+.note.err { background: #f8d4dc; color: var(--rose-d); border: 1px solid var(--blush); max-height: 5.6em; overflow-y: auto; -webkit-user-select: text; user-select: text; }
+.note.info { background: var(--paper-2); color: var(--hat-d); border: 1px solid var(--hat-l); }
+.pill { display: inline-block; font: 600 12px var(--sans); padding: 2px 9px; border-radius: 999px; background: var(--hat-l); color: var(--hat-d); }
 .pill.teal { background: var(--teal-l); color: var(--teal-d); }
 .pill.rose { background: #f8d4dc; color: var(--rose-d); }
 
-/* plain text; after six lines it scrolls */
-.text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: calc(14px * 1.45 * 6); overflow-y: auto; -webkit-user-select: text; user-select: text; }
+/* the text; after about eleven lines it scrolls, and fades where there is more below */
+.text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: calc(14px * 1.45 * 11); overflow-y: auto; -webkit-user-select: text; user-select: text; }
+.text.more { -webkit-mask-image: linear-gradient(#000 calc(100% - 28px), transparent); mask-image: linear-gradient(#000 calc(100% - 28px), transparent); }
+.text.empty { display: none; }
+.text.big { font-size: 15px; font-weight: 600; }
+.text p { margin: 0; }
+.text > * + * { margin-top: 6px; }
+.text ul, .text ol { margin: 0; padding-left: 20px; white-space: normal; }
+.text li + li { margin-top: 2px; }
+.text .h { font-weight: 700; }
+.text code { font: 12.5px var(--mono); background: var(--paper-2); border-radius: 4px; padding: 1px 4px; }
+.text pre.code { font: 12px/1.4 var(--mono); background: var(--ink-2); color: var(--paper-2); border-radius: 6px; padding: 6px 8px; margin-bottom: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.text .url { color: var(--fur-5); font-size: 12px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .bubble { animation: none; }
+  .dots::after { animation: none; }
+  .btn:active:not([disabled]) { transform: none; }
+}

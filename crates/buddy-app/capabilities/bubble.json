@@ -13,6 +13,8 @@
     "allow-bubble-dismiss",
     "allow-bubble-size",
     "allow-bubble-retry",
+    "allow-bubble-recall",
+    "allow-bubble-reply",
     "allow-reminder-snooze"
   ]
 }

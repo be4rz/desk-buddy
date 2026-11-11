@@ -27,10 +27,11 @@ add `BUDDY_HOME=$(mktemp -d)` in front of the command.
 - [ ] **Drag and persisted position.** Drag the bear somewhere else, quit from the tray, then
   `cargo run -p buddy-app` again.
   **Expect:** it comes back where you dropped it. `~/.desk-buddy/settings.json` holds the position.
-- [ ] **Tray.** In the menu-bar icon, try each item: Zoom ×1/×2/×3, Hide bear (and show it again),
-  Hold still / Hide (busy), Do not disturb, Quiet hours, Move to next display, Ask…, Clear web taint,
-  Sign in…, Studio…, and Quit desk-buddy.
-  **Expect:** each one does what it says, and the zoom is still set after a relaunch. There is no Dock
+- [ ] **Tray.** In the menu-bar icon, try each item: Size ▸ Small/Medium/Large, Hide bear (and show it again),
+  When busy ▸ Hold still / Hide, Do not disturb, Quiet hours, Move to next display, Ask…, Reset web caution
+  (only while the chat has read a web page), Approvals ▸ Ask every time / Ask only when unsure,
+  Accounts…, Studio…, and Quit desk-buddy.
+  **Expect:** each one does what it says, and the size is still set after a relaunch. There is no Dock
   icon (only `buddy-app --studio`, a separate window app, has one).
 - [ ] **Look and feel.** Leave the bear on your own wallpaper (try a light one and a dark one) for a
   few minutes.
@@ -111,17 +112,17 @@ and `verify_face.py`.
   **Expect:** macOS asks again for access to the `desk-buddy` keychain item, because the binary is
   unsigned; "Always Allow" answers it. Note whether the bear and tray freeze until you answer (known
   limitation V4).
-- [ ] **Live API-key sign-in.** Tray → **Sign in…** → a provider → **Add key**, and paste a real key.
-  **Expect:** the tray shows "Agent: running · <model>", and a question gets an answer. The key is in
+- [ ] **Live API-key sign-in.** Tray → **Accounts…** → a provider → **Add key**, and paste a real key.
+  **Expect:** the tray shows "Ready · <model>", and a question gets an answer. The key is in
   Keychain Access under service `desk-buddy`, and nowhere in `~/.desk-buddy`.
 - [ ] **Live OAuth sign-in.** Sign in with one OAuth provider: the Anthropic code flow, or GitHub
   Copilot's device code.
   **Expect:** the browser opens, the code field stays visible in the window, and sign-in finishes with
-  "Agent: running · <model>".
+  "Ready · <model>".
 - [ ] **Relaunch.** Quit, then launch again.
   **Expect:** the credential loads from the keychain, with no new sign-in.
-- [ ] **Looks.** The Sign in… window at its native size, its focus ring, and the tray lines
-  "Unprompted N/4 this hour" and "Unprompted paused (…)".
+- [ ] **Looks.** The Accounts window at its native size, its focus ring, and the tray lines
+  "Check-ins: N of 4 this hour" and "Check-ins paused (…)".
 
 ## 6. Do Not Disturb (AC4)
 

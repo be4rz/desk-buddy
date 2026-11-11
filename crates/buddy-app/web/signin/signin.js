@@ -82,10 +82,14 @@
     const f = s.flow;
     const mine = f && f.providerId === p.id;
     const busy = f && f.phase !== "error";
-    const row = el("div", "provider" + (mine ? " active" : ""));
-    row.dataset.provider = p.id;
+    const set = p.status !== "none";
+    const box = el("section", "provider" + (mine || keyFor === p.id ? " active" : "") + (set ? " set" : ""));
+    box.dataset.provider = p.id;
+    const row = el("div", "provider-main");
     const left = el("div");
-    left.append(el("b", null, p.name), el("small", null, mine ? (f.progress && f.phase !== "error" ? f.progress : flowText(f)) : statusText(p)));
+    const name = el("b", null, p.name);
+    if (set) name.append(el("span", "badge", p.status === "session" ? "this run only" : "connected"));
+    left.append(name, el("small", null, mine ? (f.progress && f.phase !== "error" ? f.progress : flowText(f)) : statusText(p)));
     const acts = el("div", "acts");
     const oauth = p.methods.includes("oauth"), key = p.methods.includes("api_key");
     if (mine && busy) {
@@ -102,11 +106,20 @@
         acts.append(btn("Sign in", s.firstOAuth === p.id ? "primary" : "", () => { keyFor = null; invoke("signin_start", { providerId: p.id }); }, why || false));
       }
       if (key) {
-        acts.append(btn("Add key", oauth ? "" : (keyFor === p.id ? "primary" : ""), () => { keyFor = keyFor === p.id ? null : p.id; render(state); }));
+        const add = btn(keyFor === p.id ? "Cancel" : "Add key", "", () => { keyFor = keyFor === p.id ? null : p.id; render(state); });
+        add.setAttribute("aria-expanded", keyFor === p.id ? "true" : "false");
+        acts.append(add);
       }
     }
     row.append(left, acts);
-    return row;
+    box.append(row);
+    // what this provider needs next opens right under it: its key field, or its sign-in steps
+    if (keyFor === p.id && !set) {
+      box.append(secretForm("API key for " + p.name, "", "password", "Save key", (v) => { keyFor = null; invoke("signin_save_key", { providerId: p.id, key: v }); },
+        "Stored in your login keychain. Never shown to the agent or its commands."));
+    }
+    if (mine) box.append(flowBox(s));
+    return box;
   }
 
   function flowBox(s) {
@@ -145,7 +158,7 @@
     if (f.phase === "error") {
       box.append(note(f.error || "The sign-in didn't work."));
       const r = el("div", "row");
-      r.append(btn("Close", "", () => invoke("signin_close")), btn("Start again", "primary", () => invoke("signin_start", { providerId: f.providerId }), !s.canOAuth && "the agent isn't running"));
+      r.append(btn("Cancel", "", () => invoke("signin_cancel")), btn("Start again", "primary", () => invoke("signin_start", { providerId: f.providerId }), !s.canOAuth && "the agent isn't running"));
       box.append(r);
     }
     return box;
@@ -169,28 +182,24 @@
     keepFor = typing;
     const providers = s.providers || [];
     s.firstOAuth = (providers.find((p) => p.status === "none" && p.methods.includes("oauth")) || {}).id;
-    if (s.keychain) root.append(note("Can't read the keychain: " + s.keychain + ". desk-buddy needs “Always Allow” for its keychain item."));
     const set = providers.filter((p) => p.status !== "none");
     const rest = providers.filter((p) => p.status === "none");
-    for (const p of set) root.append(providerRow(p, s));
-    if (set.length && rest.length) root.append(el("div", "sep"));
+    if (!providers.some((p) => p.id === keyFor && p.status === "none")) keyFor = null;
+    const intro = el("header", "intro");
+    intro.append(el("h1", null, set.length ? "Accounts" : "Connect an AI account"),
+      el("p", null, set.length ? "The bear answers with the account below. Add another, or remove one, any time."
+        : "Pick one so the bear can answer you. Sign in with a subscription you already have, or paste an API key."));
+    root.append(intro);
+    if (s.notice) root.append(note(s.notice.text, s.notice.ok));
+    if (s.keychain) root.append(note("Can't read the keychain: " + s.keychain + ". desk-buddy needs “Always Allow” for its keychain item."));
+    if (!s.canOAuth && rest.some((p) => p.methods.includes("oauth"))) root.append(el("div", "note info", "Browser sign-in is off while the assistant isn’t running. Adding an API key still works."));
+    if (set.length) {
+      for (const p of set) root.append(providerRow(p, s));
+      if (rest.length) root.append(el("h2", "group", "Add another"));
+    }
     for (const p of rest) root.append(providerRow(p, s));
     if (!rest.length) root.append(el("div", "empty", "No other providers yet."));
-    const kp = keyFor && providers.find((p) => p.id === keyFor && p.status === "none");
-    if (kp) {
-      root.append(secretForm("API key for " + kp.name, "", "password", "Save", (v) => { keyFor = null; invoke("signin_save_key", { providerId: kp.id, key: v }); },
-        "Stored in your login keychain. Never shown to the agent or its commands."));
-    } else {
-      keyFor = null;
-    }
-    if (s.flow) root.append(flowBox(s));
-    if (s.notice) root.append(note(s.notice.text, s.notice.ok));
-    // a failed sign-in's own row already has Close (prototype #signin-error: Close + Start again)
-    if (!(s.flow && s.flow.phase === "error")) {
-      const r = el("div", "row");
-      r.append(btn("Close", "", () => invoke("signin_close")));
-      root.append(r);
-    }
+    root.append(el("p", "foot", "Keys and sign-ins stay in your Mac’s keychain. Esc closes this window."));
     for (const f of root.querySelectorAll("input.field")) {
       const v = keepFor[fieldKey(f, s)];
       if (v) {
@@ -199,6 +208,9 @@
       }
     }
     keepFor = {};
+    // the open form or the sign-in in progress is never below the fold
+    const open = root.querySelector(".provider.active");
+    if (open && open.scrollIntoView) open.scrollIntoView({ block: "nearest" });
   }
 
   document.addEventListener("keydown", (e) => {

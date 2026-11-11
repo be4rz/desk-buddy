@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-bubble-recall"
+description = "Enables the bubble_recall command without any pre-configured scope."
+commands.allow = ["bubble_recall"]
+
+[[permission]]
+identifier = "deny-bubble-recall"
+description = "Denies the bubble_recall command without any pre-configured scope."
+commands.deny = ["bubble_recall"]

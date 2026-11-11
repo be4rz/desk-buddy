@@ -4,16 +4,47 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use mascot_protocol::MascotEvent;
+use mascot_protocol::{MascotEvent, WorkKind};
 use serde::Serialize;
 use serde_json::Value;
 
-/// A finished bubble hides this long after its run ends (unless hovered).
+/// A finished bubble hides this long after its run ends (unless hovered); a longer text gets
+/// more time to be read (`hide_ms`).
 pub const HIDE_MS: u64 = 6000;
+/// The longest a finished bubble stays up by itself.
+pub const HIDE_MAX_MS: u64 = 45_000;
 /// While hovered, the hide is checked again after this long.
 pub const HOVER_RECHECK_MS: u64 = 1000;
 
-pub const TAINT_NOTE: &str = "This chat read a web page, so “Always” is off until you clear it (tray → Clear web taint).";
+pub const TAINT_NOTE: &str = "I read a web page in this chat, so “Always allow” is off and I ask before anything risky. To switch that off: menu-bar bear → Reset web caution.";
+/// Said once the first model is connected (after the setup bubble).
+pub const READY_LINE: &str = "All set! Click me whenever you want to ask something.";
+/// Said on the very first launch when a model is already connected.
+pub const WELCOME_LINE: &str = "Hi, I’m your desk buddy! Click me to ask something, or drag me wherever you like.";
+
+/// The service's message says the key or sign-in was turned down (HTTP 401/403 and the like).
+fn key_rejected(message: &str) -> bool {
+    let m = message.to_lowercase();
+    let code = |c: &str| m.split(|ch: char| !ch.is_ascii_alphanumeric()).any(|w| w == c);
+    code("401") || code("403") || m.contains("unauthori") || m.contains("authentication") || m.contains("invalid x-api-key") || m.contains("invalid api key")
+}
+
+/// How long a finished line stays up: 6 s, plus reading time for every character past the first 60.
+pub fn hide_ms(text: &str) -> u64 {
+    (HIDE_MS + 50 * (text.chars().count() as u64).saturating_sub(60)).min(HIDE_MAX_MS)
+}
+
+/// What the bear is doing during a tool call, in plain words.
+fn activity(kind: WorkKind) -> &'static str {
+    match kind {
+        WorkKind::Buddy => "Working on it",
+        WorkKind::Media => "Sorting out the music",
+        WorkKind::Vcs => "Checking git",
+        WorkKind::Files => "Looking at files",
+        WorkKind::Web => "Fetching from the web",
+        WorkKind::Shell => "Running a command",
+    }
+}
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -23,6 +54,8 @@ pub enum Mode {
     Card,
     Reminder,
     Error,
+    /// No model is connected: the bear says so and offers the Accounts window (additive, UX pass).
+    Setup,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -72,11 +105,23 @@ pub struct BubbleModel {
     /// chip is shown, so a reminder that waited behind a card isn't stale.
     #[serde(skip)]
     pub set_at_ms: Option<u64>,
+    /// What the running turn is doing ("Running a command"), while a tool call runs (additive).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activity: Option<String>,
+    /// The prompt: a turn is running, so sending replaces it (additive).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub busy: Option<bool>,
+    /// The prompt: there is a last answer to bring back (`bubble_recall`) (additive).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recall: Option<bool>,
+    /// A finished answer: it offers Reply and Copy (additive).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply: Option<bool>,
 }
 
 impl BubbleModel {
     fn new(mode: Mode) -> BubbleModel {
-        BubbleModel { mode, text: None, streaming: None, emotion: None, card: None, error: None, id: None, set_min_ago: None, set_at_ms: None }
+        BubbleModel { mode, text: None, streaming: None, emotion: None, card: None, error: None, id: None, set_min_ago: None, set_at_ms: None, activity: None, busy: None, recall: None, reply: None }
     }
 
     pub fn speech(text: String, streaming: bool, emotion: Option<String>) -> BubbleModel {
@@ -87,9 +132,19 @@ impl BubbleModel {
         BubbleModel::new(Mode::Prompt)
     }
 
+    pub fn setup() -> BubbleModel {
+        BubbleModel::new(Mode::Setup)
+    }
+
+    /// A turn's finished answer: it can be replied to and copied.
+    fn answer(text: String) -> BubbleModel {
+        BubbleModel { reply: Some(true), ..BubbleModel::speech(text, false, None) }
+    }
+
     pub fn error(reason: &str, message: &str) -> BubbleModel {
-        // no model, or a keychain that can't be read: retrying can't help, the Sign in… window can
-        let action = if matches!(reason, "no_model" | "keychain") { "sign_in" } else { "retry" };
+        // no model, a keychain that can't be read, or a key the service turned down: retrying
+        // can't help, the Accounts window can
+        let action = if matches!(reason, "no_model" | "keychain") || key_rejected(message) { "sign_in" } else { "retry" };
         BubbleModel { error: Some(ErrorModel { reason: reason.into(), message: message.into(), action: Some(action.into()) }), ..BubbleModel::new(Mode::Error) }
     }
 
@@ -143,6 +198,14 @@ pub struct Bubble {
     reminder: Option<(String, String)>,
     /// Wall clock (epoch ms) for the reminder chip, set by the caller before `event`.
     pub wall_ms: u64,
+    /// What the running tool call is doing, for the streaming bubble's status.
+    activity: Option<&'static str>,
+    /// The last finished answer, for the prompt's "Last answer".
+    last_answer: Option<String>,
+    /// No model is connected: a click shows the setup bubble, not a prompt that can only fail.
+    signed_out: bool,
+    /// Say `READY_LINE` once the agent runs (it was signed out before).
+    greet: bool,
 }
 
 impl Bubble {
@@ -196,9 +259,9 @@ impl Bubble {
         Out::Show(m)
     }
 
-    /// Show a bubble that waited: a finished speech line gets its 6 s from now.
+    /// Show a bubble that waited: a finished speech line gets its reading time from now.
     fn show_later(&mut self, m: BubbleModel, now: u64) -> Out {
-        self.hide_at = (m.mode == Mode::Speech && m.streaming != Some(true)).then_some(now + HIDE_MS);
+        self.hide_at = (m.mode == Mode::Speech && m.streaming != Some(true)).then(|| now + hide_ms(m.text.as_deref().unwrap_or("")));
         self.show(m)
     }
 
@@ -241,16 +304,68 @@ impl Bubble {
     fn streaming(&mut self) -> Out {
         self.hide_at = None;
         let t = self.turn_text();
-        self.show(BubbleModel::speech(t, true, None))
+        let activity = self.activity.map(str::to_string);
+        self.show(BubbleModel { activity, ..BubbleModel::speech(t, true, None) })
     }
 
     /// Click on the bear or tray → Ask… (a card on screen stays: it needs its answer first).
+    /// With no model connected it is the setup bubble: a prompt could only fail.
     pub fn open_prompt(&mut self) -> Out {
         if self.mode() == Some(Mode::Card) {
             return Out::Keep;
         }
         self.hide_at = None;
-        self.show(BubbleModel::prompt())
+        if self.signed_out {
+            return self.show(BubbleModel::setup());
+        }
+        let m = BubbleModel { busy: self.run.then_some(true), recall: self.last_answer.is_some().then_some(true), ..BubbleModel::prompt() };
+        self.show(m)
+    }
+
+    /// The setup bubble by itself (the first launch with no model).
+    pub fn setup(&mut self) -> Out {
+        if self.holding() || self.run {
+            return Out::Keep;
+        }
+        self.hide_at = None;
+        self.show(BubbleModel::setup())
+    }
+
+    /// The setup bubble is what's shown (its button opens the Accounts window).
+    pub fn is_setup(&self) -> bool {
+        self.mode() == Some(Mode::Setup)
+    }
+
+    /// The agent's state changed. `signed_out`: no model (or no keychain); `ready`: it runs.
+    /// Leaving signed-out takes the setup bubble away, and the first run after it says so.
+    pub fn agent(&mut self, signed_out: bool, ready: bool, now: u64) -> Out {
+        if signed_out {
+            self.signed_out = true;
+            self.greet = true;
+            return Out::Keep;
+        }
+        self.signed_out = false;
+        if ready && std::mem::replace(&mut self.greet, false) {
+            if self.is_setup() {
+                self.shown = None;
+            }
+            return self.say(READY_LINE, Some("happy".into()), false, now);
+        }
+        if self.is_setup() {
+            return self.hide(now);
+        }
+        Out::Keep
+    }
+
+    /// The prompt's "Last answer": the last finished answer again.
+    pub fn recall(&mut self, now: u64) -> Out {
+        if self.mode() == Some(Mode::Card) {
+            return Out::Keep;
+        }
+        match self.last_answer.clone() {
+            Some(t) => self.show_later(BubbleModel::answer(t), now),
+            None => Out::Keep,
+        }
     }
 
     /// A turn is running (the bubble's view).
@@ -290,6 +405,7 @@ impl Bubble {
         self.stopped = false;
         self.text.clear();
         self.said.clear();
+        self.activity = None;
         self.streaming()
     }
 
@@ -389,6 +505,10 @@ impl Bubble {
             MascotEvent::Thinking | MascotEvent::Working { .. } | MascotEvent::Speaking { .. } if self.stopped => Out::Keep,
             MascotEvent::Thinking | MascotEvent::Working { .. } => {
                 self.answered = None;
+                self.activity = match ev {
+                    MascotEvent::Working { kind, .. } => Some(activity(*kind)),
+                    _ => None,
+                };
                 if !self.run {
                     // a turn the person didn't start here (a resumed run, a sense turn): it shows too
                     self.ours = false;
@@ -405,6 +525,7 @@ impl Bubble {
                 self.answered = None;
                 self.ours &= self.run;
                 self.run = true;
+                self.activity = None;
                 self.text = text.clone();
                 if self.holding() {
                     return Out::Keep;
@@ -425,6 +546,7 @@ impl Bubble {
             }
             MascotEvent::Idle => {
                 let was = std::mem::replace(&mut self.run, false);
+                self.activity = None;
                 self.answered = None;
                 self.approvals.clear();
                 self.cards.clear();
@@ -441,7 +563,8 @@ impl Bubble {
                 if t.is_empty() {
                     return if turn_on_screen { self.hide(now) } else { Out::Keep };
                 }
-                let m = BubbleModel::speech(t, false, None);
+                self.last_answer = Some(t.clone());
+                let m = BubbleModel::answer(t);
                 if self.holding() {
                     self.deferred.push_back(m);
                     return Out::Keep;
@@ -450,6 +573,7 @@ impl Bubble {
             }
             MascotEvent::Error { reason, message } => {
                 self.run = false;
+                self.activity = None;
                 self.answered = None;
                 // the run is over, as at Idle: its cards are withdrawn
                 self.approvals.clear();
@@ -517,7 +641,6 @@ impl Bubble {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mascot_protocol::WorkKind;
     use serde_json::json;
 
     fn labels(outs: &[Out]) -> Vec<String> {
@@ -566,7 +689,8 @@ mod tests {
         assert_eq!(labels(&[b.answered("c1", 0)]), ["speech streaming"]);
         assert_eq!(b.answered("c1", 0), Out::Keep, "once");
         let o = [b.event(&MascotEvent::Working { kind: WorkKind::Shell, tool: "bash".into() }, 1), b.event(&speaking("Done."), 2), b.event(&MascotEvent::Idle, 3)];
-        assert_eq!(labels(&o), ["speech streaming", "speech"]);
+        // the tool call shows what it is doing, then the answer streams and settles
+        assert_eq!(labels(&o), ["speech streaming", "speech streaming", "speech"]);
     }
 
     #[test]
@@ -616,6 +740,17 @@ mod tests {
         let Out::Show(m) = b.set_tainted(false) else { panic!() };
         assert!(m.card.unwrap().can_always);
         assert_eq!(b.set_tainted(false), Out::Keep);
+    }
+
+    #[test]
+    fn a_rejected_key_offers_accounts_not_a_retry_loop() {
+        for msg in ["401 invalid x-api-key", "HTTP 403: forbidden", "authentication_error: bad token", "Unauthorized"] {
+            assert_eq!(BubbleModel::error("model_error", msg).error.unwrap().action.as_deref(), Some("sign_in"), "{msg}");
+        }
+        // not every number is a status code, and a busy service is worth another try
+        for msg in ["529 overloaded", "request 14013 failed", "timed out"] {
+            assert_eq!(BubbleModel::error("model_error", msg).error.unwrap().action.as_deref(), Some("retry"), "{msg}");
+        }
     }
 
     #[test]
@@ -885,5 +1020,93 @@ mod tests {
         b.event(&MascotEvent::Speaking { text: "hm".into() }, 9);
         let Out::Show(m) = b.event(&MascotEvent::Error { reason: "model_error".into(), message: "x".into() }, 10) else { panic!() };
         assert_eq!(m.error.unwrap().action, None);
+    }
+
+    #[test]
+    fn a_tool_call_says_what_it_is_doing_until_the_answer_streams() {
+        let mut b = Bubble::new();
+        b.submitted("commit it");
+        let Out::Show(m) = b.event(&MascotEvent::Working { kind: WorkKind::Vcs, tool: "bash".into() }, 1) else { panic!() };
+        assert_eq!(m.activity.as_deref(), Some("Checking git"));
+        assert_eq!(serde_json::to_value(&m).unwrap()["activity"], "Checking git");
+        let Out::Show(m) = b.event(&MascotEvent::Thinking, 2) else { panic!() };
+        assert_eq!(m.activity, None);
+        b.event(&MascotEvent::Working { kind: WorkKind::Shell, tool: "bash".into() }, 3);
+        let Out::Show(m) = b.event(&speaking("Done."), 4) else { panic!() };
+        assert_eq!(m.activity, None, "the answer is streaming: no stale status");
+    }
+
+    #[test]
+    fn a_long_answer_stays_up_longer_and_never_forever() {
+        assert_eq!(hide_ms("short"), HIDE_MS);
+        assert_eq!(hide_ms(&"a".repeat(60)), HIDE_MS);
+        assert_eq!(hide_ms(&"a".repeat(260)), HIDE_MS + 10_000);
+        assert_eq!(hide_ms(&"a".repeat(100_000)), HIDE_MAX_MS);
+        let mut b = Bubble::new();
+        b.submitted("explain");
+        b.event(&speaking(&"é".repeat(160)), 1);
+        b.event(&MascotEvent::Idle, 1000);
+        assert_eq!(b.hide_at(), Some(1000 + HIDE_MS + 5000), "counted in characters, not bytes");
+    }
+
+    #[test]
+    fn the_last_answer_can_be_brought_back_from_the_prompt() {
+        let mut b = Bubble::new();
+        let Out::Show(m) = b.open_prompt() else { panic!() };
+        assert_eq!((m.recall, m.busy), (None, None), "nothing to bring back yet");
+        assert_eq!(b.recall(0), Out::Keep);
+        b.submitted("hi");
+        b.event(&speaking("Hello."), 1);
+        // the prompt opened mid-turn says that sending replaces the running answer
+        let Out::Show(m) = b.open_prompt() else { panic!() };
+        assert_eq!(m.busy, Some(true));
+        b.dismiss(2);
+        let Out::Show(m) = b.event(&MascotEvent::Idle, 3) else { panic!() };
+        assert_eq!(m.reply, Some(true), "a finished answer offers Reply and Copy");
+        assert_eq!(b.tick(3 + HIDE_MS, false), Out::Hide);
+        let Out::Show(m) = b.open_prompt() else { panic!() };
+        assert_eq!((m.recall, m.busy), (Some(true), None));
+        let Out::Show(m) = b.recall(10_000) else { panic!() };
+        assert_eq!((m.mode, m.text.as_deref(), m.streaming, m.reply), (Mode::Speech, Some("Hello."), Some(false), Some(true)));
+        assert_eq!(b.hide_at(), Some(10_000 + HIDE_MS));
+        // a `buddy say` line is not an answer: no Reply, and it doesn't replace the last answer
+        let Out::Show(m) = b.say("psst", None, false, 11_000) else { panic!() };
+        assert_eq!(m.reply, None);
+        assert!(matches!(b.recall(12_000), Out::Show(m) if m.text.as_deref() == Some("Hello.")));
+        // a card on screen keeps its place
+        b.event(&MascotEvent::AwaitingPermission { call_id: "c".into(), title: "t".into() }, 13_000);
+        assert_eq!(b.recall(13_001), Out::Keep);
+    }
+
+    #[test]
+    fn signed_out_a_click_shows_setup_not_a_prompt_and_signing_in_says_ready() {
+        let mut b = Bubble::new();
+        assert_eq!(b.agent(true, false, 0), Out::Keep);
+        let Out::Show(m) = b.open_prompt() else { panic!() };
+        assert_eq!(serde_json::to_value(&m).unwrap(), json!({ "mode": "setup" }));
+        assert!(b.is_setup());
+        assert_eq!(b.hide_at(), None, "it waits for the person");
+        // the sign-in went through: the agent starts (setup goes), then runs (the ready line)
+        assert_eq!(b.agent(false, false, 1), Out::Hide);
+        let Out::Show(m) = b.agent(false, true, 2) else { panic!() };
+        assert_eq!((m.text.as_deref(), m.streaming), (Some(READY_LINE), Some(false)));
+        assert_eq!(b.hide_at(), Some(2 + HIDE_MS));
+        // said once; later restarts are quiet, and a click is the prompt again
+        assert_eq!(b.agent(false, true, 3), Out::Keep);
+        assert_eq!(labels(&[b.open_prompt()]), ["prompt"]);
+        // straight from setup to running: the ready line replaces it
+        let mut b = Bubble::new();
+        b.agent(true, false, 0);
+        b.setup();
+        assert!(matches!(b.agent(false, true, 1), Out::Show(m) if m.text.as_deref() == Some(READY_LINE)));
+        // never signed out: no greeting on an ordinary launch
+        let mut b = Bubble::new();
+        assert_eq!(b.agent(false, false, 0), Out::Keep);
+        assert_eq!(b.agent(false, true, 1), Out::Keep);
+        // the unasked setup bubble never covers a prompt, a card or a running turn
+        b.open_prompt();
+        assert_eq!(b.setup(), Out::Keep);
+        b.submitted("hi");
+        assert_eq!(b.setup(), Out::Keep);
     }
 }

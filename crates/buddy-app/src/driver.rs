@@ -136,8 +136,11 @@ pub struct App {
     pub on_hidden: Option<Box<dyn Fn(bool)>>,
     /// the tray's agent line
     pub on_agent: Option<Box<dyn Fn(&AgentState)>>,
-    /// the tray's "Clear web taint" (shown while tainted)
+    /// the tray's "Reset web caution" (shown while tainted)
     pub on_taint: Option<Box<dyn Fn(bool)>>,
+    /// the tray's Approvals submenu (the policy's mode: ask / allowlist / skip)
+    pub on_mode: Option<Box<dyn Fn(&str)>>,
+    policy_mode: String,
     /// the tray's checkmarks after `Inbox::Settings`
     pub on_settings: Option<Box<dyn Fn(&Settings)>>,
     /// the speech bubble's state and window
@@ -216,6 +219,8 @@ pub fn start(init: Init, handle: tauri::AppHandle) {
         on_hidden: None,
         on_agent: None,
         on_taint: None,
+        on_mode: None,
+        policy_mode: "allowlist".into(),
         on_settings: None,
         bubble: Bubble::new(),
         bubble_win: None,
@@ -397,7 +402,7 @@ impl App {
         self.refresh_budget(now);
     }
 
-    /// The tray's "Unprompted N/4 this hour" / "Unprompted paused (…)", on change.
+    /// The tray's "Check-ins: N of 4 this hour" / "Check-ins paused (…)", on change.
     fn refresh_budget(&mut self, now: u64) {
         let paused = (!self.brain.unprompted_allowed()).then(|| unprompted::paused(&self.senses).unwrap_or("do not disturb"));
         let line = self.unprompted.line(now, paused);
@@ -756,7 +761,21 @@ impl App {
                 self.bubble_dismiss()
             }
             (Some("retry"), Some(p)) => self.submit(p),
+            // the setup bubble's "Set up…"
+            _ if self.bubble.is_setup() => {
+                crate::signin::window::open();
+                self.bubble_dismiss()
+            }
             _ => self.bubble_dismiss(),
+        }
+    }
+
+    /// The prompt's "Last answer": the last finished answer again.
+    pub fn bubble_recall(&mut self) {
+        let out = self.bubble.recall(self.now_ms());
+        self.apply(out);
+        if let Some(w) = &self.bubble_win {
+            w.give_keyboard_back();
         }
     }
 
@@ -800,8 +819,20 @@ impl App {
         if let Some(f) = &self.on_taint {
             f(tainted);
         }
+        if let Some(mode) = view["mode"].as_str() {
+            self.policy_mode = mode.to_string();
+        }
+        self.policy_mode_refresh();
         let out = self.bubble.set_tainted(tainted);
         self.apply(out);
+    }
+
+    /// The tray's Approvals checkmarks, from the policy's last view (a click toggles the native
+    /// checkmark by itself; this puts it back on what the policy really has).
+    pub fn policy_mode_refresh(&self) {
+        if let Some(f) = &self.on_mode {
+            f(&self.policy_mode);
+        }
     }
 
     /// The agent started, stopped, crashed, …
@@ -809,6 +840,19 @@ impl App {
         if let Some(f) = &self.on_agent {
             f(s);
         }
+        let signed_out = matches!(s, AgentState::SignedOut | AgentState::Keychain(_));
+        let ready = matches!(s, AgentState::Running { .. });
+        let now = self.now_ms();
+        let mut out = self.bubble.agent(signed_out, ready, now);
+        // the very first launch: say hello, or offer to connect a model, once (settings.onboarded)
+        if (signed_out || ready) && !self.settings.onboarded {
+            self.settings.onboarded = true;
+            self.save_settings();
+            if out == Out::Keep {
+                out = if signed_out { self.bubble.setup() } else { self.bubble.say(crate::bubble::model::WELCOME_LINE, Some("happy".into()), false, now) };
+            }
+        }
+        self.apply(out);
     }
 }
 

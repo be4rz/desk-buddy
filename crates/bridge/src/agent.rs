@@ -465,7 +465,7 @@ impl Agent {
     /// A sign-in question from pi-ai's login flow, for the window.
     fn on_auth(&self, op: &str, req: &Value, cancelled: &AtomicBool) -> Result<Value, (String, String)> {
         let Some(ui) = lock(&self.auth).clone() else {
-            return Err(("no_ui".into(), "Sign in from desk-buddy’s Sign in… window.".into()));
+            return Err(("no_ui".into(), "Sign in from desk-buddy’s Accounts window.".into()));
         };
         let s = |k: &str| req[k].as_str().unwrap_or("");
         let opt = |k: &str| req[k].as_str().filter(|v| !v.is_empty());

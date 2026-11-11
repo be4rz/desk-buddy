@@ -1,12 +1,14 @@
 //! Menu-bar item (prototype `#tray-menu`, `#tray-menu-error`, `#tray-dnd`). p1 items: a
-//! header, an optional settings warning, Zoom ×1/×2/×3 (persisted), Hide/Show bear, Move
+//! header, an optional settings warning, Size ▸ Small/Medium/Large (the zoom, persisted), Hide/Show bear, Move
 //! to next display, Quit. p2 (senses): a status line while DND or quiet hours is active,
 //! "Do not disturb" (session only), "Quiet hours HH:MM–HH:MM" (writes
 //! `quiet_hours.enabled`) and "When busy ▸ Hide / Hold still" (writes `dnd.action`).
-//! p3 (talk): "Ask…" (opens the bubble's prompt), the agent line ("Agent: running · <model>",
-//! stopped, error, not signed in, can't read keychain) and "Clear web taint" while the chat is
-//! tainted. p4 (accounts): the budget line ("Unprompted N/4 this hour" / "Unprompted paused
-//! (…)", `#tray-budget`), "Sign in…" (the sign-in window), and Ask… reads "Ask… (bear hidden)",
+//! p3 (talk): "Ask…" (opens the bubble's prompt), the agent line ("Ready · <model>",
+//! stopped, problem, "Connect an AI account…", can't read the keychain) and "Reset web caution" while the chat is
+//! tainted. UX pass: plain words ("Ready · <model>", "Connect an AI account…" which opens the
+//! Accounts window, "Reset web caution", "Check-ins: N of 4 this hour", "Accounts…"), the three
+//! sizes in a "Size" submenu, and "Approvals ▸" (the policy's ask / allowlist modes). p4 (accounts): the budget line ("Check-ins: N of 4 this hour" / "Check-ins paused
+//! (…)", `#tray-budget`), "Accounts…" (the sign-in window), and Ask… reads "Ask… (bear hidden)",
 //! disabled, while DND or quiet hours hide the bear (a bear the person hid comes back on Ask…).
 
 use mascot_core::{Dir, EyeState, Intent, MouthState, Show, Visibility};
@@ -93,6 +95,21 @@ pub struct TrayInit {
     pub quiet_span: String,
 }
 
+const SIZES: [&str; 3] = ["Small", "Medium", "Large"];
+
+fn size_label(zoom: u32) -> String {
+    format!("Size: {}", SIZES[(zoom.clamp(1, 3) - 1) as usize])
+}
+
+/// The Approvals submenu's title for a policy mode (`skip` can only be set from the CLI).
+pub fn approvals_label(mode: &str) -> &'static str {
+    match mode {
+        "ask" => "Approvals: ask every time",
+        "skip" => "Approvals: off (never asks)",
+        _ => "Approvals: ask when unsure",
+    }
+}
+
 fn busy_label(a: DndAct) -> &'static str {
     match a {
         DndAct::Hide => "When busy: Hide",
@@ -107,17 +124,21 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
         None => None,
     };
     let zooms = [1u32, 2, 3]
-        .map(|z| CheckMenuItem::with_id(app, format!("zoom{z}"), format!("Zoom ×{z}"), true, z == t.zoom, None::<&str>));
+        .map(|z| CheckMenuItem::with_id(app, format!("zoom{z}"), SIZES[(z - 1) as usize], true, z == t.zoom, None::<&str>));
     let [z1, z2, z3] = zooms;
     let zs = [z1?, z2?, z3?];
+    let size = Submenu::with_id_and_items(app, "size", size_label(t.zoom), true, &[&zs[0], &zs[1], &zs[2]])?;
+    let mode_ask = CheckMenuItem::with_id(app, "mode_ask", "Ask every time", true, false, None::<&str>)?;
+    let mode_list = CheckMenuItem::with_id(app, "mode_allowlist", "Ask when unsure (safe commands just run)", true, true, None::<&str>)?;
+    let approvals = Submenu::with_id_and_items(app, "approvals", approvals_label("allowlist"), true, &[&mode_ask, &mode_list])?;
     let ask = MenuItem::with_id(app, "ask", "Ask…", true, None::<&str>)?;
     let agent = MenuItem::with_id(app, "agent", harness::AgentState::Starting.line(), false, None::<&str>)?;
-    let taint = MenuItem::with_id(app, "taint", "Clear web taint", true, None::<&str>)?;
+    let taint = MenuItem::with_id(app, "taint", "Reset web caution", true, None::<&str>)?;
     let hide = MenuItem::with_id(app, "hide", "Hide bear", true, None::<&str>)?;
     let next = MenuItem::with_id(app, "nextdisplay", "Move to next display", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit desk-buddy", true, None::<&str>)?;
-    let budget = MenuItem::with_id(app, "budget", "Unprompted 0/4 this hour", false, None::<&str>)?;
-    let signin = MenuItem::with_id(app, "signin", "Sign in…", true, None::<&str>)?;
+    let budget = MenuItem::with_id(app, "budget", "Check-ins: 0 of 4 this hour", false, None::<&str>)?;
+    let signin = MenuItem::with_id(app, "signin", "Accounts…", true, None::<&str>)?;
     let studio = MenuItem::with_id(app, "studio", "Studio…", true, None::<&str>)?;
     let sep5 = PredefinedMenuItem::separator(app)?;
     let status = MenuItem::with_id(app, "status", "", false, None::<&str>)?;
@@ -137,9 +158,9 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
     // the status line goes in at index `items.len()` (under the header/warning) when active
     let status_at = items.len();
     items.extend([&sep1 as &dyn IsMenuItem<Wry>, &ask, &agent]);
-    // "Clear web taint" goes in under the agent line while tainted
+    // "Reset web caution" goes in under the agent line while tainted
     let taint_at = items.len();
-    items.extend([&sep4 as &dyn IsMenuItem<Wry>, &zs[0], &zs[1], &zs[2], &hide, &next, &sep2, &dnd, &quiet, &busy, &sep5, &budget, &signin, &studio, &sep3, &quit]);
+    items.extend([&sep4 as &dyn IsMenuItem<Wry>, &size, &hide, &next, &sep2, &dnd, &quiet, &busy, &budget, &sep5, &approvals, &signin, &studio, &sep3, &quit]);
     let menu = Menu::with_items(app, &items)?;
 
     let hide2 = hide.clone();
@@ -150,6 +171,14 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
     with_app(move |a| {
         a.on_agent = Some(Box::new(move |s| {
             let _ = agent.set_text(s.line());
+            // with no account the line is the way in: it opens the Accounts window
+            let _ = agent.set_enabled(s.needs_account());
+        }));
+        let (ma, ml, ap) = (mode_ask.clone(), mode_list.clone(), approvals.clone());
+        a.on_mode = Some(Box::new(move |mode| {
+            let _ = ma.set_checked(mode == "ask");
+            let _ = ml.set_checked(mode == "allowlist");
+            let _ = ap.set_text(approvals_label(mode));
         }));
         let _ = budget.set_text(a.budget_line());
         a.on_budget = Some(Box::new(move |line| {
@@ -206,12 +235,25 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
             match id {
                 "quit" => app.exit(0),
                 "ask" => with_app(|a| a.open_prompt()),
-                "signin" => crate::signin::window::open(),
+                "signin" | "agent" => crate::signin::window::open(),
+                "mode_ask" | "mode_allowlist" => {
+                    let mode = id[5..].to_string();
+                    // the checkmarks follow the policy's own view (`on_mode`), also when this fails
+                    with_app(|a| a.policy_mode_refresh());
+                    std::thread::spawn(move || {
+                        if let Some(h) = harness::get() {
+                            eprintln!("[buddy] approvals: {mode}");
+                            if let Err(e) = h.agent().policy_ui(&serde_json::json!({ "op": "set_mode", "mode": mode })) {
+                                eprintln!("[buddy] approvals: {e}");
+                            }
+                        }
+                    });
+                }
                 "studio" => crate::studio::window::open(false),
                 "taint" => {
                     std::thread::spawn(|| {
                         if let Some(h) = harness::get() {
-                            eprintln!("[buddy] clear web taint");
+                            eprintln!("[buddy] reset web caution (clear taint)");
                             if let Err(e) = h.agent().policy_ui(&serde_json::json!({ "op": "clear_taint" })) {
                                 eprintln!("[buddy] clear taint: {e}");
                             }
@@ -223,6 +265,7 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
                     for (i, it) in zs.iter().enumerate() {
                         let _ = it.set_checked(i as u32 + 1 == z);
                     }
+                    let _ = size.set_text(size_label(z));
                     with_app(|a| a.set_zoom(z));
                 }
                 "hide" => with_app(|a| {

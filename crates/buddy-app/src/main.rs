@@ -161,6 +161,8 @@ fn main() {
             bubble::window::bubble_dismiss,
             bubble::window::bubble_size,
             bubble::window::bubble_retry,
+            bubble::window::bubble_recall,
+            bubble::window::bubble_reply,
             bubble::window::reminder_snooze,
             signin::signin_state,
             signin::signin_save_key,
