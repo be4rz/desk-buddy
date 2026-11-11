@@ -212,26 +212,19 @@ mod tests {
         assert_eq!(m.on_record(&other), None);
     }
 
-    /// `host::EMOTIONS`/`EMOTES` (what the CLI validates) are exactly the protocol's enums.
+    /// `host::EMOTIONS` (what the CLI validates) is exactly the protocol's enum. Emotes are pack data now
+    /// (`buddy mascot list`), so there is no static emote list to pin.
     #[test]
-    fn the_hosts_emotion_and_emote_lists_equal_the_protocol_enums() {
-        use mascot_protocol::{EmoteName, Emotion};
+    fn the_hosts_emotion_list_equals_the_protocol_enum() {
+        use mascot_protocol::Emotion;
         // Exhaustive: a new variant fails to compile here until it is listed.
         let emotion_name = |e: Emotion| match e {
             Emotion::Neutral | Emotion::Happy | Emotion::Sad | Emotion::Surprised | Emotion::Thinking | Emotion::Sleepy => serde_json::to_value(e).unwrap().as_str().unwrap().to_string(),
         };
-        let emote_name = |e: EmoteName| match e {
-            EmoteName::Wave | EmoteName::Nod | EmoteName::Shake | EmoteName::Jump | EmoteName::Spin => serde_json::to_value(e).unwrap().as_str().unwrap().to_string(),
-        };
         let emotions: Vec<String> = [Emotion::Neutral, Emotion::Happy, Emotion::Sad, Emotion::Surprised, Emotion::Thinking, Emotion::Sleepy].into_iter().map(emotion_name).collect();
-        let emotes: Vec<String> = [EmoteName::Wave, EmoteName::Nod, EmoteName::Shake, EmoteName::Jump, EmoteName::Spin].into_iter().map(emote_name).collect();
         assert_eq!(emotions, host::EMOTIONS);
-        assert_eq!(emotes, host::EMOTES);
         for s in host::EMOTIONS {
             assert!(serde_json::from_value::<Emotion>(json!(s)).is_ok(), "{s}");
-        }
-        for s in host::EMOTES {
-            assert!(serde_json::from_value::<EmoteName>(json!(s)).is_ok(), "{s}");
         }
     }
 

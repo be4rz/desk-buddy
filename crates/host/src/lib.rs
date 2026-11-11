@@ -4,7 +4,8 @@
 //! `Origin` header (a web page) or a `Host` other than the loopback address
 //! (DNS rebinding) is refused. Each sidecar start gets its own agent token,
 //! revoked when it exits. `X-Buddy-Turn` names the turn a command ran in; a
-//! command from a turn that already ended still runs, flagged `afterTurn`.
+//! command from a turn that already ended still runs, flagged `afterTurn` (`buddy mascot
+//! do|stop|emote` too).
 //! The sink answers each command (design §4.6): its JSON is merged into
 //! `{ "ok": true, … }`, a `Refusal` becomes the error reply.
 
@@ -24,9 +25,13 @@ use tiny_http::{Header, Method, Request, Response, Server};
 const MAX_BODY: u64 = 64 * 1024;
 /// The longest `say` text.
 pub const MAX_SAY: usize = 2000;
-/// The emotions `say` takes, and the emotes `mascot emote` plays.
+/// The emotions `say` takes. (Emotes and activities are the pack's: `buddy mascot list`.)
 pub const EMOTIONS: [&str; 6] = ["neutral", "happy", "sad", "surprised", "thinking", "sleepy"];
-pub const EMOTES: [&str; 5] = ["wave", "nod", "shake", "jump", "spin"];
+/// `buddy mascot do --for` bounds, ms (10 s to 30 min; the pack's `max_for_s` may cap lower).
+pub const MIN_FOR_MS: u64 = 10_000;
+pub const MAX_FOR_MS: u64 = 1_800_000;
+/// The usage error for a `--for` out of bounds.
+pub const FOR_RANGE: &str = "--for must be between 10s and 30m";
 /// The longest reminder text.
 pub const MAX_REMIND_TEXT: usize = 500;
 /// How far ahead a reminder may be: 7 days.
@@ -78,7 +83,7 @@ pub enum Caller {
 #[derive(Clone, Debug, PartialEq)]
 pub struct HostEvent {
     pub caller: Caller,
-    /// `say`, `emote` or a reminder op.
+    /// `say`, a mascot op, a reminder op or a widget op.
     pub action: Action,
     /// The `X-Buddy-Turn` the command sent.
     pub turn: Option<String>,
@@ -89,11 +94,25 @@ pub struct HostEvent {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     Say { text: String, emotion: Option<String> },
-    Emote { name: String },
+    /// `buddy mascot …` (body-tools): the app answers with the brain's `BodyReply`.
+    Mascot(MascotOp),
     /// `buddy remind …`: the app's agent keeps reminders (durable, in its sidecar).
     Remind(RemindOp),
     /// `buddy widget …` and `buddy <widget> <action> …` (design §4.9).
     Widget(WidgetOp),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum MascotOp {
+    Emote { name: String },
+    Do { name: String, for_ms: Option<u64> },
+    Stop,
+    List,
+}
+
+/// An activity or emote name's shape: `[a-z0-9_-]{1,32}`.
+pub fn mascot_name_ok(name: &str) -> bool {
+    (1..=32).contains(&name.len()) && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -290,6 +309,50 @@ fn act(sh: &Shared, req: Request, event: HostEvent, extra: Value) {
             reply(req, 200, body)
         }
         Err(r) => refuse(req, r.status, r.code, &r.message),
+    }
+}
+
+/// The four mascot routes answer errors in their own shape (design `#json-replies`):
+/// `{"ok":false,"error":"<text>"[,"have":[…]]}`. A reply carrying `error` is a 400.
+/// Like `say`, a `do`, `stop` or `emote` from a turn that already ended still acts; its reply then
+/// carries `"afterTurn": true` (left out when on time, so the frozen shapes stay as they are).
+fn act_mascot(sh: &Shared, req: Request, event: HostEvent) {
+    let late = event.after_turn && !matches!(event.action, Action::Mascot(MascotOp::List));
+    match (sh.sink)(event) {
+        Ok(Value::Object(mut m)) if m.get("error").is_some_and(|e| !e.is_null()) => {
+            let mut body = json!({ "ok": false, "error": m.remove("error").unwrap() });
+            if let Some(have) = m.remove("have") {
+                body["have"] = have;
+            }
+            reply(req, 400, body)
+        }
+        Ok(v) => {
+            let mut body = json!({ "ok": true });
+            if let Value::Object(m) = v {
+                body.as_object_mut().unwrap().extend(m.into_iter().filter(|(k, _)| k != "ok"));
+            }
+            if late {
+                body["afterTurn"] = json!(true);
+            }
+            reply(req, 200, body)
+        }
+        Err(r) => {
+            let error = if r.code == "busy" { "busy".to_string() } else { r.message };
+            reply(req, r.status, json!({ "ok": false, "error": error }))
+        }
+    }
+}
+
+fn mascot_error(req: Request, error: &str) {
+    reply(req, 400, json!({ "ok": false, "error": error }))
+}
+
+/// A mascot route's `name`, checked for shape.
+fn mascot_name(body: &Value) -> Result<String, String> {
+    match body["name"].as_str() {
+        Some(n) if mascot_name_ok(n) => Ok(n.to_string()),
+        Some(n) => Err(format!("bad name \"{n}\" (a-z, 0-9, _ and -, at most 32)")),
+        None => Err("name is missing".into()),
     }
 }
 
@@ -498,13 +561,26 @@ fn serve(sh: &Shared, mut req: Request) {
             }
             act(sh, req, HostEvent { caller, action: Action::Say { text, emotion }, turn, after_turn }, json!({ "afterTurn": after_turn }))
         }
-        (Method::Post, "/v1/mascot/emote") => {
-            let name = body["name"].as_str().unwrap_or("").to_string();
-            if !EMOTES.contains(&name.as_str()) {
-                return refuse(req, 400, "usage", &format!("Emote is one of {}.", EMOTES.join(", ")));
-            }
-            act(sh, req, HostEvent { caller, action: Action::Emote { name }, turn, after_turn }, json!({ "afterTurn": after_turn }))
+        (Method::Post, "/v1/mascot/emote") => match mascot_name(&body) {
+            Err(e) => mascot_error(req, &e),
+            Ok(name) => act_mascot(sh, req, HostEvent { caller, action: Action::Mascot(MascotOp::Emote { name }), turn, after_turn }),
+        },
+        (Method::Post, "/v1/mascot/do") => {
+            let name = match mascot_name(&body) {
+                Ok(n) => n,
+                Err(e) => return mascot_error(req, &e),
+            };
+            let for_ms = match body.get("forMs").filter(|v| !v.is_null()) {
+                None => None,
+                Some(v) => match v.as_u64() {
+                    Some(ms) if (MIN_FOR_MS..=MAX_FOR_MS).contains(&ms) => Some(ms),
+                    _ => return mascot_error(req, FOR_RANGE),
+                },
+            };
+            act_mascot(sh, req, HostEvent { caller, action: Action::Mascot(MascotOp::Do { name, for_ms }), turn, after_turn })
         }
+        (Method::Post, "/v1/mascot/stop") => act_mascot(sh, req, HostEvent { caller, action: Action::Mascot(MascotOp::Stop), turn, after_turn }),
+        (Method::Get, "/v1/mascot/list") => act_mascot(sh, req, HostEvent { caller, action: Action::Mascot(MascotOp::List), turn, after_turn }),
         (Method::Post, "/v1/remind") => match remind_add(sh, &body) {
             Err(e) => refuse(req, 400, "usage", &e),
             Ok((at_ms, text)) => act(sh, req, HostEvent { caller, action: Action::Remind(RemindOp::Add { at_ms, text }), turn, after_turn }, Value::Null),
@@ -547,7 +623,7 @@ fn serve(sh: &Shared, mut req: Request) {
             };
             act(sh, req, HostEvent { caller, action: Action::Widget(WidgetOp::Action { widget, action, args }), turn, after_turn }, Value::Null)
         }
-        (_, "/v1/status" | "/v1/say" | "/v1/mascot/emote" | "/v1/remind" | "/v1/reminders" | "/v1/remind/cancel" | "/v1/widget/open" | "/v1/widget/list" | "/v1/widget/commands" | "/v1/widget/close" | "/v1/widget/action") => refuse(req, 405, "method", "Wrong method."),
+        (_, "/v1/status" | "/v1/say" | "/v1/mascot/emote" | "/v1/mascot/do" | "/v1/mascot/stop" | "/v1/mascot/list" | "/v1/remind" | "/v1/reminders" | "/v1/remind/cancel" | "/v1/widget/open" | "/v1/widget/list" | "/v1/widget/commands" | "/v1/widget/close" | "/v1/widget/action") => refuse(req, 405, "method", "Wrong method."),
         _ => refuse(req, 404, "not_found", "No such endpoint."),
     }
 }

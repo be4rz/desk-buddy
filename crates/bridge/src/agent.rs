@@ -86,6 +86,8 @@ pub struct AgentSpec {
     pub providers: Vec<ProviderDef>,
     /// Merged over the defaults (`stepLimit`, `shutdownMs`, …).
     pub settings: Value,
+    /// The prompt's "Your body" section, from the pack (`Init.body`); `None` adds no section.
+    pub body: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -234,6 +236,7 @@ impl Agent {
             platform: platform(),
             host: Some(HostApi { url: self.host.url(), token }),
             settings,
+            body: self.spec.body.clone(),
         };
         // The sidecar's own environment: nothing of the app's, no key.
         let env = vec![

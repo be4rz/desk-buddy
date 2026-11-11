@@ -28,7 +28,8 @@ pub struct Session {
 
 /// Load a pack and its art.
 pub fn load(dir: &Path) -> Result<(Arc<PackMeta>, Art)> {
-    let pack = Arc::new(mascot_core::pack::load(dir)?);
+    // load_report: a bad body block is a lint finding, not a reason to hide the art
+    let pack = Arc::new(mascot_core::pack::load_report(dir)?);
     let art = Art::load(&pack)?;
     Ok((pack, art))
 }

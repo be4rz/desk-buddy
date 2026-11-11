@@ -13,6 +13,8 @@
 //! - `bad_anchor`: an anchor outside its frame.
 //! - `missing_face_pos`: face positions whose count isn't the clip's frame count, or a face
 //!   clip/dir/slot without a layer patch.
+//! - `bad_body`: a problem in pack.json's `body` block (activities and emotes), one per entry, from
+//!   `pack::load_report` (the app refuses such a pack).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -145,6 +147,9 @@ pub fn check_pixels(file: &str, w: usize, h: usize, rgba: &[u8], fw: usize, pale
 /// Lint a loaded pack.
 pub fn lint(pack: &PackMeta) -> Report {
     let mut r = Report { pack: pack.id.clone(), ..Default::default() };
+    for b in &pack.body_issues {
+        r.push(issue("bad_body", "error", "pack.json", b.clone()));
+    }
     // palettes
     let mut pal = BTreeSet::new();
     for p in &pack.palettes {
@@ -264,6 +269,19 @@ mod tests {
             v[(y * w + x) * 4..(y * w + x) * 4 + 4].copy_from_slice(&c);
         }
         v
+    }
+
+    #[test]
+    fn body_problems_are_errors() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../mascots/bear");
+        let mut pack = mascot_core::pack::load_report(&dir).unwrap();
+        assert!(pack.body_issues.is_empty(), "{:?}", pack.body_issues);
+        assert!(!lint(&pack).issues.iter().any(|i| i.code == "bad_body"));
+        pack.body_issues.push("body: activities.juggle: unknown behavior \"juggle\"".into());
+        let r = lint(&pack);
+        let bad: Vec<_> = r.issues.iter().filter(|i| i.code == "bad_body").map(|i| (i.severity, i.file.as_str(), i.detail.as_str())).collect();
+        assert_eq!(bad, vec![("error", "pack.json", "body: activities.juggle: unknown behavior \"juggle\"")]);
+        assert!(r.errors >= 1);
     }
 
     #[test]

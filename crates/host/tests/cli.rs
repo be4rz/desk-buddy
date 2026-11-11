@@ -180,3 +180,101 @@ fn the_agent_token_env_wins_over_buddy_home() {
     drop(host);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A host whose sink answers `buddy mascot …` like the app (body-tools).
+fn mascot_host(name: &str) -> (Host, PathBuf, Arc<Mutex<Vec<host::MascotOp>>>) {
+    let dir = std::env::temp_dir().join(format!("buddy-cli-{name}-{}-{}", std::process::id(), random_hex(3)));
+    let seen: Arc<Mutex<Vec<host::MascotOp>>> = Arc::default();
+    let s2 = seen.clone();
+    let host = Host::start(&dir.join("host.json"), move |e| {
+        let Action::Mascot(op) = e.action else { return Ok(json!({})) };
+        s2.lock().unwrap().push(op.clone());
+        Ok(match op {
+            host::MascotOp::Do { name, .. } if name == "juggle" => json!({ "error": "unknown activity \"juggle\"", "have": ["read", "nap"], "message": "" }),
+            host::MascotOp::Do { name, .. } if name == "busy" => return Err(Refusal::new(503, "busy", "busy")),
+            host::MascotOp::Do { name, .. } if name == "nap" => json!({ "status": "refused", "activity": "nap", "reason": "dnd", "message": "Not now: do not disturb is on." }),
+            host::MascotOp::Do { name, for_ms } => json!({ "status": "queued", "activity": name, "forMs": for_ms, "message": "Started reading for 5m (after this reply)." }),
+            host::MascotOp::Stop => json!({ "status": "stopped", "activity": "read", "message": "Stopped reading." }),
+            host::MascotOp::List => json!({ "activities": [{ "name": "read", "about": "sit down and read a book", "kind": "pastime", "defaultForS": 120 }], "emotes": [], "maxForS": 1800, "playing": null, "message": "Activities:\n  read      sit down and read a book (default 2m)" }),
+            host::MascotOp::Emote { name } => json!({ "status": "played", "emote": name, "message": "Waved." }),
+        })
+    })
+    .unwrap();
+    (host, dir, seen)
+}
+
+#[test]
+fn mascot_commands_print_the_reply_and_exit_by_the_frozen_codes() {
+    let (host, dir, seen) = mascot_host("mascot");
+    let file = host.file().to_path_buf();
+    let out = |o: &Output| (code(o), String::from_utf8_lossy(&o.stdout).trim().to_string(), String::from_utf8_lossy(&o.stderr).trim().to_string());
+
+    let o = buddy(&file, &["mascot", "do", "read", "--for", "5m"]);
+    assert_eq!(out(&o), (0, "Started reading for 5m (after this reply).".into(), String::new()));
+    assert_eq!(seen.lock().unwrap().last(), Some(&host::MascotOp::Do { name: "read".into(), for_ms: Some(300_000) }));
+    let o = buddy(&file, &["mascot", "do", "read", "--json"]);
+    let v: Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!((code(&o), v["ok"].clone(), v["status"].clone()), (0, json!(true), json!("queued")), "--json prints the reply");
+    // refused is an answer: exit 0
+    let o = buddy(&file, &["mascot", "do", "nap"]);
+    assert_eq!(out(&o), (0, "Not now: do not disturb is on.".into(), String::new()));
+    // an unknown name: usage, with the names it has
+    let o = buddy(&file, &["mascot", "do", "juggle"]);
+    assert_eq!(out(&o), (2, String::new(), "buddy: unknown activity \"juggle\" (have: read, nap)".into()));
+    // busy: exit 1
+    let o = buddy(&file, &["mascot", "do", "busy"]);
+    assert_eq!(code(&o), 1, "{}", String::from_utf8_lossy(&o.stderr));
+    let n = seen.lock().unwrap().len();
+    // out-of-range --for: usage before any request
+    for d in ["5s", "31m", "2h", "soon"] {
+        let o = buddy(&file, &["mascot", "do", "read", "--for", d]);
+        assert_eq!(code(&o), 2, "--for {d}");
+    }
+    assert_eq!(out(&buddy(&file, &["mascot", "do", "read", "--for", "5s"])).2, "buddy: --for must be between 10s and 30m");
+    assert_eq!(code(&buddy(&file, &["mascot", "do"])), 2);
+    assert_eq!(code(&buddy(&file, &["mascot", "dance"])), 2);
+    assert_eq!(seen.lock().unwrap().len(), n, "usage errors send nothing");
+
+    assert_eq!(out(&buddy(&file, &["mascot", "stop"])).1, "Stopped reading.");
+    assert_eq!(out(&buddy(&file, &["mascot", "emote", "wave"])).1, "Waved.");
+    let o = buddy(&file, &["mascot", "list"]);
+    assert_eq!(out(&o).1, "Activities:\n  read      sit down and read a book (default 2m)");
+    let v: Value = serde_json::from_slice(&buddy(&file, &["mascot", "list", "--json"]).stdout).unwrap();
+    assert_eq!((v["maxForS"].clone(), v["playing"].clone()), (json!(1800), Value::Null));
+
+    // --help --json: the mascot commands, no static emote list
+    let v: Value = serde_json::from_slice(&buddy(&file, &["--help", "--json"]).stdout).unwrap();
+    assert_eq!(v["mascot"], "run `buddy mascot list` for activities and emotes");
+    let usages: Vec<&str> = v["commands"].as_array().unwrap().iter().filter_map(|c| c["usage"].as_str()).collect();
+    for u in ["buddy mascot list [--json]", "buddy mascot do <activity> [--for <dur>]", "buddy mascot stop", "buddy mascot emote <name>"] {
+        assert!(usages.contains(&u), "{u}");
+    }
+    assert!(v["commands"].as_array().unwrap().iter().all(|c| c.get("emotes").is_none()));
+
+    // the app gone: exit 1
+    drop(host);
+    assert_eq!(code(&buddy(&file, &["mascot", "list"])), 1);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A late `buddy mascot do` (its turn ended) still acts and says so, like `buddy say`.
+#[test]
+fn a_late_mascot_command_says_after_its_turn_ended() {
+    let (host, dir, seen) = mascot_host("mascot-late");
+    let token = host.issue("main", 1);
+    host.set_turn("main", Some("u:t2"));
+    let o = Command::new(env!("CARGO_BIN_EXE_buddy"))
+        .args(["mascot", "do", "read"])
+        .env_remove("BUDDY_HOST_FILE")
+        .env("BUDDY_HOME", &dir)
+        .env("BUDDY_API", host.url())
+        .env("BUDDY_TOKEN", &token)
+        .env("BUDDY_TURN", "u:t1")
+        .output()
+        .unwrap();
+    assert_eq!(code(&o), 0, "{}", String::from_utf8_lossy(&o.stderr));
+    assert_eq!(String::from_utf8_lossy(&o.stdout).trim(), "Started reading for 5m (after this reply). (after its turn ended)");
+    assert_eq!(seen.lock().unwrap().len(), 1, "it still acted");
+    drop(host);
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -23,8 +23,9 @@ use bridge::credentials::Credentials;
 use bridge::store::{CredentialStore, KeychainStore};
 use bridge::protocol::{ModelRef, ProviderDef, ProviderModel};
 use bridge::{Agent, AgentEvent, AgentSpec, BridgeError, Res};
-use host::{Action, Caller, Host, HostEvent, Refusal, RemindOp, WidgetOp};
-use mascot_protocol::{EmoteName, Emotion, MascotEvent};
+use host::{Action, Caller, Host, HostEvent, MascotOp, Refusal, RemindOp, WidgetOp};
+use mascot_core::body::BodyReq;
+use mascot_protocol::{Emotion, MascotEvent};
 use policy::Production;
 use serde_json::{json, Value};
 
@@ -80,6 +81,8 @@ pub struct Config {
     pub fake: bool,
     /// Debug builds' scripted `fake-oauth` sign-in: its model's base URL.
     pub fake_oauth: Option<String>,
+    /// The prompt's "Your body" section (`mascot_core::body::prompt_text`); `None` adds none.
+    pub body: Option<String>,
 }
 
 /// The fake provider at `url` (no `/v1`).
@@ -110,7 +113,7 @@ impl Config {
         let fake_url = std::env::var("BUDDY_FAKE_MODEL").ok().filter(|u| !u.trim().is_empty());
         #[cfg(not(debug_assertions))]
         let fake_url: Option<String> = None;
-        let mut c = Config { store: Box::new(KeychainStore::new()), session: vec![], providers: vec![], fake: false, fake_oauth: None };
+        let mut c = Config { store: Box::new(KeychainStore::new()), session: vec![], providers: vec![], fake: false, fake_oauth: None, body: None };
         #[cfg(debug_assertions)]
         {
             match std::env::var("BUDDY_CRED_STORE").ok().as_deref() {
@@ -140,7 +143,7 @@ impl Config {
     /// Tests: an in-memory store and no dev hooks.
     #[cfg(test)]
     pub fn memory(store: bridge::store::MemoryStore) -> Config {
-        Config { store: Box::new(store), session: vec![], providers: vec![], fake: false, fake_oauth: None }
+        Config { store: Box::new(store), session: vec![], providers: vec![], fake: false, fake_oauth: None, body: None }
     }
 }
 
@@ -231,14 +234,7 @@ fn on_host(e: HostEvent, agent: Option<Arc<Agent>>, policy: Option<Arc<Productio
             post(Inbox::Event(MascotEvent::Say { text, emotion: emo }));
             Ok(json!({}))
         }
-        Action::Emote { name } => {
-            eprintln!("[buddy] host emote {who}: {name}");
-            match serde_json::from_value::<EmoteName>(json!(name)) {
-                Ok(n) => post(Inbox::Event(MascotEvent::Emote { name: n })),
-                Err(_) => return Err(Refusal::new(400, "usage", format!("Unknown emote “{name}”."))),
-            }
-            Ok(json!({}))
-        }
+        Action::Mascot(op) => body_call(who, op, e.after_turn),
         Action::Remind(op) => {
             eprintln!("[buddy] host remind {who}: {op:?}");
             agent.map_or_else(|| Err(Refusal::no_agent()), |a| a.remind(&op))
@@ -268,6 +264,56 @@ fn on_host(e: HostEvent, agent: Option<Arc<Agent>>, policy: Option<Arc<Productio
     }
 }
 
+/// How long a `buddy mascot …` waits for the main thread before it answers busy (design `#host-api`).
+const BODY_WAIT: Duration = Duration::from_secs(2);
+
+/// `buddy mascot …`: the brain answers on the main thread (`App::body`); no answer in `BODY_WAIT`
+/// is HTTP 503 `busy`.
+/// `late`: from a turn that already ended (it still acts, like `say`; the log and reply say so).
+fn body_call(who: &str, op: MascotOp, late: bool) -> host::Reply {
+    let who = if late { format!("{who} (after turn)") } else { who.to_string() };
+    let req = match op {
+        MascotOp::Emote { name } => BodyReq::Emote { name },
+        MascotOp::Do { name, for_ms } => BodyReq::Do { name, for_ms },
+        MascotOp::Stop => BodyReq::Stop,
+        MascotOp::List => BodyReq::List,
+    };
+    let what = match &req {
+        BodyReq::Do { name, .. } | BodyReq::Emote { name } => format!("{} {name}", req.op()),
+        _ => req.op().to_string(),
+    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    // `true` once the caller was answered busy. The main thread checks it and acts under the same
+    // lock, so a call either happens and its reply is read, or never happens.
+    let gave_up = Arc::new(std::sync::Mutex::new(false));
+    let g2 = gave_up.clone();
+    post(Inbox::Call(Box::new(move |a| {
+        let g = g2.lock().unwrap_or_else(|e| e.into_inner());
+        // already answered busy: the caller was told it did not happen, so it must not happen now
+        if *g {
+            eprintln!("[buddy] host mascot: a late {} dropped", req.op());
+            return;
+        }
+        let _ = tx.send(a.body(&req));
+    })));
+    let got = rx.recv_timeout(BODY_WAIT).or_else(|_| {
+        let mut g = gave_up.lock().unwrap_or_else(|e| e.into_inner());
+        // the main thread may have acted just as the wait ran out: then its reply is here
+        rx.try_recv().inspect_err(|_| *g = true)
+    });
+    match got {
+        Ok(v) => {
+            let out = v["status"].as_str().or(v["error"].as_str().map(|_| "error")).unwrap_or("ok");
+            eprintln!("[buddy] host mascot {who}: {what} -> {out}");
+            Ok(v)
+        }
+        Err(_) => {
+            eprintln!("[buddy] host mascot {who}: {what} -> busy");
+            Err(Refusal::new(503, "busy", "The bear didn't answer in time."))
+        }
+    }
+}
+
 /// A widget command for the log: never the typed text or a page's address in full.
 fn widget_line(op: &WidgetOp) -> String {
     match op {
@@ -284,7 +330,10 @@ impl Harness {
     /// the agent, in the background. Its state changes, mascot events and policy views arrive in
     /// the inbox. An `Err` is the host API's (the caller shows it in the tray).
     pub fn start(home: &Path, wanted: &settings::Model) -> std::io::Result<Arc<Harness>> {
-        let h = Harness::build(home, wanted, Config::from_env(), sidecar_bin())?;
+        let mut config = Config::from_env();
+        // the pack's "Your body" prompt section (runs on the main thread, after driver::start)
+        crate::driver::with_app(|a| config.body = mascot_core::body::prompt_text(&a.pack));
+        let h = Harness::build(home, wanted, config, sidecar_bin())?;
         let _ = HARNESS.set(h.clone());
         h.clone().launch();
         Ok(h)
@@ -303,7 +352,7 @@ impl Harness {
             post(Inbox::Call(Box::new(move |a| a.policy_changed(&view))));
         }));
         let _ = pslot.set(Arc::downgrade(&policy));
-        let Config { store, session, providers, fake, fake_oauth } = config;
+        let Config { store, session, providers, fake, fake_oauth, body } = config;
         let creds = Arc::new(Credentials::with_store(store));
         for (p, k) in &session {
             creds.set_api_key(p, k);
@@ -337,6 +386,7 @@ impl Harness {
             model: None,
             providers,
             settings: agent_settings,
+            body,
         };
         let answer = auto_answer();
         let me: Arc<OnceLock<Weak<Harness>>> = Arc::default();

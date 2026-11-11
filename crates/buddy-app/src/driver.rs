@@ -459,11 +459,27 @@ impl App {
 
     pub fn set_user_hidden(&mut self, h: bool) {
         self.user_hidden = h;
+        // the body tools refuse with reason "hidden" while the person has hidden the bear
+        self.brain.set_user_hidden(h);
         eprintln!("[buddy] bear visible={}", !h);
         if let Some(f) = &self.on_hidden {
             f(h);
         }
         self.wake();
+    }
+
+    /// A `buddy mascot …` request (design `#host-api`): the brain's reply as JSON, `playing.untilMs`
+    /// moved from the brain's clock to epoch ms.
+    pub fn body(&mut self, req: &mascot_core::body::BodyReq) -> serde_json::Value {
+        let now = self.now_ms();
+        let mut r = self.brain.body(req, now);
+        if let Some(Some(p)) = &mut r.playing {
+            if let Some(u) = &mut p.until_ms {
+                *u = policy::now_ms() + u.saturating_sub(now);
+            }
+        }
+        self.wake();
+        serde_json::to_value(r).unwrap_or_default()
     }
 
     pub fn user_hidden(&self) -> bool {

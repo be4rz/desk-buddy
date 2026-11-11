@@ -6,10 +6,11 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 
 use mascot_protocol::pack::{Loops, Temperament, Turn};
-use mascot_protocol::{EmoteName, Emotion, MascotEvent};
+use mascot_protocol::{Emotion, MascotEvent};
 use serde::{Deserialize, Serialize};
 
-use crate::pack::{Dir, Ori, PackMeta};
+use crate::body::{self, BodyReply, BodyReq, Playing, Reason, Status};
+use crate::pack::{Dir, EmoteAct, Ori, PackMeta};
 use crate::reflex::Reflexes;
 use crate::rng::Rng;
 
@@ -37,9 +38,14 @@ pub enum Intent {
     Stretch,
     Remind,
     Dodge,
+    /// A running activity (`buddy mascot do`): plays the activity's behavior. Not pack-mapped.
+    Do,
+    /// An emote the pack declares with `plays`: plays that behavior once. Not pack-mapped.
+    Emote,
 }
 
 impl Intent {
+    /// Every intent a pack's `intents` must map (`Do` and `Emote` take their behavior from `body`).
     pub const ALL: [Intent; 20] = [
         Intent::Idle,
         Intent::Think,
@@ -85,9 +91,12 @@ impl Intent {
             Intent::Stretch => "stretch",
             Intent::Remind => "remind",
             Intent::Dodge => "dodge",
+            Intent::Do => "do",
+            Intent::Emote => "emote",
         }
     }
 
+    /// A pack-mappable intent by name (not `do` or `emote`).
     pub fn parse(s: &str) -> Option<Intent> {
         Intent::ALL.into_iter().find(|i| i.as_str() == s)
     }
@@ -266,7 +275,7 @@ enum TurnState {
 
 /// An out-of-turn cue (`say`, `emote`, reminder, reflex): over the turn while
 /// it lasts. Cues queue; only the front one plays.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum Cue {
     /// Held for `dur` ms from when it reaches the front (`until`), or (a Say,
     /// intent Talk) until Settled, then `then` once.
@@ -274,21 +283,35 @@ enum Cue {
     Once(Intent),
     /// A reflex's one-shot: it yields to a harness turn and to DND.
     Reflex(Intent),
+    /// An emote declared with `plays`: this behavior once (intent `Emote`).
+    Gesture(String),
 }
 
 impl Cue {
     fn intent(&self) -> Intent {
         match *self {
             Cue::Timed { intent, .. } | Cue::Once(intent) | Cue::Reflex(intent) => intent,
+            Cue::Gesture(_) => Intent::Emote,
         }
     }
 
     fn once(&self) -> Option<Intent> {
         match *self {
             Cue::Once(i) | Cue::Reflex(i) => Some(i),
+            Cue::Gesture(_) => Some(Intent::Emote),
             Cue::Timed { .. } => None,
         }
     }
+}
+
+/// The activity slot (body-tools): below the turn, above the idle pool.
+#[derive(Clone, Debug)]
+struct Activity {
+    name: String,
+    behavior: String,
+    for_ms: u64,
+    /// When it ends; `None` = pending (asked during a turn, starts when the turn ends).
+    until: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -317,6 +340,12 @@ pub struct Brain {
     dir: Dir,
     turn: Option<TurnState>,
     cue: VecDeque<Cue>,
+    activity: Option<Activity>,
+    /// The person hid the bear from the tray (refuses `do` and `emote`).
+    user_hidden: bool,
+    /// the agent's turn is open (Thinking … Idle/Error): a pending activity waits for its end even
+    /// when the bubble was dismissed (`Settled`) mid-turn
+    turn_open: bool,
     dragging: bool,
     vis: Visibility,
     quiet: bool,
@@ -371,6 +400,9 @@ impl Brain {
             dir: Dir::S,
             turn: None,
             cue: VecDeque::new(),
+            activity: None,
+            user_hidden: false,
+            turn_open: false,
             dragging: false,
             vis: Visibility::Shown,
             quiet: false,
@@ -409,25 +441,45 @@ impl Brain {
     pub fn event(&mut self, ev: &MascotEvent, now_ms: u64) {
         self.advance(now_ms);
         let t = self.t;
+        // a started activity ends on the next turn, whichever status opens it (a run can begin with a
+        // tool or an approval card); one asked in this turn is still pending and waits for its end
+        let opens_turn = matches!(ev, MascotEvent::Thinking | MascotEvent::Working { .. } | MascotEvent::AwaitingPermission { .. } | MascotEvent::Speaking { .. });
+        if opens_turn && self.activity.as_ref().is_some_and(|a| a.until.is_some()) {
+            self.end_activity(t, "turn");
+        }
         match ev {
             MascotEvent::Idle => {
+                self.turn_open = false;
                 if matches!(self.turn, Some(TurnState::Held(_))) {
                     self.turn = None;
                 }
                 self.speak_len = None;
             }
-            MascotEvent::Thinking => self.set_turn(TurnState::Held(Intent::Think)),
-            MascotEvent::Working { .. } => self.set_turn(TurnState::Held(Intent::Work)),
-            MascotEvent::AwaitingPermission { .. } => self.set_turn(TurnState::Held(Intent::Ask)),
+            MascotEvent::Thinking => {
+                self.turn_open = true;
+                self.set_turn(TurnState::Held(Intent::Think))
+            }
+            MascotEvent::Working { .. } => {
+                self.turn_open = true;
+                self.set_turn(TurnState::Held(Intent::Work))
+            }
+            MascotEvent::AwaitingPermission { .. } => {
+                self.turn_open = true;
+                self.set_turn(TurnState::Held(Intent::Ask))
+            }
             MascotEvent::Speaking { text } => {
                 let len = text.chars().count();
                 if self.speak_len.is_none_or(|l| len > l) {
                     self.talk_until(t + self.pack.timers.mouth.stall_ms as u64);
                 }
                 self.speak_len = Some(len);
+                self.turn_open = true;
                 self.set_turn(TurnState::Held(Intent::Talk));
             }
-            MascotEvent::Error { .. } => self.set_turn(TurnState::Once(Intent::Oops)),
+            MascotEvent::Error { .. } => {
+                self.turn_open = false;
+                self.set_turn(TurnState::Once(Intent::Oops))
+            }
             MascotEvent::Say { text, emotion } => {
                 let until = t + bubble_ms(text);
                 let then = emotion.and_then(|e| match e {
@@ -442,21 +494,24 @@ impl Brain {
                 let say = Cue::Timed { intent: Intent::Talk, dur: until - t, until: None, then };
                 match self.cue.iter().position(|c| matches!(c, Cue::Timed { intent: Intent::Talk, .. })) {
                     Some(i) => self.cue[i] = say,
-                    None => self.push_cue(say),
+                    None => {
+                        self.push_cue(say);
+                    }
                 }
                 self.activate_cue(t);
             }
-            // a moment reaction: nothing to react with while hidden or held still
-            MascotEvent::Emote { name } if self.vis == Visibility::Shown => {
-                self.push_cue(Cue::Once(match name {
-                    EmoteName::Wave => Intent::Wave,
-                    EmoteName::Nod => Intent::Nod,
-                    EmoteName::Shake => Intent::Shake,
-                    EmoteName::Jump => Intent::Jump,
-                    EmoteName::Spin => Intent::Spin,
-                }));
+            MascotEvent::Emote { name } => {
+                let r = self.body_at(&BodyReq::Emote { name: name.clone() }, t);
+                self.note_reply("emote", &r, t);
             }
-            MascotEvent::Emote { .. } => {}
+            MascotEvent::Activity { name, for_ms } => {
+                let r = self.body_at(&BodyReq::Do { name: name.clone(), for_ms: *for_ms }, t);
+                self.note_reply("do", &r, t);
+            }
+            MascotEvent::ActivityStop => {
+                let r = self.body_at(&BodyReq::Stop, t);
+                self.note_reply("stop", &r, t);
+            }
             MascotEvent::Reminder { text, .. } => {
                 self.push_cue(Cue::Timed { intent: Intent::Remind, dur: bubble_ms(text), until: None, then: None });
                 self.activate_cue(t);
@@ -487,6 +542,8 @@ impl Brain {
             MascotEvent::Emote { .. } => "Emote",
             MascotEvent::Reminder { .. } => "Reminder",
             MascotEvent::Settled => "Settled",
+            MascotEvent::Activity { .. } => "Activity",
+            MascotEvent::ActivityStop => "ActivityStop",
         };
         self.note(t, "event", what.to_string());
         self.settle(t);
@@ -500,12 +557,15 @@ impl Brain {
         self.follow_edge(t, s.fullscreen);
         self.quiet = s.quiet_hours;
         self.dnd = s.fullscreen || s.screen_share || s.dnd_toggle;
+        if self.activity.is_some() && (self.dnd || self.quiet) {
+            self.end_activity(t, if self.dnd { "dnd" } else { "quiet hours" });
+        }
         self.apply_vis(t);
         let off = !self.unprompted_allowed();
         if off {
             self.drop_cues(false); // reflexes are off in DND and quiet hours
         }
-        let free = self.cue.is_empty() && self.turn.is_none() && !self.dragging && self.vis == Visibility::Shown;
+        let free = self.cue.is_empty() && self.turn.is_none() && self.activity.is_none() && !self.dragging && self.vis == Visibility::Shown;
         let shyness = self.temperament.shyness;
         let rng = &mut self.rng;
         if let Some(f) = self.reflex.sample(s, t, off, free, shyness, &mut |p| rng.chance(p)) {
@@ -571,7 +631,10 @@ impl Brain {
         let t = self.t;
         self.note(t, "poke", format!("{p:?}"));
         match p {
-            Poke::Click => {}
+            Poke::Click => {
+                // the person's click outranks the agent's activity, started or still pending
+                self.end_activity(t, "click");
+            }
             Poke::DragStart => {
                 self.dragging = true;
                 self.drag_from = self.panel.map(|p| Placement { x: p.x, y: p.y, follow_pid: None });
@@ -681,6 +744,9 @@ impl Brain {
         if let Some(&Cue::Timed { until: Some(until), .. }) = self.cue.front() {
             next = next.min(until);
         }
+        if let Some(until) = self.activity.as_ref().and_then(|a| a.until) {
+            next = next.min(until);
+        }
         if self.face_here() {
             if self.pack.capabilities.blink {
                 next = next.min(self.closed_until.unwrap_or(self.blink_at));
@@ -730,7 +796,8 @@ impl Brain {
             let blink = if hidden { u64::MAX } else { self.closed_until.unwrap_or(self.blink_at) };
             // Only steps inside the talking window, whatever the tick cadence.
             let mouth = if self.flapping() && self.mouth_at < self.talking_until { self.mouth_at } else { u64::MAX };
-            let next = frame_end.min(cue_end).min(blink).min(mouth);
+            let act_end = self.activity.as_ref().and_then(|a| a.until).unwrap_or(u64::MAX);
+            let next = frame_end.min(cue_end).min(blink).min(mouth).min(act_end);
             if next > now {
                 break;
             }
@@ -739,7 +806,10 @@ impl Brain {
             let next = next.max(self.t);
             self.t = next;
             self.dirty = true;
-            if due == cue_end {
+            if due == act_end {
+                self.end_activity(next, "done");
+                self.settle(next);
+            } else if due == cue_end {
                 if let Some(&Cue::Timed { then, .. }) = self.cue.front() {
                     self.finish_timed(then, next);
                 }
@@ -803,8 +873,8 @@ impl Brain {
             return;
         }
         let in_hold = self.play.left.is_none();
-        let wanted_behavior = self.pack.resolve(want);
-        if self.play.intent != Intent::Idle && wanted_behavior == self.play.behavior {
+        let wanted_behavior = self.behavior_for(want);
+        if (self.play.intent != Intent::Idle || want == Intent::Do) && wanted_behavior == self.play.behavior {
             // Same behavior (e.g. ask → work both `hold`): just relabel. A
             // one-shot turn being relabelled away counts as played, as it
             // would if interrupt() had ended it.
@@ -812,28 +882,40 @@ impl Brain {
                 self.turn = None;
             }
             self.play.intent = want;
+            if want == Intent::Do && !self.step_loops().is_once() {
+                self.play.left = None; // an activity holds its loop until it ends
+            }
             return;
         }
         if self.play.intent == Intent::Idle || want != Intent::Idle {
-            if in_hold && self.play.intent != Intent::Idle {
-                return; // a held loop finishes its iteration first
+            // a held loop finishes its iteration first; an activity's hold is only waiting
+            // for its end, so a cue leaves it at the next frame
+            if in_hold && self.play.intent != Intent::Idle && self.play.intent != Intent::Do {
+                return;
             }
             self.interrupt(t);
         }
     }
 
-    /// Leaves the current behavior now: a set behavior first plays its exit clip.
+    /// Leaves the current behavior now: a set behavior (or one marked `exit`) first plays
+    /// its exit clip.
     fn interrupt(&mut self, t: u64) {
-        let Some(def) = self.pack.behaviors.get(&self.play.behavior) else { return };
+        let pack = self.pack.clone();
+        let Some(def) = pack.behaviors.get(&self.play.behavior) else { return };
         let last = def.seq.len() - 1;
-        if def.set.is_some() && self.play.step < last {
+        let exits = def.set.is_some() || (def.exit && last > 0);
+        if exits && self.play.step < last {
             self.leave_step();
             self.enter_step(last, t);
-            self.note(t, "end", "exit set".into());
-        } else if def.set.is_none() {
+            self.note(t, "end", if def.set.is_some() { "exit set".into() } else { "exit".into() });
+        } else if !exits {
             self.end_behavior(t);
         }
         // In the exit clip already: let it finish.
+    }
+
+    fn step_loops(&self) -> Loops {
+        self.pack.behaviors.get(&self.play.behavior).and_then(|d| d.seq.get(self.play.step)).map_or(Loops::Once, |s| s.loops)
     }
 
     fn leave_step(&mut self) {
@@ -864,6 +946,8 @@ impl Brain {
         self.play.frame_start = t;
         self.play.left = match loops {
             Loops::Once => Some(1),
+            // an activity holds its loop until it ends
+            _ if self.play.intent == Intent::Do && self.activity.is_some() => None,
             Loops::Range(lo, hi) => Some(self.rng.range(lo, hi)),
             Loops::Hold => None,
         };
@@ -883,6 +967,7 @@ impl Brain {
                 self.turn = None;
             }
         }
+        self.sync_activity(t);
         let want = self.desired();
         if self.dragging {
             self.start("hold", want, t);
@@ -896,7 +981,7 @@ impl Brain {
                 self.start(&b, Intent::Idle, t);
             }
         } else {
-            let b = self.pack.resolve(want).to_string();
+            let b = self.behavior_for(want);
             self.start(&b, want, t);
         }
     }
@@ -938,10 +1023,11 @@ impl Brain {
     /// Applies an input's consequences that don't wait for a frame boundary.
     fn settle(&mut self, t: u64) {
         self.dirty = true;
+        self.sync_activity(t);
         let want = self.desired();
         if self.play.pinned && want != Intent::Idle {
             self.play.pinned = false;
-            let b = self.pack.resolve(want).to_string();
+            let b = self.behavior_for(want);
             self.start(&b, want, t);
         } else if !self.play.pinned && self.vis == Visibility::Still && want == Intent::Idle && !self.dragging {
             // Still: idle frame 0, current facing, right away.
@@ -971,13 +1057,13 @@ impl Brain {
     /// A harness turn, DND or quiet hours outrank a pending reflex (it would be
     /// stale later); `once` also drops queued one-shot emotes (hidden/still).
     fn drop_cues(&mut self, once: bool) {
-        let front = self.cue.front().copied();
+        let front = self.cue.front().cloned();
         self.cue.retain(|c| match c {
             Cue::Reflex(_) => false,
-            Cue::Once(_) => !once,
+            Cue::Once(_) | Cue::Gesture(_) => !once,
             Cue::Timed { .. } => true,
         });
-        if self.cue.front().copied() != front {
+        if self.cue.front().cloned() != front {
             let t = self.t;
             self.activate_cue(t);
         }
@@ -988,19 +1074,21 @@ impl Brain {
     /// Say or Reminder outlives an emote. With only Timed cues waiting, an
     /// incoming one-shot is dropped instead, and an incoming Timed cue evicts
     /// the oldest waiting one.
-    fn push_cue(&mut self, c: Cue) {
+    /// False when the queue is full of timed cues and `c` (not timed) was dropped.
+    fn push_cue(&mut self, c: Cue) -> bool {
         if self.cue.len() >= CUE_CAP {
             match (1..self.cue.len()).find(|&i| !matches!(self.cue[i], Cue::Timed { .. })) {
                 Some(i) => {
                     self.cue.remove(i);
                 }
-                None if !matches!(c, Cue::Timed { .. }) => return,
+                None if !matches!(c, Cue::Timed { .. }) => return false,
                 None => {
                     self.cue.remove(1);
                 }
             }
         }
         self.cue.push_back(c);
+        true
     }
 
     /// The front cue starts its clock (and a Say its mouth) when it gets there.
@@ -1033,8 +1121,149 @@ impl Brain {
         }
         match self.turn {
             Some(TurnState::Held(i) | TurnState::Once(i)) => i,
+            None if self.activity.as_ref().is_some_and(|a| a.until.is_some()) => Intent::Do,
             None => Intent::Idle,
         }
+    }
+
+    /// The behavior an intent plays now: an activity's or a gesture's own, else the pack's.
+    fn behavior_for(&self, want: Intent) -> String {
+        match want {
+            Intent::Do => self.activity.as_ref().map_or_else(|| "rest".to_string(), |a| a.behavior.clone()),
+            Intent::Emote => match self.cue.front() {
+                Some(Cue::Gesture(b)) => b.clone(),
+                _ => "rest".to_string(),
+            },
+            _ => self.pack.resolve(want).to_string(),
+        }
+    }
+
+    // ---- body (buddy mascot do|stop|list|emote) ----
+
+    /// Answers a `buddy mascot …` request (design `#host-api`). Name and duration are checked
+    /// first, then the gates (DND, quiet hours, hidden) refuse `do` and `emote`.
+    pub fn body(&mut self, req: &BodyReq, now_ms: u64) -> BodyReply {
+        self.advance(now_ms);
+        let t = self.t;
+        let r = self.body_at(req, t);
+        self.note_reply(req.op(), &r, t);
+        self.settle(t);
+        r
+    }
+
+    /// The person hid the bear (tray), or showed it again.
+    pub fn set_user_hidden(&mut self, hidden: bool) {
+        self.user_hidden = hidden;
+    }
+
+    fn gate(&self) -> Option<Reason> {
+        if self.dnd {
+            Some(Reason::Dnd)
+        } else if self.quiet {
+            Some(Reason::QuietHours)
+        } else if self.user_hidden {
+            Some(Reason::Hidden)
+        } else {
+            None
+        }
+    }
+
+    fn body_at(&mut self, req: &BodyReq, t: u64) -> BodyReply {
+        let pack = self.pack.clone();
+        let b = &pack.body;
+        match req {
+            BodyReq::Do { name, for_ms } => {
+                let Some(a) = b.activity(name) else {
+                    return BodyReply::error(format!("unknown activity \"{name}\""), b.activity_names());
+                };
+                let max = b.max_for_s.saturating_mul(1000);
+                let for_ms = for_ms.unwrap_or(b.default_for_s.saturating_mul(1000)).clamp(body::MIN_FOR_MS.min(max), max);
+                if let Some(reason) = self.gate() {
+                    return BodyReply { status: Some(Status::Refused), activity: Some(name.clone()), reason: Some(reason), message: reason.message().into(), ..BodyReply::default() };
+                }
+                let behavior = pack.first_available(&a.plays).unwrap_or("rest").to_string();
+                let queued = self.turn.is_some() || self.turn_open;
+                let until = (!queued).then_some(t + for_ms);
+                // a newer do replaces the running one: it leaves through its exit clip
+                let playing = self.play.intent == Intent::Do;
+                if let Some(old) = self.activity.take() {
+                    self.note(t, "activity", format!("end {} (replaced)", old.name));
+                }
+                self.activity = Some(Activity { name: name.clone(), behavior, for_ms, until });
+                self.note(t, "activity", format!("{} {name}", if queued { "queue" } else { "start" }));
+                if playing {
+                    self.interrupt(t);
+                }
+                BodyReply {
+                    status: Some(if queued { Status::Queued } else { Status::Started }),
+                    activity: Some(name.clone()),
+                    for_ms: Some(for_ms),
+                    message: body::started_msg(name, for_ms, queued),
+                    ..BodyReply::default()
+                }
+            }
+            BodyReq::Stop => match self.end_activity(t, "stop") {
+                Some(a) => BodyReply { status: Some(Status::Stopped), message: body::stopped_msg(&a.name), activity: Some(a.name), ..BodyReply::default() },
+                None => BodyReply { status: Some(Status::Nothing), message: body::NOTHING_MSG.into(), ..BodyReply::default() },
+            },
+            BodyReq::List => BodyReply {
+                message: body::list_text(&pack, self.playing().as_ref(), t),
+                activities: Some(body::activities(&pack)),
+                emotes: Some(body::emotes(&pack)),
+                max_for_s: Some(b.max_for_s),
+                playing: Some(self.playing()),
+                ..BodyReply::default()
+            },
+            BodyReq::Emote { name } => {
+                let Some(e) = b.emote(name) else {
+                    return BodyReply::error(format!("unknown emote \"{name}\""), b.emote_names());
+                };
+                if let Some(reason) = self.gate() {
+                    return BodyReply { status: Some(Status::Refused), emote: Some(name.clone()), reason: Some(reason), message: reason.message().into(), ..BodyReply::default() };
+                }
+                let cue = match &e.act {
+                    EmoteAct::Intent(i) => Cue::Once(*i),
+                    EmoteAct::Plays(chain) => Cue::Gesture(pack.first_available(chain).unwrap_or("rest").to_string()),
+                };
+                if !self.push_cue(cue) {
+                    let reason = Reason::Busy;
+                    return BodyReply { status: Some(Status::Refused), emote: Some(name.clone()), reason: Some(reason), message: reason.message().into(), ..BodyReply::default() };
+                }
+                BodyReply { status: Some(Status::Played), emote: Some(name.clone()), message: body::played(name), ..BodyReply::default() }
+            }
+        }
+    }
+
+    fn note_reply(&mut self, op: &str, r: &BodyReply, t: u64) {
+        let what = r.status.map_or_else(|| r.error.clone().unwrap_or_else(|| "listed".into()), |s| s.as_str().to_string());
+        self.note(t, "body", format!("{op} -> {what}"));
+    }
+
+    /// Ends the activity (started or pending); a playing one leaves through its exit clip.
+    fn end_activity(&mut self, t: u64, why: &str) -> Option<Activity> {
+        let a = self.activity.take()?;
+        self.note(t, "activity", format!("end {} ({why})", a.name));
+        if self.play.intent == Intent::Do {
+            self.interrupt(t);
+        }
+        Some(a)
+    }
+
+    /// A pending activity starts its clock once no turn runs (after the reply).
+    fn sync_activity(&mut self, t: u64) {
+        if self.turn.is_some() || self.turn_open {
+            return;
+        }
+        if let Some(a) = self.activity.as_mut().filter(|a| a.until.is_none()) {
+            a.until = Some(t + a.for_ms);
+            let n = a.name.clone();
+            self.note(t, "activity", format!("start {n}"));
+        }
+    }
+
+    /// What the activity slot holds (for tests and the app).
+    pub fn playing(&self) -> Option<Playing> {
+        self.activity.as_ref().map(|a| Playing { activity: a.name.clone(), until_ms: a.until, pending: a.until.is_none() })
     }
 
     // ---- idle scheduler ----

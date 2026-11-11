@@ -170,6 +170,7 @@ fn fixture_with(name: &str, settings: Value) -> Fx {
             s.as_object_mut().unwrap().extend(settings.as_object().cloned().unwrap_or_default());
             s
         },
+        body: None,
     };
     let events = Arc::new(Mutex::new(Vec::new()));
     let e2 = events.clone();
@@ -412,6 +413,7 @@ fn a_start_that_dies_before_ready_keeps_the_last_exit() {
         model: None,
         providers: vec![],
         settings: json!({}),
+        body: None,
     };
     let agent = Agent::new(spec, Arc::new(Production::new(|_, _| {})), host, Arc::new(Credentials::new()), |_| {});
     assert!(agent.start().is_err());

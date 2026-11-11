@@ -111,12 +111,12 @@ fn bad_bodies_and_unknown_routes_are_refused() {
     assert_eq!(request(port, "POST", "/v1/say", &h, Some(&json!({ "text": "hi", "emotion": "furious" }))).unwrap().status, 400);
     assert_eq!(request(port, "POST", "/v1/say", &h, Some(&json!({ "text": "x".repeat(MAX_SAY + 1) }))).unwrap().status, 400);
     assert_eq!(request(port, "POST", "/v1/say", &h, Some(&json!(["not", "an", "object"]))).unwrap().status, 400);
-    assert_eq!(request(port, "POST", "/v1/mascot/emote", &h, Some(&json!({ "name": "explode" }))).unwrap().status, 400);
+    assert_eq!(request(port, "POST", "/v1/mascot/emote", &h, Some(&json!({ "name": "Explode!" }))).unwrap().status, 400);
     assert_eq!(request(port, "GET", "/v1/say", &h, None).unwrap().status, 405);
     assert_eq!(request(port, "GET", "/v2/anything", &h, None).unwrap().status, 404);
     let r = request(port, "POST", "/v1/mascot/emote", &h, Some(&json!({ "name": "wave" }))).unwrap();
     assert_eq!(r.status, 200);
-    assert_eq!(fx.events.recv_timeout(Duration::from_secs(2)).unwrap().action, Action::Emote { name: "wave".into() });
+    assert_eq!(fx.events.recv_timeout(Duration::from_secs(2)).unwrap().action, Action::Mascot(MascotOp::Emote { name: "wave".into() }));
     assert!(fx.events.try_recv().is_err());
 }
 
@@ -295,4 +295,134 @@ fn widget_endpoints_reach_the_sink_as_widget_ops() {
     assert_eq!(request(p, "POST", "/v1/widget/list", &h, Some(&json!({}))).unwrap().status, 405);
     drop(host);
     let _ = fs::remove_dir_all(&dir);
+}
+
+/// A host whose sink answers mascot ops like the app: by name, with refusals and a busy brain.
+fn start_mascot(name: &str) -> (Host, PathBuf, mpsc::Receiver<HostEvent>) {
+    let dir = std::env::temp_dir().join(format!("buddy-host-{name}-{}-{}", std::process::id(), random_hex(3)));
+    let (tx, rx) = mpsc::channel();
+    let tx = Mutex::new(tx);
+    let host = Host::start(&dir.join("host.json"), move |e| {
+        let _ = tx.lock().unwrap().send(e.clone());
+        let Action::Mascot(op) = e.action else { return Ok(json!({})) };
+        match op {
+            MascotOp::Do { name, .. } if name == "juggle" => Ok(json!({ "error": "unknown activity \"juggle\"", "have": ["read", "nap"], "message": "x" })),
+            MascotOp::Do { name, .. } if name == "nap" => {
+                Ok(json!({ "status": "refused", "activity": "nap", "reason": "dnd", "message": "Not now: do not disturb is on." }))
+            }
+            MascotOp::Do { name, for_ms } if name == "busy" => {
+                let _ = for_ms;
+                Err(Refusal::new(503, "busy", "busy"))
+            }
+            MascotOp::Do { name, for_ms } => Ok(json!({ "status": "queued", "activity": name, "forMs": for_ms.unwrap_or(120_000), "message": "Started reading for 5m (after this reply)." })),
+            MascotOp::Stop => Ok(json!({ "status": "nothing", "message": "Not doing anything." })),
+            MascotOp::List => Ok(json!({ "activities": [], "emotes": [], "maxForS": 1800, "playing": null, "message": "" })),
+            MascotOp::Emote { name } => Ok(json!({ "status": "played", "emote": name, "message": "Waved." })),
+        }
+    })
+    .unwrap();
+    (host, dir, rx)
+}
+
+#[test]
+fn mascot_routes_answer_in_the_frozen_shapes() {
+    let (host, dir, rx) = start_mascot("mascot");
+    let auth = format!("Bearer {}", host.user_token());
+    let h = [("Authorization", auth.as_str())];
+    let port = host.port();
+    let post = |path: &str, body: Value| request(port, "POST", path, &h, Some(&body)).unwrap();
+
+    let r = post("/v1/mascot/do", json!({ "name": "read", "forMs": 300_000 }));
+    assert_eq!((r.status, r.body.clone()), (200, json!({ "ok": true, "status": "queued", "activity": "read", "forMs": 300000, "message": "Started reading for 5m (after this reply)." })));
+    assert_eq!(rx.recv_timeout(Duration::from_secs(2)).unwrap().action, Action::Mascot(MascotOp::Do { name: "read".into(), for_ms: Some(300_000) }));
+    let r = post("/v1/mascot/do", json!({ "name": "nap" }));
+    assert_eq!((r.status, r.body["status"].as_str(), r.body["reason"].as_str()), (200, Some("refused"), Some("dnd")), "a refusal is an answer");
+    let r = post("/v1/mascot/do", json!({ "name": "juggle" }));
+    assert_eq!((r.status, r.body.clone()), (400, json!({ "ok": false, "error": "unknown activity \"juggle\"", "have": ["read", "nap"] })));
+    let r = post("/v1/mascot/do", json!({ "name": "busy" }));
+    assert_eq!((r.status, r.body.clone()), (503, json!({ "ok": false, "error": "busy" })));
+    while rx.try_recv().is_ok() {}
+
+    // the host's own checks never reach the app
+    for (body, err) in [
+        (json!({ "name": "read", "forMs": 5000 }), FOR_RANGE),
+        (json!({ "name": "read", "forMs": 1_800_001 }), FOR_RANGE),
+        (json!({ "name": "read", "forMs": "5m" }), FOR_RANGE),
+        (json!({ "name": "Read Book" }), "bad name \"Read Book\" (a-z, 0-9, _ and -, at most 32)"),
+        (json!({}), "name is missing"),
+    ] {
+        let r = post("/v1/mascot/do", body.clone());
+        assert_eq!((r.status, r.body["ok"].clone(), r.body["error"].as_str()), (400, json!(false), Some(err)), "{body}");
+    }
+    assert_eq!(post("/v1/mascot/do", json!({ "name": "x".repeat(33) })).status, 400);
+    assert!(rx.try_recv().is_err());
+    assert_eq!(post("/v1/mascot/do", json!({ "name": "read", "forMs": 10_000 })).status, 200, "10 s is the floor");
+
+    let r = post("/v1/mascot/stop", json!({}));
+    assert_eq!((r.status, r.body["status"].as_str()), (200, Some("nothing")));
+    let r = request(port, "GET", "/v1/mascot/list", &h, None).unwrap();
+    assert_eq!((r.status, r.body["maxForS"].clone(), r.body["playing"].clone()), (200, json!(1800), Value::Null));
+    let r = post("/v1/mascot/emote", json!({ "name": "tea-time" }));
+    assert_eq!((r.status, r.body["emote"].as_str()), (200, Some("tea-time")), "the host checks the shape only");
+    for path in ["/v1/mascot/do", "/v1/mascot/stop", "/v1/mascot/emote"] {
+        assert_eq!(request(port, "GET", path, &h, None).unwrap().status, 405, "{path}");
+    }
+    assert_eq!(request(port, "POST", "/v1/mascot/list", &h, None).unwrap().status, 405);
+    drop(host);
+    let _ = fs::remove_dir_all(dir);
+}
+
+/// The on-time rule of `say` (plan §2): a `do`, `stop` or `emote` from a turn that already ended still
+/// reaches the app, flagged, and its reply carries `afterTurn: true`; `list` and the person's own calls
+/// (no turn) answer as always.
+#[test]
+fn mascot_routes_follow_says_after_turn_rule() {
+    let (host, dir, rx) = start_mascot("mascot-late");
+    let token = host.issue("a1", 1);
+    let auth = format!("Bearer {token}");
+    let user = format!("Bearer {}", host.user_token());
+    let port = host.port();
+    let on = |h: &[(&str, &str)], method: &str, path: &str, body: Option<Value>| request(port, method, path, h, body.as_ref()).unwrap();
+    let calls: [(&str, &str, Option<Value>); 3] = [
+        ("POST", "/v1/mascot/do", Some(json!({ "name": "read" }))),
+        ("POST", "/v1/mascot/stop", Some(json!({}))),
+        ("POST", "/v1/mascot/emote", Some(json!({ "name": "wave" }))),
+    ];
+
+    // on time: no flag, the frozen shape as is
+    host.set_turn("a1", Some("u:t1"));
+    let agent = [("Authorization", auth.as_str()), ("X-Buddy-Turn", "u:t1")];
+    for (m, p, b) in calls.clone() {
+        let r = on(&agent, m, p, b);
+        assert_eq!((r.status, r.body.get("afterTurn")), (200, None), "{p}");
+        assert!(!rx.recv_timeout(Duration::from_secs(2)).unwrap().after_turn);
+    }
+
+    // the turn ended: still acts, flagged
+    host.set_turn("a1", None);
+    for (m, p, b) in calls.clone() {
+        let r = on(&agent, m, p, b);
+        assert_eq!((r.status, r.body["ok"].clone(), r.body["afterTurn"].clone()), (200, json!(true), json!(true)), "{p}");
+        assert!(rx.recv_timeout(Duration::from_secs(2)).unwrap().after_turn, "{p} reached the app");
+    }
+    // a newer turn running: still after its own
+    host.set_turn("a1", Some("u:t2"));
+    assert_eq!(on(&agent, "POST", "/v1/mascot/do", Some(json!({ "name": "read" }))).body["afterTurn"], true);
+    let _ = rx.recv_timeout(Duration::from_secs(2));
+    // list always answers, unflagged
+    let r = on(&agent, "GET", "/v1/mascot/list", None);
+    assert_eq!((r.status, r.body.get("afterTurn")), (200, None));
+    let _ = rx.recv_timeout(Duration::from_secs(2));
+    // a refusal from a late turn is still an answer, flagged
+    let r = on(&agent, "POST", "/v1/mascot/do", Some(json!({ "name": "nap" })));
+    assert_eq!((r.status, r.body["status"].as_str(), r.body["afterTurn"].clone()), (200, Some("refused"), json!(true)));
+    let _ = rx.recv_timeout(Duration::from_secs(2));
+    // the person's terminal: no turn id, never late
+    for (m, p, b) in calls {
+        let r = on(&[("Authorization", user.as_str())], m, p, b);
+        assert_eq!((r.status, r.body.get("afterTurn")), (200, None), "{p}");
+        assert!(!rx.recv_timeout(Duration::from_secs(2)).unwrap().after_turn);
+    }
+    drop(host);
+    let _ = fs::remove_dir_all(dir);
 }

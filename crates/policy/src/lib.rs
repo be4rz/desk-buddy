@@ -130,7 +130,7 @@ const DEFAULT_RULES: [(&str, &str, &str); 11] = [
     ("d3", "ask", "Shell(curl:*)"),
     ("d4", "ask", "Shell(wget:*)"),
     ("d5", "allow", "Shell(buddy say:*)"),
-    ("d6", "allow", "Shell(buddy mascot emote:*)"),
+    ("d6", "allow", "Shell(buddy mascot:*)"),
     ("d7", "allow", "Shell(buddy status:*)"),
     ("d8", "allow", "Shell(buddy remind:*)"),
     ("d9", "allow", "Shell(buddy music:*)"),

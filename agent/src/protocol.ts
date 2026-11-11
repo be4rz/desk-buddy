@@ -57,6 +57,8 @@ export type Init = {
   host: HostApi | null;
   /** Open: later tickets add tunables, each with a default here. */
   settings: Settings;
+  /** The "Your body" prompt section the app renders from the pack; absent → no section. */
+  body?: string;
 };
 
 export type Settings = {

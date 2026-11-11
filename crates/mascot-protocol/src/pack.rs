@@ -158,6 +158,103 @@ pub struct BehaviorDef {
     pub seq: Vec<StepDef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn: Option<Turn>,
+    /// A free behavior whose last step is its way out (like a set's exit clip): an ending
+    /// activity jumps to it instead of stopping at once.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub exit: bool,
+}
+
+/// `pack.json` `"body"` (body-tools, p1): what `buddy mascot do|emote` can ask for.
+/// Optional; a pack without it gets the bear's block (the loader synthesizes it).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct BodyFile {
+    #[serde(default = "default_for_s")]
+    pub default_for_s: u64,
+    #[serde(default = "max_for_s")]
+    pub max_for_s: u64,
+    /// In pack order (the prompt and `list` keep it).
+    #[serde(default, with = "ordered")]
+    pub activities: Vec<(String, BodyEntry)>,
+    #[serde(default, with = "ordered")]
+    pub emotes: Vec<(String, BodyEntry)>,
+}
+
+/// A JSON object as `(key, value)` pairs in document order.
+mod ordered {
+    use serde::de::{Deserializer, MapAccess, Visitor};
+    use serde::ser::{SerializeMap, Serializer};
+
+    use super::BodyEntry;
+
+    pub fn serialize<S: Serializer>(v: &[(String, BodyEntry)], s: S) -> Result<S::Ok, S::Error> {
+        let mut m = s.serialize_map(Some(v.len()))?;
+        for (k, e) in v {
+            m.serialize_entry(k, e)?;
+        }
+        m.end()
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<(String, BodyEntry)>, D::Error> {
+        struct V;
+        impl<'de> Visitor<'de> for V {
+            type Value = Vec<(String, BodyEntry)>;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("an object of entries")
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut a: A) -> Result<Self::Value, A::Error> {
+                let mut out = Vec::new();
+                while let Some((k, v)) = a.next_entry::<String, BodyEntry>()? {
+                    out.push((k, v));
+                }
+                Ok(out)
+            }
+        }
+        d.deserialize_map(V)
+    }
+}
+
+fn default_for_s() -> u64 {
+    120
+}
+
+fn max_for_s() -> u64 {
+    1800
+}
+
+/// One activity or emote. Exactly one action key: `plays` (a behavior fallback chain),
+/// `intent` (emotes only) or `station` (activities only, p3). The loader checks.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct BodyEntry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plays: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub station: Option<String>,
+    /// Activities: `pastime` (default) or `work`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<ActivityKind>,
+    #[serde(default)]
+    pub about: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ActivityKind {
+    #[default]
+    Pastime,
+    Work,
+}
+
+impl ActivityKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ActivityKind::Pastime => "pastime",
+            ActivityKind::Work => "work",
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]

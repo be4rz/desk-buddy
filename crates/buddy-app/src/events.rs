@@ -78,4 +78,29 @@ mod tests {
         let e = parse("{\"at_ms\": 5}").unwrap_err();
         assert!(e.contains("needs event"), "{e}");
     }
+
+    /// AC1: the `#ex-read` fixture through the brain's replay: a `do read` asked mid-turn waits for the
+    /// reply, sits down after it, holds the read loop for its 5m and stands up at the deadline.
+    #[test]
+    fn the_activity_fixture_reads_after_the_reply_for_five_minutes() {
+        use mascot_core::{pack, replay, Intent};
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let items = load(&dir.join("tests/fixtures/activity.jsonl")).unwrap();
+        let p = std::sync::Arc::new(pack::load(&dir.join("../../mascots/bear")).unwrap());
+        let tl = replay::Timeline { timeline_version: replay::TIMELINE_VERSION, seed: 7, duration_ms: 320_000, start_local: "10:00".into(), weekday: 2, items };
+        let log = replay::run(p, &tl);
+        let at = |clip: &str| log.iter().find(|l| l.behavior == "read" && l.clip == clip).map(|l| (l.t_ms, l.intent));
+        let (sit, intent) = at("sit_down").expect("the bear sits down to read");
+        assert_eq!(intent, Intent::Do);
+        assert!((7000..9000).contains(&sit), "after the reply (idle at 7000), not before: {sit}");
+        assert!(log.iter().all(|l| l.t_ms >= 7000 || l.intent != Intent::Do), "nothing of read during the turn");
+        let (read, _) = at("read").expect("then the read loop");
+        assert!(read > sit);
+        // held: nothing changes between the read loop and the deadline
+        assert!(log.iter().filter(|l| l.t_ms > read && l.t_ms < 307_000).all(|l| l.behavior == "read" && l.clip == "read"), "{log:#?}");
+        assert_eq!(at("stand_up"), Some((307_000, Intent::Do)), "deadline 7000 + 300000");
+        let after = log.iter().find(|l| l.t_ms > 307_000 && l.behavior != "read").expect("then idle again");
+        assert_eq!(after.intent, Intent::Idle);
+    }
 }
+

@@ -28,6 +28,31 @@ toy-like.
 - **Errors** are one line: `pack <dir>: <path>: <what>`, e.g.
   `pack /nonexistent: pack.json: not found`.
 
+## The body block (what the agent can do)
+
+`body` in `pack.json` lists what the agent may ask the bear to do. The agent sees it through
+`buddy mascot list` and the prompt's "Your body" section (`mascot_core::body::prompt_text`),
+so a new entry reaches the agent with no code change. Names are semantic; clip names never
+leave the pack.
+
+- **Activities** (`buddy mascot do <name> [--for 5m]`): `plays` is a fallback chain of
+  behaviors (the first available one plays; its looping steps hold until the time is up),
+  `kind` is `pastime` (default) or `work`, `about` is one line for the agent. An activity
+  asked during a reply starts after it, lasts `default_for_s` (120) unless `--for` says
+  otherwise, at most `max_for_s` (1800), and ends early on a click, `buddy mascot stop`, the
+  next turn, or do-not-disturb / quiet hours. A behavior with `"exit": true` plays its last
+  step (e.g. `read`'s `stand_up`) when it is cut short.
+- **Emotes** (`buddy mascot emote <name>`): a one-shot, either `intent` (one of the brain's
+  intents, as `wave`) or `plays` (a behavior chain). What it plays must end by itself: no
+  `"hold"` step, and not `idle`.
+- Rules: a name is 1–32 of `a-z`, `0-9`, `_`, `-`; `about` starts lower-case, has no
+  trailing period and is at most 120 characters; `max_for_s` is at most 1800 (the CLI's 30m); every behavior named must exist and one of
+  a chain must be available. A pack with no `body` gets the default block (`read`, `nap` and
+  the five intent emotes, minus any it can't play). `buddy studio lint` lists each problem
+  as a `bad_body` error, and the app refuses such a pack.
+- Do-not-disturb, quiet hours and the tray's hide refuse `do` and `emote` (status
+  `refused`, nothing plays); `stop` and `list` always answer.
+
 ## Sprite spec (every clip the art round adds)
 
 | Rule | Value |

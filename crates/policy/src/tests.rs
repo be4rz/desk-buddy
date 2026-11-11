@@ -51,7 +51,7 @@ fn read_only_commands_and_buddy_verbs_run_and_others_ask_with_an_always_rule() {
     assert_eq!(p.decide(&fx.at, &bash("c1", "ls -la && buddy status --json")), Decision::Allow);
     assert_eq!(p.decide(&fx.at, &bash("c2", "buddy --help --json")), Decision::Allow);
     // The bear's own verbs run by default (d5–d8).
-    for (i, cmd) in ["buddy say \"Hi!\" --emotion happy", "buddy mascot emote wave", "buddy status", "buddy remind --in 20m stretch"].iter().enumerate() {
+    for (i, cmd) in ["buddy say \"Hi!\" --emotion happy", "buddy mascot emote wave", "buddy mascot do read --for 5m", "buddy mascot stop", "buddy mascot list --json", "buddy status", "buddy remind --in 20m stretch"].iter().enumerate() {
         assert_eq!(p.decide(&fx.at, &bash(&format!("b{i}"), cmd)), Decision::Allow, "{cmd}");
     }
     let d = p.decide(&fx.at, &bash("c3", "make build"));

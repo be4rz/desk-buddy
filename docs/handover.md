@@ -182,7 +182,7 @@ small follow-ups.
 
 **Security and agent**
 - `web_fetch` DNS-rebind TOCTOU: the host name is resolved once to check it and again to fetch it.
-- After taint, the default `buddy say`, `mascot emote`, `status` and `remind` run without a card.
+- After taint, the default `buddy say`, `mascot` (do, stop, list, emote), `status` and `remind` run without a card.
   Outside ask mode, `web_fetch` and `web_search` also run without one, so a query string can carry
   data out.
 - In ask mode, a research helper's own web calls run without a card, and the `task` card doesn't say so.

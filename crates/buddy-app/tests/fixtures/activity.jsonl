@@ -1,0 +1,8 @@
+// Design #ex-read ("I want to watch you read a book"), without the p2 prompt pokes: replay Items, at_ms after launch.
+// The agent asks for read during its turn (queued); the bear sits down after the reply and stands up at 7000 + 300000.
+{"at_ms": 0, "poke": "click"}
+{"at_ms": 3000, "event": {"type": "thinking"}}
+{"at_ms": 4200, "event": {"type": "working", "kind": "buddy", "tool": "buddy mascot do read --for 5m"}}
+{"at_ms": 4210, "event": {"type": "activity", "name": "read", "forMs": 300000}}
+{"at_ms": 5000, "event": {"type": "speaking", "text": "Okay! Grabbing my book."}}
+{"at_ms": 7000, "event": {"type": "idle"}}

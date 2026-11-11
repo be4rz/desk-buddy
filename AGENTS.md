@@ -48,7 +48,9 @@ and talks through speech bubbles, powered by an LLM.
   port, logged `[buddy] widgets at http://127.0.0.1:<wport>`; pages `<id>/index.html?mock=<state>`) + `src/widgets.rs`
   (windows, run-time capabilities: each widget page gets only its own `widget_*` commands, the browser's page none).
   CLI `buddy widget list|open|close`, `buddy music play|pause|next|status`, `buddy browser goto|snapshot|click|type`
-  (browser reads taint the chat; click/type then ask). Music/Spotify control is AppleScript to an already-running app
+  (browser reads taint the chat; click/type then ask). Body tools: `buddy mascot list|do <activity> [--for 5m]|stop|emote <name>`
+  (activities and emotes from the pack's `body` block, `mascots/bear/README.md`; the prompt's "Your body" section is
+  `mascot_core::body::prompt_text`; replay `crates/buddy-app/tests/fixtures/activity.jsonl`). Music/Spotify control is AppleScript to an already-running app
   only (`src/media_os.rs`). Edges: drop the bear on a window's top edge (`settings.edges.enabled`), `src/senses/windows.rs`
   polls window bounds only while it sits (never window names). Debug only: `BUDDY_MEDIA_FAKE=1` (local stand-in for
   YouTube). Real-window browser test: `cargo build -p host --bin buddy && cargo test -p buddy-app --test browser_widget -- --ignored`.

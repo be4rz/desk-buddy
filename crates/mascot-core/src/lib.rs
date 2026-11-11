@@ -3,6 +3,7 @@
 //! deterministic replay driver, plus the sense reflexes. No pixels and no window here.
 
 pub mod attention;
+pub mod body;
 pub mod brain;
 pub mod pack;
 pub mod reflex;
@@ -14,6 +15,6 @@ pub use brain::{
     bubble_ms, AppCategory, Brain, BrainConfig, DndAction, EyeState, FrontApp, Intent, LocalTime, MouthState, NowPlaying, Placement, Poke,
     Senses, Show, TraceLine, Visibility, WinRect,
 };
-pub use pack::{load, ClipMeta, Dir, FaceMeta, Handoff, Ori, PackError, PackMeta, QuietPool, SetMeta, StripRef, Warmup};
+pub use pack::{load, load_report, ActivityMeta, BodyMeta, EmoteAct, EmoteMeta, ClipMeta, Dir, FaceMeta, Handoff, Ori, PackError, PackMeta, QuietPool, SetMeta, StripRef, Warmup};
 pub use reflex::Reflexes;
 pub use rng::Rng;

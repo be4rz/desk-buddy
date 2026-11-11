@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use mascot_protocol::{EmoteName, Emotion, MascotEvent, WorkKind};
+use mascot_protocol::{Emotion, MascotEvent, WorkKind};
 use serde_json::{json, Value};
 
 use super::*;
@@ -411,7 +411,7 @@ fn relabelled_one_shot_turn_is_not_replayed() {
     b.event(&MascotEvent::Error { reason: "x".into(), message: "y".into() }, 0);
     // Let the error start playing (`rest` labelled oops), then nod over it.
     let at = run_until(&mut b, 0, 5000).into_iter().find(|(_, s)| s.intent == Intent::Oops).expect("oops plays").0 + 100;
-    b.event(&MascotEvent::Emote { name: EmoteName::Nod }, at);
+    b.event(&MascotEvent::Emote { name: "nod".into() }, at);
     let shows = run_until(&mut b, at, 30_000);
     assert!(shows.iter().any(|(_, s)| s.intent == Intent::Nod), "relabelled to nod");
     let oops_after_nod = shows.iter().skip_while(|(_, s)| s.intent != Intent::Nod).any(|(_, s)| s.intent == Intent::Oops);
@@ -444,8 +444,8 @@ fn events_map_to_intents() {
         (MascotEvent::Speaking { text: "hi".into() }, Intent::Talk),
         (MascotEvent::Error { reason: "model_error".into(), message: "m".into() }, Intent::Oops),
         (MascotEvent::Say { text: "hi".into(), emotion: Some(Emotion::Happy) }, Intent::Talk),
-        (MascotEvent::Emote { name: EmoteName::Wave }, Intent::Wave),
-        (MascotEvent::Emote { name: EmoteName::Spin }, Intent::Spin),
+        (MascotEvent::Emote { name: "wave".into() }, Intent::Wave),
+        (MascotEvent::Emote { name: "spin".into() }, Intent::Spin),
         (MascotEvent::Reminder { id: "r".into(), text: "tea".into(), set_at_ms: None }, Intent::Remind),
     ];
     for (ev, want) in cases {
@@ -831,9 +831,12 @@ fn quiet_pool_and_warmup_come_from_pack_data() {
         o["behaviors"].as_object_mut().unwrap().remove("nap");
         o["intents"]["sleepy"] = json!(["rest"]);
         o["idle_pool"].as_array_mut().unwrap().retain(|e| e["behavior"] != "nap");
+        // an older pack: no body block either (the bear's own names nap, which is now an error)
+        o.remove("body");
     });
     let no_nap = t.load().unwrap();
     assert_eq!(no_nap.quiet_hours.pool, ["rest"]);
+    assert_eq!(no_nap.body.activity_names(), ["read"], "the default body block drops what the pack can't play");
     assert!(no_nap.quiet_hours.boost.is_empty() && no_nap.warmup.exclude.is_empty());
     let t = TempPack::new("noquiet2");
     // a pack can change them
@@ -991,7 +994,7 @@ fn morning_greets_on_the_first_input_after_six() {
 fn r2_cues_queue_instead_of_overwriting_a_follow_up() {
     let mut b = brain_with(bear(), 2);
     b.event(&MascotEvent::Say { text: "hi".into(), emotion: Some(Emotion::Happy) }, 1000);
-    b.event(&MascotEvent::Emote { name: EmoteName::Wave }, 1100);
+    b.event(&MascotEvent::Emote { name: "wave".into() }, 1100);
     b.event(&MascotEvent::Reminder { id: "r1".into(), text: "stand up".into(), set_at_ms: None }, 1200);
     let shows = run_until(&mut b, 1000, 30_000);
     let mut seq: Vec<Intent> = shows.iter().map(|(_, s)| s.intent).collect();
@@ -1014,7 +1017,7 @@ fn r2_a_new_say_replaces_the_queued_line_and_the_queue_is_bounded() {
     b.event(&MascotEvent::Say { text: "two".into(), emotion: Some(Emotion::Happy) }, 10);
     assert_eq!(b.cue.len(), 1);
     for _ in 0..10 {
-        b.event(&MascotEvent::Emote { name: EmoteName::Nod }, 20);
+        b.event(&MascotEvent::Emote { name: "nod".into() }, 20);
     }
     assert_eq!(b.cue.len(), CUE_CAP);
     assert!(matches!(b.cue[0], Cue::Timed { intent: Intent::Talk, then: Some(Intent::Happy), .. }), "the playing cue is kept");
@@ -1094,7 +1097,7 @@ fn p2_a_full_queue_of_timed_cues_drops_an_incoming_emote_not_a_reminder() {
     }
     assert_eq!(b.cue.len(), CUE_CAP);
     let before = b.cue.clone();
-    b.event(&MascotEvent::Emote { name: EmoteName::Wave }, 10);
+    b.event(&MascotEvent::Emote { name: "wave".into() }, 10);
     assert_eq!(b.cue, before, "the emote is dropped, every reminder kept");
 }
 
@@ -1104,7 +1107,7 @@ fn review_hidden_drops_one_shots_so_a_reminder_is_not_blocked() {
     b.tick(0);
     b.senses(&Senses { screen_share: true, ..sense_at(600, 0) }, 0);
     assert_eq!(b.tick(1).visibility, Visibility::Hidden);
-    b.event(&MascotEvent::Emote { name: EmoteName::Wave }, 10);
+    b.event(&MascotEvent::Emote { name: "wave".into() }, 10);
     assert!(b.cue.is_empty(), "no emote queued while hidden");
     b.event(&MascotEvent::Reminder { id: "r".into(), text: "drink water".into(), set_at_ms: None }, 20);
     assert!(matches!(b.cue.front(), Some(Cue::Timed { until: Some(_), .. })), "its clock runs at once");
@@ -1116,11 +1119,11 @@ fn review_hidden_drops_one_shots_so_a_reminder_is_not_blocked() {
 fn review_a_full_queue_evicts_an_emote_before_a_reminder() {
     let mut b = brain_with(bear(), 7);
     b.tick(0);
-    b.event(&MascotEvent::Emote { name: EmoteName::Wave }, 0);
+    b.event(&MascotEvent::Emote { name: "wave".into() }, 0);
     b.event(&MascotEvent::Reminder { id: "r".into(), text: "stretch".into(), set_at_ms: None }, 1);
-    b.event(&MascotEvent::Emote { name: EmoteName::Nod }, 2);
-    b.event(&MascotEvent::Emote { name: EmoteName::Jump }, 3);
-    b.event(&MascotEvent::Emote { name: EmoteName::Spin }, 4);
+    b.event(&MascotEvent::Emote { name: "nod".into() }, 2);
+    b.event(&MascotEvent::Emote { name: "jump".into() }, 3);
+    b.event(&MascotEvent::Emote { name: "spin".into() }, 4);
     assert_eq!(b.cue.len(), CUE_CAP);
     assert!(b.cue.iter().any(|c| matches!(c, Cue::Timed { intent: Intent::Remind, .. })), "{:?}", b.cue);
 }
@@ -1176,4 +1179,484 @@ impl Rect {
     fn at(p: Placement, r: WinRect) -> WinRect {
         WinRect { x: p.x, y: p.y, ..r }
     }
+}
+
+// ---- body tools (body-tools AC1–AC5) ----
+
+fn do_(b: &mut Brain, name: &str, for_ms: Option<u64>, t: u64) -> BodyReply {
+    b.body(&BodyReq::Do { name: name.into(), for_ms }, t)
+}
+
+/// The first time at or after `from` the bear shows `clip`.
+fn first_clip(shows: &[(u64, Show)], clip: &str) -> Option<u64> {
+    shows.iter().find(|(_, s)| s.clip == clip).map(|(t, _)| *t)
+}
+
+fn activity_notes(b: &Brain) -> Vec<String> {
+    b.trace().iter().filter(|l| l.what == "activity").map(|l| l.note.clone()).collect()
+}
+
+#[test]
+fn a_do_during_a_turn_waits_for_the_reply_then_holds_and_leaves() {
+    let mut b = brain_with(bear(), 11);
+    b.event(&MascotEvent::Thinking, 0);
+    b.event(&MascotEvent::Working { kind: WorkKind::Buddy, tool: "buddy mascot do read --for 5m".into() }, 1000);
+    let r = do_(&mut b, "read", Some(300_000), 1010);
+    assert_eq!((r.status, r.for_ms, r.message.as_str()), (Some(Status::Queued), Some(300_000), "Started reading for 5m (after this reply)."));
+    assert_eq!(b.playing(), Some(Playing { activity: "read".into(), until_ms: None, pending: true }));
+    // the bridge sends Thinking again between tool calls: a pending activity survives it
+    b.event(&MascotEvent::Thinking, 1500);
+    assert!(b.playing().is_some_and(|p| p.pending), "pending survives a mid-turn Thinking");
+    b.event(&MascotEvent::Speaking { text: "Okay! Grabbing my book.".into() }, 2000);
+    let during = run_until(&mut b, 2000, 3999);
+    assert!(during.iter().all(|(_, s)| s.intent != Intent::Do), "nothing plays before the reply ends");
+    b.event(&MascotEvent::Idle, 4000);
+    assert_eq!(b.playing(), Some(Playing { activity: "read".into(), until_ms: Some(304_000), pending: false }));
+    assert_eq!(b.next_wake_ms().min(304_000), b.next_wake_ms(), "the deadline is a wake");
+    let shows = run_until(&mut b, 4000, 320_000);
+    let sit = first_clip(&shows, "sit_down").expect("sits down");
+    assert!(sit < 6000, "starts right after the reply's loop: {sit}");
+    let stand = first_clip(&shows, "stand_up").expect("stands up");
+    assert_eq!(stand, 304_000, "leaves at the deadline");
+    let reading: Vec<_> = shows.iter().filter(|(t, _)| *t > sit + 1500 && *t < stand).collect();
+    assert!(reading.iter().all(|(_, s)| (s.intent, s.behavior.as_str(), s.clip.as_str()) == (Intent::Do, "read", "read")), "holds the read loop");
+    let after = shows.iter().find(|(t, _)| *t > stand + 1500).unwrap();
+    assert_eq!(after.1.intent, Intent::Idle);
+    assert_eq!(b.playing(), None);
+}
+
+#[test]
+fn a_click_ends_a_running_activity_through_its_exit_and_cancels_a_pending_one() {
+    let mut b = brain_with(bear(), 12);
+    let r = do_(&mut b, "read", None, 100);
+    assert_eq!((r.status, r.for_ms), (Some(Status::Started), Some(120_000)), "no turn: starts now, default 2m");
+    let shows = run_until(&mut b, 100, 10_000);
+    assert!(shows.last().is_some_and(|(_, s)| s.clip == "read"), "reading");
+    b.poke(Poke::Click, 10_000);
+    assert_eq!(b.playing(), None);
+    let shows = run_until(&mut b, 10_000, 14_000);
+    assert_eq!(shows[0].1.clip, "stand_up", "the exit clip at once");
+    assert_eq!(shows.last().unwrap().1.intent, Intent::Idle);
+
+    // pending: the click cancels it before the reply ends; nothing plays later
+    b.event(&MascotEvent::Thinking, 20_000);
+    assert_eq!(do_(&mut b, "nap", None, 20_100).status, Some(Status::Queued));
+    b.poke(Poke::Click, 20_200);
+    assert_eq!(b.playing(), None);
+    b.event(&MascotEvent::Idle, 21_000);
+    let shows = run_until(&mut b, 21_000, 30_000);
+    assert!(shows.iter().all(|(_, s)| s.intent != Intent::Do), "the cancelled do never starts");
+    assert!(activity_notes(&b).iter().any(|n| n == "end nap (click)"), "{:?}", activity_notes(&b));
+}
+
+#[test]
+fn the_next_turn_ends_a_started_activity() {
+    let mut b = brain_with(bear(), 13);
+    do_(&mut b, "read", None, 0);
+    run_until(&mut b, 0, 8000);
+    b.event(&MascotEvent::Thinking, 8000);
+    let shows = run_until(&mut b, 8000, 12_000);
+    assert_eq!(shows[0].1.clip, "stand_up");
+    assert!(shows.iter().any(|(_, s)| s.intent == Intent::Think), "then thinks");
+    assert_eq!(b.playing(), None);
+}
+
+/// A turn whose first status is a tool, a card or text (no Thinking first) still ends a started
+/// activity, so it does not sit back down after the turn.
+#[test]
+fn a_turn_that_opens_without_thinking_still_ends_a_started_activity() {
+    let opens = [
+        MascotEvent::Working { kind: mascot_protocol::WorkKind::Files, tool: "read".into() },
+        MascotEvent::AwaitingPermission { call_id: "c1".into(), title: "Allow?".into() },
+        MascotEvent::Speaking { text: "Hi".into() },
+    ];
+    for ev in opens {
+        let mut b = brain_with(bear(), 13);
+        do_(&mut b, "read", None, 0);
+        run_until(&mut b, 0, 8000);
+        assert!(b.playing().is_some_and(|p| !p.pending), "reading: {ev:?}");
+        b.event(&ev, 8000);
+        let shows = run_until(&mut b, 8000, 12_000);
+        assert_eq!(shows[0].1.clip, "stand_up", "{ev:?}");
+        assert_eq!(b.playing(), None, "{ev:?}");
+        b.event(&MascotEvent::Idle, 12_000);
+        let after = run_until(&mut b, 12_000, 20_000);
+        assert!(after.iter().all(|(_, s)| s.intent != Intent::Do), "no sitting back down: {ev:?}");
+    }
+}
+
+/// The bubble dismissed mid-turn (`Settled`) clears the turn's talk, but the agent is still working:
+/// a pending activity waits for the turn's real end (Idle), and its clock starts only then.
+#[test]
+fn a_pending_activity_waits_for_idle_even_when_the_bubble_is_dismissed_mid_turn() {
+    let mut b = brain_with(bear(), 21);
+    b.event(&MascotEvent::Thinking, 1000);
+    let r = do_(&mut b, "read", Some(60_000), 1200);
+    assert_eq!(r.status, Some(Status::Queued));
+    b.event(&MascotEvent::Speaking { text: "Sure!".into() }, 1500);
+    b.event(&MascotEvent::Settled, 2000);
+    run_until(&mut b, 2000, 4000);
+    assert_eq!(b.playing().map(|p| p.pending), Some(true), "still pending after Settled");
+    // a `do` asked now is still queued: the turn is open
+    assert_eq!(do_(&mut b, "read", Some(60_000), 4000).status, Some(Status::Queued));
+    b.event(&MascotEvent::Working { kind: mascot_protocol::WorkKind::Files, tool: "read".into() }, 4500);
+    b.event(&MascotEvent::Idle, 6000);
+    run_until(&mut b, 6000, 6100);
+    assert_eq!(b.playing().and_then(|p| p.until_ms), Some(66_000), "the clock starts at Idle");
+}
+
+#[test]
+fn gates_refuse_do_and_emote_and_nothing_plays() {
+    for (senses, hidden, reason) in [
+        (Senses { dnd_toggle: true, ..Senses::default() }, false, Reason::Dnd),
+        (Senses { quiet_hours: true, dnd_toggle: true, ..Senses::default() }, false, Reason::Dnd),
+        (Senses { quiet_hours: true, ..Senses::default() }, true, Reason::QuietHours),
+        (Senses::default(), true, Reason::Hidden),
+    ] {
+        let mut b = brain_with(bear(), 14);
+        b.senses(&senses, 0);
+        b.set_user_hidden(hidden);
+        let r = do_(&mut b, "read", None, 100);
+        assert_eq!((r.status, r.reason), (Some(Status::Refused), Some(reason)), "{senses:?} hidden={hidden}");
+        assert_eq!(r.message, reason.message());
+        let e = b.body(&BodyReq::Emote { name: "wave".into() }, 100);
+        assert_eq!((e.status, e.reason, e.emote.as_deref()), (Some(Status::Refused), Some(reason), Some("wave")));
+        assert_eq!(b.playing(), None);
+        let shows = run_until(&mut b, 100, 5000);
+        assert!(shows.iter().all(|(_, s)| s.intent != Intent::Do && s.intent != Intent::Wave), "nothing plays");
+        // stop and list always answer
+        assert_eq!(b.body(&BodyReq::Stop, 5000).status, Some(Status::Nothing));
+        assert!(b.body(&BodyReq::List, 5000).activities.is_some());
+    }
+    assert_eq!(Reason::Dnd.message(), "Not now: do not disturb is on.");
+    assert_eq!(Reason::QuietHours.message(), "Not now: it is quiet hours.");
+    assert_eq!(Reason::Hidden.message(), "Not now: the bear is hidden.");
+}
+
+#[test]
+fn unknown_names_are_errors_before_the_gates() {
+    let mut b = brain_with(bear(), 15);
+    b.senses(&Senses { dnd_toggle: true, ..Senses::default() }, 0);
+    let r = do_(&mut b, "juggle", None, 10);
+    assert_eq!(r.error.as_deref(), Some("unknown activity \"juggle\""));
+    assert_eq!(r.have, Some(vec!["read".to_string(), "nap".to_string()]));
+    assert_eq!(r.status, None);
+    let r = b.body(&BodyReq::Emote { name: "explode".into() }, 10);
+    assert_eq!(r.error.as_deref(), Some("unknown emote \"explode\""));
+    assert_eq!(r.have.unwrap(), ["wave", "nod", "shake", "jump", "spin"]);
+}
+
+#[test]
+fn stop_list_and_the_duration_cap() {
+    let mut b = brain_with(bear(), 16);
+    let l = b.body(&BodyReq::List, 0);
+    let v = serde_json::to_value(&l).unwrap();
+    assert_eq!(v["activities"][0], json!({ "name": "read", "about": "sit down and read a book", "kind": "pastime", "defaultForS": 120 }));
+    assert_eq!(v["activities"][1]["name"], "nap");
+    assert_eq!(v["emotes"][0], json!({ "name": "wave", "about": "a happy little wave" }));
+    assert_eq!((v["maxForS"].clone(), v["playing"].clone()), (json!(1800), Value::Null));
+    assert!(l.message.starts_with("Activities:\n  read      sit down and read a book (default 2m)\n  nap       get into bed and sleep (default 2m)\nEmotes:\n  wave      a happy little wave"), "{}", l.message);
+    let r = do_(&mut b, "nap", Some(9_000_000), 10);
+    assert_eq!(r.for_ms, Some(1_800_000), "capped at max_for_s");
+    let v = serde_json::to_value(b.body(&BodyReq::List, 20)).unwrap();
+    assert_eq!(v["playing"], json!({ "activity": "nap", "untilMs": 1_800_010, "pending": false }));
+    let s = b.body(&BodyReq::Stop, 30);
+    assert_eq!((s.status, s.activity.as_deref(), s.message.as_str()), (Some(Status::Stopped), Some("nap"), "Stopped napping."));
+    let s = b.body(&BodyReq::Stop, 40);
+    assert_eq!((s.status, s.message.as_str()), (Some(Status::Nothing), "Not doing anything."));
+    // emote: played, the intent's own behavior
+    let e = b.body(&BodyReq::Emote { name: "wave".into() }, 50);
+    assert_eq!((e.status, e.message.as_str()), (Some(Status::Played), "Waved."));
+}
+
+#[test]
+fn events_route_to_the_body_and_reply_in_the_trace() {
+    let mut b = brain_with(bear(), 17);
+    b.event(&MascotEvent::Activity { name: "read".into(), for_ms: Some(60_000) }, 0);
+    assert_eq!(b.playing().map(|p| p.until_ms), Some(Some(60_000)));
+    b.event(&MascotEvent::ActivityStop, 10);
+    assert_eq!(b.playing(), None);
+    b.event(&MascotEvent::Activity { name: "juggle".into(), for_ms: None }, 20);
+    let notes: Vec<String> = b.trace().iter().filter(|l| l.what == "body").map(|l| l.note.clone()).collect();
+    assert_eq!(notes, ["do -> started", "stop -> stopped", "do -> unknown activity \"juggle\""]);
+}
+
+#[test]
+fn the_idle_pool_waits_for_an_activity_and_a_newer_do_replaces_it() {
+    let mut b = brain_with(bear(), 18);
+    run_until(&mut b, 0, 30_000);
+    assert_eq!(do_(&mut b, "nap", Some(60_000), 30_000).status, Some(Status::Started));
+    let shows = run_until(&mut b, 30_000, 40_000);
+    assert!(shows.iter().any(|(_, s)| s.intent == Intent::Do && s.clip == "get_in_bed"), "the pool waits; nap starts");
+    assert_eq!(do_(&mut b, "read", Some(60_000), 40_000).status, Some(Status::Started));
+    let shows = run_until(&mut b, 40_000, 50_000);
+    let wake = first_clip(&shows, "wake_up").expect("leaves the bed first");
+    let sit = first_clip(&shows, "sit_down").expect("then reads");
+    assert!(wake < sit);
+    assert_eq!(b.playing().unwrap().activity, "read");
+}
+
+#[test]
+fn dnd_or_quiet_hours_end_an_activity() {
+    let mut b = brain_with(bear(), 19);
+    do_(&mut b, "read", None, 0);
+    run_until(&mut b, 0, 8000);
+    b.senses(&Senses { quiet_hours: true, ..Senses::default() }, 8000);
+    assert_eq!(b.playing(), None);
+    let shows = run_until(&mut b, 8000, 12_000);
+    assert_eq!(shows[0].1.clip, "stand_up", "quiet: the exit clip, then idle");
+    assert_eq!(shows.last().unwrap().1.intent, Intent::Idle);
+
+    let mut b = brain_with(bear(), 19);
+    do_(&mut b, "read", None, 0);
+    run_until(&mut b, 0, 8000);
+    b.senses(&Senses { fullscreen: true, ..Senses::default() }, 8000);
+    assert_eq!(b.playing(), None);
+    assert_eq!(b.tick(8000).visibility, Visibility::Hidden);
+}
+
+#[test]
+fn a_say_outranks_the_activity_which_resumes_after_it() {
+    let mut b = brain_with(bear(), 20);
+    do_(&mut b, "read", Some(120_000), 0);
+    run_until(&mut b, 0, 8000);
+    b.event(&MascotEvent::Say { text: "Tea time!".into(), emotion: None }, 8000);
+    let shows = run_until(&mut b, 8000, 20_000);
+    let talk = shows.iter().position(|(_, s)| s.intent == Intent::Talk).expect("talks");
+    assert!(shows[talk..].iter().any(|(_, s)| s.intent == Intent::Do && s.clip == "sit_down"), "reads again after");
+    assert!(b.playing().is_some());
+}
+
+/// A pack with its own body: an activity that plays a free one-shot, and a `plays` emote.
+fn custom_body_pack() -> (TempPack, Arc<PackMeta>) {
+    let t = TempPack::new("body");
+    t.add_anim_c();
+    t.edit(|v| {
+        v["body"] = json!({ "default_for_s": 60, "max_for_s": 600,
+            "activities": { "dance": { "plays": ["happy"], "about": "a happy little dance" } },
+            "emotes": { "tea-time": { "plays": ["celebrate"], "about": "a cheer for tea" } } });
+    });
+    let p = Arc::new(t.load().unwrap_or_else(|e| panic!("{e}")));
+    (t, p)
+}
+
+#[test]
+fn a_pack_can_add_activities_and_emotes_with_odd_names() {
+    let (_t, p) = custom_body_pack();
+    assert_eq!(p.body.activity_names(), ["dance"]);
+    let text = body::prompt_text(&p).unwrap();
+    assert!(text.contains("- dance: a happy little dance\n") && text.contains("- tea-time: a cheer for tea\n"), "{text}");
+    assert!(text.contains("last 1m unless you give --for, at most 10m;"), "{text}");
+    let mut b = brain_with(p, 21);
+    let r = do_(&mut b, "dance", None, 0);
+    assert_eq!((r.status, r.message.as_str()), (Some(Status::Started), "Started dancing for 1m."));
+    // a behavior with no loop restarts until the deadline
+    let shows = run_until(&mut b, 0, 59_000);
+    let starts = b.trace().iter().filter(|l| l.what == "start" && l.behavior == "happy").count();
+    assert!(starts >= 3, "happy restarted {starts} times");
+    assert!(shows.iter().skip(2).all(|(_, s)| s.intent == Intent::Do), "dances throughout");
+    b.body(&BodyReq::Stop, 59_000);
+    let e = b.body(&BodyReq::Emote { name: "tea-time".into() }, 60_000);
+    assert_eq!((e.status, e.message.as_str()), (Some(Status::Played), "Played tea-time."), "an odd name gets a neutral text");
+    let shows = run_until(&mut b, 60_000, 66_000);
+    assert!(shows.iter().any(|(_, s)| (s.intent, s.behavior.as_str()) == (Intent::Emote, "celebrate")), "the gesture plays its behavior");
+    assert_eq!(shows.last().unwrap().1.intent, Intent::Idle);
+    let r = do_(&mut b, "tea-time", None, 66_000);
+    assert_eq!(r.have.unwrap(), ["dance"], "an emote isn't an activity");
+}
+
+#[test]
+fn a_pack_without_body_gets_the_default_block() {
+    let t = TempPack::new("nobody");
+    t.edit(|v| {
+        v.as_object_mut().unwrap().remove("body");
+    });
+    let p = t.load().unwrap();
+    assert_eq!(p.body.activity_names(), ["read", "nap"]);
+    assert_eq!(p.body.emote_names(), ["wave", "nod", "shake", "jump", "spin"]);
+    assert_eq!((p.body.default_for_s, p.body.max_for_s), (120, 1800));
+    assert!(p.body_issues.is_empty());
+    // without the nap behavior the default leaves nap out instead of failing
+    t.edit(|v| {
+        let o = v.as_object_mut().unwrap();
+        o["behaviors"].as_object_mut().unwrap().remove("nap");
+        o["idle_pool"] = json!(o["idle_pool"].as_array().unwrap().iter().filter(|e| e["behavior"] != "nap").cloned().collect::<Vec<_>>());
+        o["intents"]["sleepy"] = json!(["rest"]);
+        o["quiet_hours"] = json!({ "pool": ["rest"] });
+        o["warmup"] = json!({ "duration_s": 180 });
+    });
+    let p = t.load().unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(p.body.activity_names(), ["read"]);
+    // a pack with neither: no prompt section
+    t.edit(|v| v["body"] = json!({}));
+    assert_eq!(body::prompt_text(&t.load().unwrap()), None);
+}
+
+#[test]
+fn bad_body_entries_are_reported_and_refused() {
+    let t = TempPack::new("badbody");
+    t.edit(|v| {
+        v["body"] = json!({ "default_for_s": 4000, "max_for_s": 1800,
+            "activities": {
+                "read": { "plays": ["read"], "about": "sit down and read a book" },
+                "fly": { "plays": ["soar"], "about": "fly away" },
+                "both": { "plays": ["read"], "station": "desk", "about": "two keys" },
+                "Bad Name": { "plays": ["read"], "about": "bad name" },
+                "long": { "plays": ["read"], "about": "x".repeat(121) },
+                "loud": { "plays": ["read"], "about": "Shouty start." },
+                "desk": { "station": "desk", "about": "use the computer" } },
+            "emotes": { "boom": { "intent": "explode", "about": "boom" },
+                "ponder": { "intent": "think", "about": "a long think" },
+                "loaf": { "intent": "idle", "about": "do nothing" },
+                "hum": { "plays": ["hold"], "about": "stand and hum" },
+                "nod": { "intent": "nod", "about": "a small yes" } } });
+    });
+    let p = pack::load_report(&t.dir()).unwrap();
+    assert_eq!(p.body.emote_names(), ["nod"], "an emote that never ends by itself is dropped");
+    assert_eq!(p.body.activity_names(), ["read"], "bad entries are dropped");
+    let all = p.body_issues.join("\n");
+    for want in [
+        "default_for_s 4000 is more than max_for_s 1800",
+        "activities.fly: unknown behavior soar",
+        "activities.both: needs exactly one of plays or station",
+        "activities.Bad Name: a name is 1-32",
+        "activities.long: about is longer than 120",
+        "activities.loud: about starts lower-case",
+        "activities.desk: unknown station desk",
+        "emotes.boom: unknown intent explode",
+        "emotes.ponder: ",
+        "emotes.loaf: intent idle is not a gesture",
+        "emotes.hum: hold holds until stopped",
+    ] {
+        assert!(all.contains(want), "missing {want:?} in\n{all}");
+    }
+    // think resolves to think or hold (whichever the art has): either one holds
+    assert!(all.lines().any(|l| l.starts_with("body: emotes.ponder: ") && l.ends_with("holds until stopped; an emote must end by itself")), "{all}");
+    let e = t.load().unwrap_err().to_string();
+    assert!(e.contains("pack.json: body: default_for_s"), "{e}");
+    // max_for_s is capped at the CLI's 30m, so the prompt never advertises a time the host refuses
+    t.edit(|v| v["body"] = json!({ "max_for_s": 7200, "default_for_s": 3600, "activities": { "read": { "plays": ["read"], "about": "sit down and read a book" } } }));
+    let p = pack::load_report(&t.dir()).unwrap();
+    assert!(p.body_issues.iter().any(|i| i == "body: max_for_s 7200 is more than 1800"), "{:?}", p.body_issues);
+    assert_eq!((p.body.max_for_s, p.body.default_for_s), (1800, 1800));
+}
+
+#[test]
+fn the_bear_prompt_section_is_golden() {
+    let want = "## Your body
+
+You are the bear on the user's screen. When the user asks you to do something
+physical, do it with these commands instead of describing it in words. Never say
+you did something the command's reply says did not happen.
+
+Activities (`buddy mascot do <name> [--for 5m]`; they start after your reply and
+last 2m unless you give --for, at most 30m; `buddy mascot stop` ends one):
+- read: sit down and read a book
+- nap: get into bed and sleep
+
+Emotes (`buddy mascot emote <name>`; a short gesture during your reply):
+- wave: a happy little wave
+- nod: a small yes
+- shake: a sad little no
+- jump: a bounce of joy
+- spin: a twirl
+
+When to use them:
+- If the user asks you to read, nap or do another listed activity, run the command
+  and say so briefly.
+- Use at most one emote per reply, only when it matches the mood. Most short
+  replies need none.
+- If a reply says \"refused\" (do not disturb or quiet hours), tell the user you
+  cannot right now; do not pretend.
+- `buddy mascot list` shows this list.
+";
+    assert_eq!(body::prompt_text(&bear()).unwrap(), want);
+}
+
+/// AC5: the `#priority` table, row by row (DND/quiet > click > agent > automatic).
+#[test]
+fn the_priority_table() {
+    let reading = |seed| {
+        let mut b = brain_with(bear(), seed);
+        do_(&mut b, "read", None, 0);
+        run_until(&mut b, 0, 8000);
+        assert_eq!(b.tick(8000).clip, "read");
+        b
+    };
+    // read | click → stand_up exit, then idle (p1)
+    let mut b = reading(30);
+    b.poke(Poke::Click, 8000);
+    let s = run_until(&mut b, 8000, 12_000);
+    assert_eq!((s[0].1.clip.as_str(), s.last().unwrap().1.intent), ("stand_up", Intent::Idle));
+    // activity | DND (Hide) → hidden, activity gone; quiet → exit, idle (dnd_or_quiet_hours_end_an_activity)
+    let mut b = reading(31);
+    b.senses(&Senses { dnd_toggle: true, ..Senses::default() }, 8000);
+    assert_eq!((b.tick(8000).visibility, b.playing()), (Visibility::Hidden, None));
+    // DND / quiet | do / emote → refused, nothing plays (gates_refuse_do_and_emote_and_nothing_plays)
+    assert_eq!(do_(&mut b, "read", None, 8100).status, Some(Status::Refused));
+    // quiet hours | click → nothing to cancel, no error (listen is p2)
+    let mut b = brain_with(bear(), 32);
+    b.senses(&Senses { quiet_hours: true, ..Senses::default() }, 0);
+    b.poke(Poke::Click, 100);
+    assert_eq!(b.playing(), None);
+    // DND-Still | click → no clip change
+    let mut b = Brain::new(bear(), BrainConfig { seed: 33, temperament: None, dnd_action: DndAction::Still }, 0);
+    b.senses(&Senses { dnd_toggle: true, ..Senses::default() }, 0);
+    let before = b.tick(100);
+    b.poke(Poke::Click, 200);
+    let after = b.tick(300);
+    assert_eq!((after.clip, after.frame, after.visibility), (before.clip, before.frame, Visibility::Still));
+    // a turn (listen in p2) | do read → queued, starts on Idle
+    let mut b = brain_with(bear(), 34);
+    b.event(&MascotEvent::Thinking, 0);
+    assert_eq!(do_(&mut b, "read", None, 100).status, Some(Status::Queued));
+    b.event(&MascotEvent::Idle, 2000);
+    assert!(run_until(&mut b, 2000, 6000).iter().any(|(_, s)| s.intent == Intent::Do));
+    // idle pool | do read → started, the pool waits
+    let mut b = brain_with(bear(), 35);
+    run_until(&mut b, 0, 20_000);
+    assert_eq!(do_(&mut b, "read", None, 20_000).status, Some(Status::Started));
+    // activity | next turn's Thinking → exit step, then think
+    let mut b = reading(36);
+    b.event(&MascotEvent::Thinking, 8000);
+    let s = run_until(&mut b, 8000, 12_000);
+    assert_eq!(s[0].1.clip, "stand_up");
+    assert_eq!(s.last().unwrap().1.intent, Intent::Think);
+    // both orders: DND first, then the agent's do → refused; do first, then DND → ended
+    let mut b = brain_with(bear(), 37);
+    do_(&mut b, "nap", None, 0);
+    b.senses(&Senses { screen_share: true, ..Senses::default() }, 10);
+    assert_eq!(b.playing(), None);
+    // reflexes stay quiet while an activity runs
+    let mut b = reading(38);
+    for i in 0..20 {
+        b.senses(&Senses { user_idle_ms: 600_000, ..sense_at(600, 0) }, 8000 + i * 1000);
+    }
+    assert!(b.trace().iter().all(|l| l.what != "reflex" || l.note.contains("late")), "no reflex during an activity");
+}
+
+/// A cue queue full of timed cues drops a new emote, so the reply must say it did not happen.
+#[test]
+fn an_emote_the_full_queue_drops_is_refused_not_played() {
+    let mut b = brain_with(bear(), 22);
+    for i in 0..4 {
+        b.event(&MascotEvent::Reminder { id: format!("r{i}"), text: "stand up".into(), set_at_ms: None }, 0);
+    }
+    let e = b.body(&BodyReq::Emote { name: "wave".into() }, 10);
+    assert_eq!((e.status, e.reason), (Some(Status::Refused), Some(Reason::Busy)));
+    assert_eq!(e.message, "Not now: the bear is busy.");
+}
+
+/// The plain `list` text names what plays now and how long is left, or that it waits for the reply.
+#[test]
+fn list_text_says_what_plays_now() {
+    let mut b = brain_with(bear(), 23);
+    assert!(!b.body(&BodyReq::List, 0).message.contains("Now:"));
+    b.event(&MascotEvent::Thinking, 100);
+    do_(&mut b, "read", Some(300_000), 200);
+    assert!(b.body(&BodyReq::List, 300).message.starts_with("Now: read (after the reply)\n"));
+    b.event(&MascotEvent::Idle, 1000);
+    run_until(&mut b, 1000, 1100);
+    let m = b.body(&BodyReq::List, 61_000).message;
+    assert!(m.starts_with("Now: read (4m left)\n"), "{m}");
 }

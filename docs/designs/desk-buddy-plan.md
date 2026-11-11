@@ -516,7 +516,7 @@ animation plugs into it.
 
 | # | Step | Status | Builds on |
 |---|---|---|---|
-| A1 | **Body tools + system prompt** (code only) | ⬜ next | p3 harness |
+| A1 | **Body tools + system prompt** (code only) | ✅ built (`buddy mascot do\|stop\|list\|emote`, pack `body` block) | p3 harness |
 | A2 | **Listen:** face the user on click | ⬜ | A1 |
 | A3 | **Working animations** for long turns | ⬜ | A1, A2 |
 | A4 | **Idle life:** fidgets and postures | ⬜ | A2's turn-in-place clip |

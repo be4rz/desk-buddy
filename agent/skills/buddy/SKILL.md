@@ -1,6 +1,6 @@
 ---
 name: buddy
-description: Drive desk-buddy's body and keep reminders with the `buddy` command (say, emote, remind, status).
+description: Drive desk-buddy's body and keep reminders with the `buddy` command (say, mascot, remind, status).
 ---
 
 # buddy
@@ -12,7 +12,10 @@ needs; never print or copy them.
 
 - `buddy say "<text>"` shows a speech bubble. Keep it to one or two short sentences.
   Add `--emotion <e>` to set the bear's face (`buddy --help --json` lists the emotions).
-- `buddy mascot emote <name>` plays an emote, such as a wave (`buddy --help --json` lists them).
+- `buddy mascot do <activity> [--for 5m]` does something physical (read a book, take a nap) after your reply;
+  `buddy mascot stop` ends it. `buddy mascot emote <name>` plays a short gesture, such as a wave.
+  `buddy mascot list` shows the activities and emotes this bear has. A reply that starts with "Not now" (status
+  "refused" in `--json`) means it did not happen: say so instead of pretending.
 - `buddy status` checks the connection.
 
 Your answer already streams into the bear's speech bubble as plain text (no Markdown), so don't repeat it with

@@ -1,6 +1,9 @@
 //! `buddy`: the agent's (and the person's) way to make the mascot act.
 //!
 //!   buddy say <text…> [--emotion <e>]   speak in a bubble
+//!   buddy mascot list [--json]           the mascot's activities and emotes
+//!   buddy mascot do <activity> [--for <dur>]  do one after this reply (10s to 30m)
+//!   buddy mascot stop                    end the running activity
 //!   buddy mascot emote <name>            play an emote
 //!   buddy remind --in <dur> <text…>      remind later (90s, 20m, 1h30m, 2d)
 //!   buddy remind --at HH:MM <text…>      remind at the next HH:MM, local time
@@ -18,13 +21,14 @@
 //! which the agent's commands get; from a terminal it reads the port file
 //! (`BUDDY_HOST_FILE`, else `$BUDDY_HOME/host.json`, else `~/.desk-buddy/host.json`);
 //! with the app gone (no file, or nothing listening) it says "desk-buddy isn't running". Exit codes: 0 done,
-//! 1 refused or unreachable, 2 usage.
+//! 1 refused or unreachable, 2 usage. `buddy mascot …`: 0 answered (a refusal is an answer: its
+//! message says why), 1 unreachable, busy or error, 2 usage (an unknown name lists the known ones).
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use host::client::{request, Reply};
-use host::{local_hhmm, parse_duration, parse_hhmm, PortFile, EMOTES, EMOTIONS, MAX_REMIND_MS};
+use host::{local_hhmm, parse_duration, parse_hhmm, PortFile, EMOTIONS, FOR_RANGE, MAX_FOR_MS, MAX_REMIND_MS, MIN_FOR_MS};
 use serde_json::{json, Value};
 use widgets::manifest::ActionSpec;
 
@@ -34,7 +38,10 @@ fn help() -> Value {
         "about": "Make the desk buddy act. Commands that change what the person sees ask for approval unless allowed.",
         "commands": [
             { "usage": "buddy say <text…> [--emotion <e>]", "about": "Speak in a speech bubble. Keep it short.", "emotions": EMOTIONS, "readOnly": false },
-            { "usage": "buddy mascot emote <name>", "about": "Play an emote.", "emotes": EMOTES, "readOnly": false },
+            { "usage": "buddy mascot list [--json]", "about": "The activities and emotes the mascot has, and what it is doing now.", "readOnly": true },
+            { "usage": "buddy mascot do <activity> [--for <dur>]", "about": "Do an activity (like read or nap) after this reply, for --for (10s to 30m; default 2m). Prints whether it started, queued or was refused.", "readOnly": false },
+            { "usage": "buddy mascot stop", "about": "End the running activity.", "readOnly": false },
+            { "usage": "buddy mascot emote <name>", "about": "Play a short gesture during the reply.", "readOnly": false },
             { "usage": "buddy remind --in <dur> <text…>", "about": "Remind the person later: the bear says the text then. dur is like 90s, 20m, 1h30m or 2d (10 s to 7 days). Prints the reminder's id.", "readOnly": false },
             { "usage": "buddy remind --at HH:MM <text…>", "about": "Remind at the next HH:MM, local time (today, else tomorrow).", "readOnly": false },
             { "usage": "buddy remind list [--json]", "about": "The reminders waiting, soonest first.", "readOnly": true },
@@ -46,7 +53,82 @@ fn help() -> Value {
             { "usage": "buddy status [--json]", "about": "Check the connection.", "readOnly": true },
             { "usage": "buddy --help [--json]", "about": "This list.", "readOnly": true },
         ],
+        "mascot": "run `buddy mascot list` for activities and emotes",
     })
+}
+
+/// `buddy mascot …`'s replies (design `#cli`): the reply's message (or the reply with `--json`).
+fn mascot_finish(r: Result<Reply, String>, json_out: bool) -> ExitCode {
+    let r = match r {
+        Err(e) => {
+            eprintln!("buddy: {e}");
+            return ExitCode::from(1);
+        }
+        Ok(r) => r,
+    };
+    if json_out {
+        println!("{}", r.body);
+    }
+    if r.status == 200 {
+        if !json_out {
+            let late = if r.body["afterTurn"] == true { " (after its turn ended)" } else { "" };
+            println!("{}{late}", r.body["message"].as_str().unwrap_or("done"));
+        }
+        return ExitCode::SUCCESS;
+    }
+    // the mascot routes' error is a string; other routes' an object
+    let err = r.body["error"].as_str().or(r.body["error"]["message"].as_str()).unwrap_or("refused").to_string();
+    if !json_out {
+        match r.body["have"].as_array() {
+            Some(have) => {
+                let names: Vec<&str> = have.iter().filter_map(Value::as_str).collect();
+                eprintln!("buddy: {err} (have: {})", names.join(", "));
+            }
+            None if r.status == 400 => eprintln!("buddy: {err}"),
+            None => eprintln!("buddy: {err} (HTTP {})", r.status),
+        }
+    }
+    ExitCode::from(if r.status == 400 { 2 } else { 1 })
+}
+
+fn mascot_usage(msg: &str) -> ExitCode {
+    eprintln!("buddy: {msg}");
+    ExitCode::from(2)
+}
+
+/// `buddy mascot …`.
+fn mascot(rest: &[&str], json_out: bool) -> ExitCode {
+    match rest {
+        ["list" | "ls"] => mascot_finish(call("GET", "/v1/mascot/list", None), json_out),
+        ["stop"] => mascot_finish(call("POST", "/v1/mascot/stop", Some(json!({}))), json_out),
+        ["emote", name] => mascot_finish(call("POST", "/v1/mascot/emote", Some(json!({ "name": name }))), json_out),
+        ["do", args @ ..] => {
+            let (mut name, mut dur) = (None, None);
+            let mut it = args.iter();
+            while let Some(w) = it.next() {
+                match *w {
+                    "--for" => match it.next() {
+                        Some(v) => dur = Some(v.to_string()),
+                        None => return mascot_usage("--for needs a value like 5m"),
+                    },
+                    w if w.starts_with("--for=") => dur = Some(w["--for=".len()..].to_string()),
+                    w if name.is_none() && !w.starts_with("--") => name = Some(w.to_string()),
+                    w => return mascot_usage(&format!("unexpected “{w}”: buddy mascot do <activity> [--for <dur>]")),
+                }
+            }
+            let Some(name) = name else { return mascot_usage("do what? buddy mascot do <activity> [--for <dur>] (buddy mascot list)") };
+            let mut body = json!({ "name": name });
+            if let Some(d) = dur {
+                match parse_duration(&d) {
+                    Some(ms) if (MIN_FOR_MS..=MAX_FOR_MS).contains(&ms) => body["forMs"] = json!(ms),
+                    Some(_) => return mascot_usage(FOR_RANGE),
+                    None => return mascot_usage(&format!("“{d}” isn’t a duration like 90s, 5m or 1h30m")),
+                }
+            }
+            mascot_finish(call("POST", "/v1/mascot/do", Some(body)), json_out)
+        }
+        _ => mascot_usage("buddy mascot list | do <activity> [--for <dur>] | stop | emote <name>"),
+    }
 }
 
 fn usage(msg: &str) -> ExitCode {
@@ -357,8 +439,7 @@ fn main() -> ExitCode {
             }
             finish(call("POST", "/v1/say", Some(body)), json_out, "said")
         }
-        ["mascot", "emote", name] => finish(call("POST", "/v1/mascot/emote", Some(json!({ "name": name }))), json_out, "emoted"),
-        ["mascot", ..] => usage("buddy mascot emote <name>"),
+        ["mascot", rest @ ..] => mascot(rest, json_out),
         ["remind", rest @ ..] => remind(rest, json_out),
         ["widget", rest @ ..] => widget(rest, json_out),
         [other, rest @ ..] => widget_action(other, rest, json_out),

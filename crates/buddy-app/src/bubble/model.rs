@@ -603,7 +603,7 @@ impl Bubble {
                 self.show(m)
             }
             // the brain's alone (say lines come through `say`, with who said them)
-            MascotEvent::Say { .. } | MascotEvent::Emote { .. } | MascotEvent::Settled => Out::Keep,
+            MascotEvent::Say { .. } | MascotEvent::Emote { .. } | MascotEvent::Activity { .. } | MascotEvent::ActivityStop | MascotEvent::Settled => Out::Keep,
         }
     }
 

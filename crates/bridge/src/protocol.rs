@@ -70,6 +70,9 @@ pub struct Init {
     pub host: Option<HostApi>,
     /// Open: `stepLimit`, `shutdownMs`, `decideMs`, `maxRetries`, `retryDelayMs`, `lastExit`.
     pub settings: Value,
+    /// The "Your body" prompt section the pack's body block renders to (`mascot_core::body::prompt_text`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
 }
 
 pub fn platform() -> &'static str {
@@ -187,5 +190,28 @@ mod tests {
         for bad in ["u:nope", "u:0F8FAD5B-D9CB-469F-A165-70867728950E", "answer:v1", "job:j-1", "continue:", "other:1", "plain", "s:nope", "s:"] {
             assert_eq!(request_source(bad), None, "{bad}");
         }
+    }
+
+    /// `Init.body` (the pack's "Your body" section) is sent as `body`, and left out when there is none.
+    #[test]
+    fn init_carries_the_body_section_only_when_set() {
+        let init = |body: Option<&str>| Init {
+            t: "init",
+            v: 1,
+            agent_id: "main".into(),
+            work_dir: "/w".into(),
+            storage_path: "/s".into(),
+            skills_dir: "/k".into(),
+            model: None,
+            providers: vec![],
+            shell_env: BTreeMap::new(),
+            shell_path: "/bin/bash".into(),
+            platform: "macos",
+            host: None,
+            settings: serde_json::json!({}),
+            body: body.map(str::to_string),
+        };
+        assert_eq!(serde_json::to_value(init(Some("## Your body\n…"))).unwrap()["body"], "## Your body\n…");
+        assert!(serde_json::to_value(init(None)).unwrap().get("body").is_none());
     }
 }

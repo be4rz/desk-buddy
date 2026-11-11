@@ -6,7 +6,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use mascot_protocol::pack::{
-    BehaviorDef, Capabilities, FaceFile, Memory, PackFile, PoolEntry, PropsFile, SourceKind, StageAFile, StageBFile, Temperament,
+    ActivityKind, BehaviorDef, BodyEntry, BodyFile, Capabilities, FaceFile, Memory, PackFile, PoolEntry, PropsFile, SourceKind, StageAFile, StageBFile, Temperament,
     Timers, PACK_VERSION,
 };
 use serde::de::DeserializeOwned;
@@ -87,7 +87,80 @@ pub struct PackMeta {
     pub quiet_hours: QuietPool,
     /// Behaviors left out of the pool just after start (additive to §3.3).
     pub warmup: Warmup,
+    /// What `buddy mascot do|emote` can ask for (body-tools, p1).
+    pub body: BodyMeta,
+    /// Problems in `pack.json`'s `body` block; their entries are dropped. `load` refuses a pack
+    /// with any, `load_report` keeps them for `buddy studio lint`.
+    pub body_issues: Vec<String>,
 }
+
+/// The pack's body: activities (`buddy mascot do`) and emotes (`buddy mascot emote`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct BodyMeta {
+    pub default_for_s: u64,
+    pub max_for_s: u64,
+    /// In pack order.
+    pub activities: Vec<(String, ActivityMeta)>,
+    pub emotes: Vec<(String, EmoteMeta)>,
+}
+
+impl BodyMeta {
+    pub fn activity(&self, name: &str) -> Option<&ActivityMeta> {
+        self.activities.iter().find(|(n, _)| n == name).map(|(_, a)| a)
+    }
+
+    pub fn emote(&self, name: &str) -> Option<&EmoteMeta> {
+        self.emotes.iter().find(|(n, _)| n == name).map(|(_, e)| e)
+    }
+
+    pub fn activity_names(&self) -> Vec<String> {
+        self.activities.iter().map(|(n, _)| n.clone()).collect()
+    }
+
+    pub fn emote_names(&self) -> Vec<String> {
+        self.emotes.iter().map(|(n, _)| n.clone()).collect()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ActivityMeta {
+    /// Behavior fallback chain: the first available one plays.
+    pub plays: Vec<String>,
+    pub kind: ActivityKind,
+    pub about: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EmoteMeta {
+    pub act: EmoteAct,
+    pub about: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum EmoteAct {
+    /// A pack intent (its `intents` chain plays).
+    Intent(Intent),
+    /// A behavior fallback chain.
+    Plays(Vec<String>),
+}
+
+/// The `body` a pack without one gets (design `#pack-body`), as JSON.
+pub const DEFAULT_BODY: &str = r#"{"default_for_s":120,"max_for_s":1800,
+ "activities":{"read":{"plays":["read"],"kind":"pastime","about":"sit down and read a book"},
+               "nap":{"plays":["nap"],"kind":"pastime","about":"get into bed and sleep"}},
+ "emotes":{"wave":{"intent":"wave","about":"a happy little wave"},"nod":{"intent":"nod","about":"a small yes"},
+           "shake":{"intent":"shake","about":"a sad little no"},"jump":{"intent":"jump","about":"a bounce of joy"},
+           "spin":{"intent":"spin","about":"a twirl"}}}"#;
+
+/// An activity or emote name: `[a-z0-9_-]{1,32}` (the host checks the same shape).
+pub fn body_name_ok(name: &str) -> bool {
+    (1..=32).contains(&name.len()) && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
+}
+
+/// The longest `max_for_s` (30m, the CLI's `--for` limit).
+pub const MAX_FOR_S: u64 = 1800;
+/// The longest `about` text.
+pub const MAX_ABOUT: usize = 120;
 
 /// `pack.json` `"quiet_hours": {"pool": [...], "boost": {behavior: ×}}`: in quiet
 /// hours the idle pool is `pool` and each `boost` entry's weight is multiplied.
@@ -129,6 +202,8 @@ struct Extras {
     quiet_hours: Option<QuietPool>,
     #[serde(default)]
     warmup: Option<Warmup>,
+    #[serde(default)]
+    body: Option<BodyFile>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -264,6 +339,11 @@ impl PackMeta {
             .unwrap_or("rest")
     }
 
+    /// The first available behavior of a fallback chain.
+    pub fn first_available<'a>(&self, chain: &'a [String]) -> Option<&'a str> {
+        chain.iter().find(|b| self.available(b)).map(String::as_str)
+    }
+
     /// Every clip it names exists (free clips in at least `S`, set clips in
     /// both orientations, in its set) and its set exists.
     pub fn available(&self, behavior: &str) -> bool {
@@ -282,8 +362,19 @@ impl PackMeta {
     }
 }
 
-/// Loads and validates the pack in `dir` (`dir/pack.json`).
+/// Loads and validates the pack in `dir` (`dir/pack.json`). A problem in the `body` block
+/// is an error too (the first one).
 pub fn load(dir: &Path) -> Result<PackMeta, PackError> {
+    let meta = load_report(dir)?;
+    match meta.body_issues.first() {
+        Some(i) => Err(PackError::Invalid { dir: dir.to_path_buf(), path: "pack.json".into(), msg: i.clone() }),
+        None => Ok(meta),
+    }
+}
+
+/// `load`, except that `body` problems are kept in `body_issues` (their entries dropped)
+/// instead of failing: for the studio (lint reports them; render, audit and the window still show the art).
+pub fn load_report(dir: &Path) -> Result<PackMeta, PackError> {
     Loader { dir: dir.to_path_buf() }.load()
 }
 
@@ -398,6 +489,8 @@ impl Loader {
             capabilities: file.capabilities.clone(),
             quiet_hours: QuietPool::default(),
             warmup: Warmup::default(),
+            body: BodyMeta { default_for_s: 120, max_for_s: 1800, activities: Vec::new(), emotes: Vec::new() },
+            body_issues: Vec::new(),
         };
         // the built-in defaults name only what this pack defines (a pack without
         // nap still loads); values the pack writes itself are checked strictly
@@ -414,6 +507,15 @@ impl Loader {
             w
         });
         self.check_behaviors(&file, &mut meta)?;
+        match extras.body {
+            Some(b) => check_body(b, &mut meta),
+            None => {
+                // the built-in block, without what this pack can't play (like quiet_hours)
+                let b: BodyFile = serde_json::from_str(DEFAULT_BODY).expect("DEFAULT_BODY parses");
+                check_body(b, &mut meta);
+                meta.body_issues.clear();
+            }
+        }
         Ok(meta)
     }
 
@@ -660,4 +762,132 @@ impl Loader {
         }
         Ok(())
     }
+}
+
+/// Validates `b` into `meta.body`; each bad entry is dropped with an issue.
+fn check_body(b: BodyFile, meta: &mut PackMeta) {
+    let mut issues = Vec::new();
+    let mut body = BodyMeta { default_for_s: b.default_for_s, max_for_s: b.max_for_s, activities: Vec::new(), emotes: Vec::new() };
+    if b.default_for_s > b.max_for_s {
+        issues.push(format!("body: default_for_s {} is more than max_for_s {}", b.default_for_s, b.max_for_s));
+        body.default_for_s = b.max_for_s;
+    }
+    if b.max_for_s == 0 {
+        issues.push("body: max_for_s must be more than 0".into());
+    }
+    // `buddy mascot do --for` takes at most 30m (design #cli): a longer cap would be advertised but refused
+    if b.max_for_s > MAX_FOR_S {
+        issues.push(format!("body: max_for_s {} is more than {MAX_FOR_S}", b.max_for_s));
+        body.max_for_s = MAX_FOR_S;
+        body.default_for_s = body.default_for_s.min(MAX_FOR_S);
+    }
+    let common = |kind: &str, name: &str, e: &BodyEntry, issues: &mut Vec<String>| -> bool {
+        let at = format!("body: {kind}.{name}");
+        let list = if kind == "activities" { &b.activities } else { &b.emotes };
+        if list.iter().filter(|(n, _)| n == name).count() > 1 {
+            issues.push(format!("{at}: defined twice"));
+            return false;
+        }
+        if !body_name_ok(name) {
+            issues.push(format!("{at}: a name is 1-32 of a-z, 0-9, _ and -"));
+            return false;
+        }
+        let keys = [e.plays.is_some(), e.intent.is_some(), e.station.is_some()].iter().filter(|k| **k).count();
+        if keys != 1 {
+            let want = if kind == "activities" { "plays or station" } else { "plays or intent" };
+            issues.push(format!("{at}: needs exactly one of {want}"));
+            return false;
+        }
+        let about = e.about.trim();
+        if about.is_empty() {
+            issues.push(format!("{at}: about is empty"));
+            return false;
+        }
+        if about.chars().count() > MAX_ABOUT {
+            issues.push(format!("{at}: about is longer than {MAX_ABOUT} characters"));
+            return false;
+        }
+        if about.chars().next().is_some_and(char::is_uppercase) || about.ends_with('.') {
+            issues.push(format!("{at}: about starts lower-case and has no trailing period"));
+            return false;
+        }
+        true
+    };
+    let chain = |at: &str, plays: &[String], meta: &PackMeta, issues: &mut Vec<String>| -> bool {
+        if let Some(x) = plays.iter().find(|x| !meta.behaviors.contains_key(*x)) {
+            issues.push(format!("{at}: unknown behavior {x}"));
+            return false;
+        }
+        if meta.first_available(plays).is_none() {
+            issues.push(format!("{at}: no available behavior in [{}]", plays.join(", ")));
+            return false;
+        }
+        true
+    };
+    for (name, e) in &b.activities {
+        if !common("activities", name, e, &mut issues) {
+            continue;
+        }
+        let at = format!("body: activities.{name}");
+        if e.intent.is_some() {
+            issues.push(format!("{at}: an activity has plays or station, not intent"));
+            continue;
+        }
+        if let Some(st) = &e.station {
+            // stations arrive with the room (p3); none exist yet
+            issues.push(format!("{at}: unknown station {st}"));
+            continue;
+        }
+        let plays = e.plays.clone().unwrap_or_default();
+        if !chain(&at, &plays, meta, &mut issues) {
+            continue;
+        }
+        body.activities.push((name.clone(), ActivityMeta { plays, kind: e.kind.unwrap_or_default(), about: e.about.trim().to_string() }));
+    }
+    for (name, e) in &b.emotes {
+        if !common("emotes", name, e, &mut issues) {
+            continue;
+        }
+        let at = format!("body: emotes.{name}");
+        if e.station.is_some() {
+            issues.push(format!("{at}: an emote has plays or intent, not station"));
+            continue;
+        }
+        if e.kind.is_some() {
+            issues.push(format!("{at}: kind is for activities"));
+            continue;
+        }
+        let act = match (&e.intent, &e.plays) {
+            (Some(i), _) => match Intent::parse(i) {
+                Some(i) => EmoteAct::Intent(i),
+                None => {
+                    issues.push(format!("{at}: unknown intent {i}"));
+                    continue;
+                }
+            },
+            (None, Some(plays)) => {
+                if !chain(&at, plays, meta, &mut issues) {
+                    continue;
+                }
+                EmoteAct::Plays(plays.clone())
+            }
+            (None, None) => continue,
+        };
+        // an emote is a one-shot cue: what it plays must end by itself, or it never leaves the queue
+        let played = match &act {
+            EmoteAct::Intent(Intent::Idle) => {
+                issues.push(format!("{at}: intent idle is not a gesture"));
+                continue;
+            }
+            EmoteAct::Intent(i) => meta.resolve(*i).to_string(),
+            EmoteAct::Plays(plays) => meta.first_available(plays).unwrap_or("rest").to_string(),
+        };
+        if meta.behaviors.get(&played).is_some_and(|d| d.seq.iter().any(|st| st.loops == mascot_protocol::pack::Loops::Hold)) {
+            issues.push(format!("{at}: {played} holds until stopped; an emote must end by itself"));
+            continue;
+        }
+        body.emotes.push((name.clone(), EmoteMeta { act, about: e.about.trim().to_string() }));
+    }
+    meta.body = body;
+    meta.body_issues = issues;
 }

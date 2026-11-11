@@ -90,7 +90,7 @@ fn main() -> ExitCode {
     let host = match Host::start(&root.join("host.json"), move |e| {
         let (kind, detail, reply) = match e.action {
             Action::Say { text, emotion } => ("say", json!({ "text": text, "emotion": emotion }), Ok(json!({}))),
-            Action::Emote { name } => ("emote", json!({ "name": name }), Ok(json!({}))),
+            Action::Mascot(op) => ("mascot", json!({ "op": format!("{op:?}") }), Ok(json!({}))),
             Action::Remind(op) => {
                 let reply = slot2.get().and_then(Weak::upgrade).map_or_else(|| Err(Refusal::no_agent()), |a| a.remind(&op));
                 ("remind", json!({ "op": format!("{op:?}") }), reply)
@@ -124,6 +124,7 @@ fn main() -> ExitCode {
         model: Some(model),
         providers,
         settings: json!({}),
+        body: None,
     };
     let _ = std::fs::create_dir_all(&spec.home);
     let (tx, rx) = mpsc::channel::<MascotEvent>();
@@ -193,7 +194,7 @@ fn drive(agent: &Agent, rx: &mpsc::Receiver<MascotEvent>, yes: bool, reminder: O
             MascotEvent::Thinking | MascotEvent::Working { .. } | MascotEvent::Speaking { .. } => busy = true,
             // One-offs, not a run: they never make the run busy.
             MascotEvent::Reminder { id, .. } if reminder.as_deref() == Some(id.as_str()) => return ExitCode::SUCCESS,
-            MascotEvent::Say { .. } | MascotEvent::Emote { .. } | MascotEvent::Reminder { .. } | MascotEvent::Settled => {}
+            MascotEvent::Say { .. } | MascotEvent::Emote { .. } | MascotEvent::Activity { .. } | MascotEvent::ActivityStop | MascotEvent::Reminder { .. } | MascotEvent::Settled => {}
         }
     }
 }

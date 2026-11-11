@@ -186,8 +186,9 @@ fn run(cmd: &str, rest: &[String]) -> Result<Out, Fail> {
         "lint" => {
             let a = p(&["pack"])?;
             let dir = PathBuf::from(a.req("pack").map_err(Fail::Usage)?);
-            // lint reads the strips itself: a pack whose art can't load is still linted
-            let pack = mascot_core::pack::load(&dir).map_err(Error::from)?;
+            // lint reads the strips itself: a pack whose art can't load is still linted, and a bad
+            // body block is listed (bad_body) rather than refused
+            let pack = mascot_core::pack::load_report(&dir).map_err(Error::from)?;
             let r = lint::lint(&pack);
             let mut line = r.issues.iter().map(|i| format!("{} {} {}{}: {}\n", i.severity, i.code, i.file, i.frame.map(|f| format!(" f{f}")).unwrap_or_default() + &i.x.zip(i.y).map(|(x, y)| format!(" ({x},{y})")).unwrap_or_default(), i.detail)).collect::<String>();
             line += &format!("{} {} files, {} errors, {} warnings", if r.errors == 0 { "ok" } else { "lint:" }, r.files, r.errors, r.warnings);
@@ -203,7 +204,7 @@ fn run(cmd: &str, rest: &[String]) -> Result<Out, Fail> {
             }
             let seed: u64 = a.num("seed", 1).map_err(Fail::Usage)?;
             let dir = PathBuf::from(a.req("pack").map_err(Fail::Usage)?);
-            let pack = std::sync::Arc::new(mascot_core::pack::load(&dir).map_err(Error::from)?);
+            let pack = std::sync::Arc::new(mascot_core::pack::load_report(&dir).map_err(Error::from)?);
             let tl = match a.opt("timeline") {
                 None => audit::quiet(minutes, seed),
                 Some(f) => {
