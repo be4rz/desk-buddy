@@ -506,6 +506,123 @@ because each one builds on the one before it.
 | 14 | **Windows pass:** S1 layered window + S2 busybox-w32 on Windows 11 | ⏳ needs a Windows machine | S1, S2 |
 | 15 | Release profile + distribution (D8) | ⬜ | P2 |
 
+### Aliveness round (added 2026-11-11)
+
+The user's request: the bear mostly stands and walks, which does not read as a
+living mascot. It needs many more animations, and the agent must be able to
+drive its own body. Effort and risk are not a constraint in this round; aim
+for the best result. Do the steps in order: A1 first, because every later
+animation plugs into it.
+
+| # | Step | Status | Builds on |
+|---|---|---|---|
+| A1 | **Body tools + system prompt** (code only) | ⬜ next | p3 harness |
+| A2 | **Listen:** face the user on click | ⬜ | A1 |
+| A3 | **Working animations** for long turns | ⬜ | A1, A2 |
+| A4 | **Idle life:** fidgets and postures | ⬜ | A2's turn-in-place clip |
+| A5 | **Real clips for the borrowed intents** | ⬜ | A1 |
+| A6 | **Desktop reactions, prop activities, rare surprises** | ⬜ | A4 |
+
+**Who decides an animation** (applies to every step):
+
+| Layer | Decides | Covers |
+|---|---|---|
+| Automatic | The brain, no model | Click → listen; waiting → think; tool running → a working animation picked from the tool's `WorkKind`; answer streaming → talk |
+| Agent tools | The agent | What it wants to express or was asked to do ("read a book"), and a specific working animation before a long job |
+| System prompt | Us | Tells the agent it has a body, what it can do and when to use it |
+
+Priority: do-not-disturb and quiet hours > the user's click > the agent's
+choice > the automatic default.
+
+**A1. Body tools + system prompt**
+- Today the agent has only `buddy mascot emote <wave|nod|shake|jump|spin>`
+  (one-shots), so "read a book" gets a text reply and no animation.
+- Add `buddy mascot do <activity> [--for 5m]`, `buddy mascot stop` and
+  `buddy mascot list`.
+- The activity and emote lists come from the pack, so a new animation reaches
+  the agent with no code change. Names are semantic (activity → behavior in
+  the pack); events still never carry clip names (§3).
+- An activity starts after the bear finishes its reply, and holds for its
+  duration or until the user clicks the bear or a new turn starts.
+- Each command replies with what happened ("reading for 5 min", or "can't,
+  do-not-disturb is on"), so the agent never claims an animation that did not
+  play.
+- The agent can chain a work animation with the work in one shell command
+  (`buddy mascot do research && curl …`), so it costs no extra round trip.
+- System prompt section, generated from the pack: you have a body; do physical
+  requests with the tool instead of describing them; the list with one line
+  per entry; match the answer's mood; pick a fitting work animation for long
+  jobs; don't overdo it on short replies.
+- Works with today's `read` and `nap` before any new art exists.
+
+**A2. Listen**
+- Today `Poke::Click` does nothing to the body, and think/talk/ask play in the
+  current facing, so the bear can answer with its back turned.
+- New `listen` state: starts when the prompt opens, holds until the user sends
+  or dismisses it.
+- Art: a `listen` clip per direction with the head turned to the camera (small
+  ear perk or lean-in), with face layers at the turned head's position.
+- From N, NE and NW the head can't reach: the bear first turns its body to the
+  nearest side or front direction, then turns its head.
+- Art: a turn-in-place clip, because direction changes are instant today.
+- This extends D16's "look-at = turning the body" with a rendered head turn
+  for listening only (user request, 2026-11-11). Eyes still don't move within
+  the face.
+- First step with no new art: snap to the nearest front-facing direction on
+  click.
+
+**A3. Working animations**
+- Today every tool call plays `think`; the brain ignores `WorkKind`.
+- First set: a desk with a computer, built like the bed and reading sets:
+  `sit_at_desk → type (loop) → stand_up`.
+- Short turns stay standing: go to the desk only when the turn runs on (about
+  4 s, or a second tool call).
+- Once seated, stay seated through the Thinking/Working alternation until the
+  turn ends.
+- Listen → work: head turns back, think pose, walk and sit.
+- Work → answer: the bear turns its head from the screen to the user and talks
+  from the chair, then stands up after the bubble is dismissed (needs seated
+  `talk` and `ask` clips). An approval card mid-work uses the seated `ask`.
+- Later: other loops per `WorkKind` (papers for files, a telescope for web, …).
+
+**A4. Idle life** (breaks up `rest`, which carries most of the idle weight)
+- Fidgets, 1–3 s, in place: weight shift, ear twitch, head tilt, look up or
+  down, scratch, stretch, yawn, rock on heels, tail wiggle (back views),
+  shake off, sneeze, tummy rub, nod off and jolt awake, unprompted wave, peek
+  at the cursor.
+- Postures: sit on the floor, sit and sway, lie on belly kicking feet, lie on
+  back, curl up for a floor nap, squat to inspect, lean on an edge.
+- Moving: tiptoe, skip, sleepy shuffle, backwards waddle, hop, roll, spin,
+  trip and get up, chase something invisible, slide to a stop.
+
+**A5. Real clips for the borrowed intents**
+- These play another intent's clip today: `wave`, `nod`, `greet`, `stretch`
+  (→ happy); `sad`, `shake` (→ oops); `surprised`, `jump`, `spin`, `dodge`,
+  `remind`.
+- New: shrug, facepalm, thumbs up, clap, point at the bubble, shy hide, laugh,
+  pout, proud chest-puff, confused head-scratch.
+
+**A6. Desktop reactions, props, rare surprises**
+- Reactions: music playing (head bob, foot tap, dance); sitting on a window
+  edge (dangle legs, peer over, doze); being dragged (dangle, squash landing,
+  dizzy); cursor (follow, flinch, giggle when petted); time of day (morning
+  stretch, evening yawns, nightcap in quiet hours); long user idle (tap on the
+  glass, wave, give up and nap); waiting on an approval (foot tap, check
+  watch).
+- Prop activities, long loops like read and nap: tea or cocoa, snack, laptop,
+  notebook, ball, bubbles, plant, knitting, yo-yo, block tower, ice fishing,
+  snowman, sweeping, headphones, umbrella or balloon.
+- Rare, long cooldown: windmill arms, hiccups, find a coin, snowflake on the
+  nose, butterfly on the ear, peekaboo, moonwalk, seasonal hats.
+
+**Art constraints for A2–A6**
+- Paws must not cross the face in S/SE/E/W/SW (`verify_face.py`). Yawn with a
+  paw, eye rub, facepalm and peekaboo need a baked face like walk/run, or a
+  pose with the paws beside the face.
+- Fidgets and gestures fit the 84×123 Stage C frame. Lying down, rolling and
+  props need a wider frame or a set, as Stage B does.
+- Keep the bear cute and toy-like in every clip (ground rules).
+
 ## 8. Open questions
 
 All ten earlier questions are answered (D1–D10). Answered since:
