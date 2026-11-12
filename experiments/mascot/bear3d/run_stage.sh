@@ -71,14 +71,15 @@ else
   BEARM=${KIT% *}; OBJS=${KIT#* }
   for c in $(python3 -c "import json; print(' '.join(json.load(open('$CJ'))['order']))"); do
     YAWS=$(python3 -c "import json,stagekit; print(','.join(str(float(stagekit.YAW[d])) for d in json.load(open('$CJ'))['clips']['$c']['dirs'] or stagekit.DIRS))")
+    CANV=$(python3 -c "import json; c=json.load(open('$CJ'))['clips']['$c']; f=c.get('frame') or [84, 123]; a=c.get('anchor') or [42, 107]; print(f'{f[0]},{f[1]},{a[1]}')")
     if [ "$OBJS" = - ]; then HB=""; else HB="--hide $OBJS"; fi
-    $B -b "$RIG" -P render_anim.py -- --raw "$WK/raw" --tag bear --clip "$c" --canvas 84,123,107 --yaws "$YAWS" $HB 2>&1 \
+    $B -b "$RIG" -P render_anim.py -- --raw "$WK/raw" --tag bear --clip "$c" --canvas "$CANV" --yaws "$YAWS" $HB 2>&1 \
       | grep -E "DONE|Error|Traceback|leaves" || true
     [ -f "$WK/raw/bear_$c/meta.json" ] || [ -f "$WK/px/bear_$c/meta.json" ] || { echo "render failed: bear $c"; exit 1; }
     [ -f "$WK/px/bear_$c/meta.json" ] && [ ! -f "$WK/raw/bear_$c/meta.json" ] || \
       python3 pixelize_set.py anim "$WK/raw/bear_$c" "$WK/px" --module "$MODULE" --depth
     if [ "$OBJS" != - ]; then
-      $B -b "$RIG" -P render_anim.py -- --raw "$WK/raw" --tag obj --clip "$c" --canvas 84,123,107 --yaws "$YAWS" \
+      $B -b "$RIG" -P render_anim.py -- --raw "$WK/raw" --tag obj --clip "$c" --canvas "$CANV" --yaws "$YAWS" \
         --hide "$BEARM" --show "$OBJS" 2>&1 | grep -E "DONE|Error|Traceback|leaves" || true
       [ -f "$WK/raw/obj_$c/meta.json" ] || [ -f "$WK/px/obj_$c/meta.json" ] || { echo "render failed: obj $c"; exit 1; }
       [ -f "$WK/px/obj_$c/meta.json" ] && [ ! -f "$WK/raw/obj_$c/meta.json" ] || \

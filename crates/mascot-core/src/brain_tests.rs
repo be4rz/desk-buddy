@@ -582,6 +582,14 @@ fn no_cooldowns(p: &PackMeta) -> Arc<PackMeta> {
     Arc::new(p)
 }
 
+/// The base weight formula alone: no cooldowns and no `variety` block (its hard rules would
+/// mask the memory penalty and the traits these tests measure).
+fn base_formula(p: &PackMeta) -> Arc<PackMeta> {
+    let mut p = (*no_cooldowns(p)).clone();
+    p.variety = None;
+    Arc::new(p)
+}
+
 fn picks(b: &mut Brain, n: usize) -> Vec<String> {
     (0..n).map(|i| pick_now(b, i as u64 * 1000)).collect()
 }
@@ -606,7 +614,7 @@ fn cooldown_blocks_a_pick() {
 
 #[test]
 fn recent_pick_penalty_lowers_repeats() {
-    let p = no_cooldowns(&bear());
+    let p = base_formula(&bear());
     let repeats = |penalty: f64| {
         let mut q = (*p).clone();
         q.memory.penalty = penalty;
@@ -620,12 +628,15 @@ fn recent_pick_penalty_lowers_repeats() {
 
 #[test]
 fn energy_shifts_wander_and_dash_share() {
-    let p = no_cooldowns(&bear());
+    let p = base_formula(&bear());
+    // the entries energy feeds (wander, dash and the energetic A4 gaits), read from the pack
+    let energetic: Vec<String> = p.idle_pool.iter().filter(|e| e.traits.get("energy").is_some_and(|w| *w > 0.0)).map(|e| e.name().to_string()).collect();
+    assert!(energetic.iter().any(|n| n == "wander") && energetic.iter().any(|n| n == "dash"), "{energetic:?}");
     let share = |energy: f64| {
         let mut b = brain_with(p.clone(), 5);
         b.set_temperament(Temperament { energy, ..p.temperament });
         let v = picks(&mut b, 10_000);
-        v.iter().filter(|x| *x == "wander" || *x == "dash").count() as f64 / v.len() as f64
+        v.iter().filter(|x| energetic.contains(x)).count() as f64 / v.len() as f64
     };
     let (hi, lo) = (share(1.0), share(0.0));
     assert!(lo < 0.02 && hi > lo + 0.2, "energy 1: {hi:.3}, energy 0: {lo:.3}");
@@ -1347,11 +1358,20 @@ fn unknown_names_are_errors_before_the_gates() {
     b.senses(&Senses { dnd_toggle: true, ..Senses::default() }, 0);
     let r = do_(&mut b, "juggle", None, 10);
     assert_eq!(r.error.as_deref(), Some("unknown activity \"juggle\""));
-    assert_eq!(r.have, Some(vec!["read".to_string(), "nap".to_string(), "computer".to_string(), "lean".to_string()]));
+    // `have` lists what can play now (entries waiting for art are left out), in pack order
+    let list = serde_json::to_value(b.body(&BodyReq::List, 10)).unwrap();
+    let names = |k: &str| -> Vec<String> { list[k].as_array().unwrap().iter().map(|a| a["name"].as_str().unwrap().to_string()).collect() };
+    let (acts, emotes) = (names("activities"), names("emotes"));
+    assert!(r.have.as_deref().is_some_and(|h| h.starts_with(&["read", "nap", "computer", "lean"].map(String::from))), "{:?}", r.have);
+    let mut have = r.have.clone().unwrap();
+    have.sort();
+    let mut want = acts.clone();
+    want.sort();
+    assert_eq!(have, want);
     assert_eq!(r.status, None);
     let r = b.body(&BodyReq::Emote { name: "explode".into() }, 10);
     assert_eq!(r.error.as_deref(), Some("unknown emote \"explode\""));
-    assert_eq!(r.have.unwrap(), ["wave", "nod", "shake", "jump", "spin"]);
+    assert_eq!(r.have.unwrap(), emotes);
 }
 
 #[test]
@@ -1361,14 +1381,32 @@ fn stop_list_and_the_duration_cap() {
     let v = serde_json::to_value(&l).unwrap();
     assert_eq!(v["activities"][0], json!({ "name": "read", "about": "sit down and read a book", "kind": "pastime", "defaultForS": 120, "group": "pastime" }));
     assert_eq!(v["activities"][1]["name"], "nap");
-    assert_eq!(v["activities"].as_array().unwrap().len(), 4, "entries waiting for art are left out");
+    // entries waiting for art are left out; the rest are listed (derived from the pack, so new art
+    // in a later phase does not move this count)
+    let p = bear();
+    let waits: std::collections::BTreeSet<String> = p.waiting().into_iter().map(|w| w.name).collect();
+    let listed = |k: &str| -> std::collections::BTreeSet<String> { v[k].as_array().unwrap().iter().map(|a| a["name"].as_str().unwrap().to_string()).collect() };
+    let want = |names: Vec<&String>| -> std::collections::BTreeSet<String> { names.into_iter().filter(|n| !waits.contains(*n)).cloned().collect() };
+    assert_eq!(listed("activities"), want(p.body.activities.iter().map(|(n, _)| n).collect()));
+    assert_eq!(listed("emotes"), want(p.body.emotes.iter().map(|(n, _)| n).collect()));
     assert_eq!(v["emotes"][0], json!({ "name": "wave", "about": "a happy little wave", "group": "gesture" }));
-    assert_eq!(v["emotes"].as_array().unwrap().len(), 5);
     assert_eq!((v["maxForS"].clone(), v["playing"].clone()), (json!(1800), Value::Null));
-    assert_eq!(
-        l.message,
-        "Activities\n  pastime  read      sit down and read a book              (2m default, 30m max)\n  pastime  nap       get into bed and sleep\n  posture  lean      lean on the wall and rest\n  work     computer  sit at the desk and use the computer  starts at once\nEmotes\n  gesture  wave      a happy little wave\n  gesture  nod       a small yes\n  gesture  shake     a sad little no\n  gesture  jump      a bounce of joy\n  gesture  spin      a twirl"
-    );
+    // the text: two headed blocks, one line per listed entry, columns padded to the longest group and
+    // name (the exact list grows as art lands, so the shape is checked, not a golden)
+    let lines: Vec<&str> = l.message.lines().collect();
+    let emotes_at = lines.iter().position(|x| *x == "Emotes").unwrap();
+    assert_eq!(lines[0], "Activities");
+    assert_eq!((emotes_at - 1, lines.len() - emotes_at - 1), (listed("activities").len(), listed("emotes").len()));
+    let col = |x: &str| x.trim_start().find(char::is_whitespace).map(|i| i + x.len() - x.trim_start().len());
+    let name_col = |x: &str| col(x).map(|c| c + x[c..].len() - x[c..].trim_start().len());
+    let at = name_col(lines[1]).unwrap();
+    for x in lines.iter().filter(|x| x.starts_with("  ")) {
+        assert_eq!(name_col(x), Some(at), "{x:?} in\n{}", l.message);
+    }
+    assert_eq!(lines[1].split_whitespace().take(2).collect::<Vec<_>>(), ["pastime", "read"]);
+    assert!(lines[1].ends_with("(2m default, 30m max)"), "{}", lines[1]);
+    assert!(lines.iter().any(|x| x.split_whitespace().collect::<Vec<_>>().join(" ") == "posture lean lean on a toy block and rest"), "{}", l.message);
+    assert!(lines.iter().any(|x| x.trim_start().starts_with("work") && x.ends_with("starts at once")), "{}", l.message);
     let r = do_(&mut b, "nap", Some(9_000_000), 10);
     assert_eq!(r.for_ms, Some(1_800_000), "capped at max_for_s");
     let v = serde_json::to_value(b.body(&BodyReq::List, 20)).unwrap();
@@ -1555,7 +1593,12 @@ others start after your reply. They last 2m unless you give --for, at most 30m.
 `buddy mascot stop` ends one.
 - read: sit down and read a book
 - nap: get into bed and sleep
-- lean: lean on the wall and rest
+- lean: lean on a toy block and rest
+- sit_floor: sit on the floor
+- sit_sway: sit on the floor and sway
+- lie_belly: lie on its tummy and kick its feet
+- lie_back: lie on its back
+- floor_nap: curl up for a nap on the floor
 - computer (work): sit at the desk and use the computer
 
 Gestures (`buddy mascot emote <name>`; a short gesture during your reply):
@@ -1565,8 +1608,11 @@ Gestures (`buddy mascot emote <name>`; a short gesture during your reply):
 - jump: a bounce of joy
 - spin: a twirl
 
+Fidgets: weight_shift, ear_twitch, look_up, look_down, tummy_rub, wave_small, peek, butt_wiggle, rock_heels, head_tilt, scratch, yawn, shake_off, sneeze, nod_off, squat
+Moves: tiptoe, skip, shuffle, back_waddle, hop, roll, trip, chase, slide
+
 When to use them:
-- If the user asks you to read, nap, lean, computer or do another listed activity, run the command
+- If the user asks you to read, nap, lean, sit_floor, sit_sway, lie_belly, lie_back, floor_nap, computer or do another listed activity, run the command
   and say so briefly.
 - Use at most one emote per reply, only when it matches the mood. Most short
   replies need none.

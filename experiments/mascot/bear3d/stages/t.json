@@ -1,0 +1,7 @@
+{
+ "id": "t",
+ "kind": "clips",
+ "module": "clips_t",
+ "verify": "verify_t.py",
+ "note": "Stage t (tumbles): hop, spin (84x123), roll, trip (132x135, lead q-103334), pounce, slide_stop (132x123), one-shots in 8 dirs, face none. pounce / slide_stop start on Stage A run_stop#0 (chase / slide = run_start -> run -> pounce | slide_stop); every clip ends on idle#0. Output out/bear3d/anim_t/."
+}

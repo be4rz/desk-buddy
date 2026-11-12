@@ -301,7 +301,7 @@ fn audit_is_reproducible_and_lively() {
     let d = tmp("audit");
     for o in ["x", "y"] {
         let out = bin().args(["audit", "--pack"]).arg(root().join("mascots/bear")).args(["--minutes", "30", "--seed", "3", "--out"]).arg(d.join(o)).output().unwrap();
-        // the bear has no variety block yet (idle-tune, p2): a report only, exit 0
+        // the bear keeps its own variety rule and targets on this seed (AC17): exit 0
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stdout));
         assert!(String::from_utf8_lossy(&out.stdout).contains("seed 3: "));
     }
@@ -317,9 +317,15 @@ fn audit_is_reproducible_and_lively() {
         assert!(run.get(k).is_some(), "runs[0].{k}");
     }
     assert_eq!((j["seeds"].clone(), run["start"].clone()), (serde_json::json!([3]), serde_json::json!("2026-11-16T10:00")));
-    // hidden entries (no art yet) are never picked and never counted
+    // only idle pool entries with art are picked (hidden entries never are), derived from the pack
+    // so new art in later phases does not move this test
     let names: Vec<&str> = run["sequence"].as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
-    assert!(names.iter().all(|n| ["rest", "look_around", "wander", "dash", "read", "nap", "desk", "lean"].contains(n)), "{names:?}");
+    assert!(!names.is_empty());
+    for n in &names {
+        let e = s.pack.idle_pool.iter().find(|e| e.name() == *n);
+        assert!(e.is_some_and(|e| e.station.is_some() || s.pack.available(n)), "{n}: picked but not an idle entry with art");
+    }
+    assert_eq!(run["pass"], true, "{run}");
     // usage errors exit 2
     for bad in [&["--seeds", "1,x"][..], &["--start", "monday"], &["--temperament", "grumpy=1"], &["--seed", "1", "--seeds", "2"]] {
         let o = bin().args(["audit", "--pack"]).arg(root().join("mascots/bear")).args(bad).output().unwrap();
@@ -357,20 +363,42 @@ fn fixture(name: &str) -> PathBuf {
     root().join("crates/mascot-core/tests/fixtures").join(name)
 }
 
-/// `#hidden-log`: the bear's wired A4 entries wait for art: warnings only, exit 0, with name/clip.
+/// `#hidden-log`: entries the bear wires before their art lands are warnings only (exit 0), one per
+/// waiting entry with its name and missing clip. The expected list comes from the pack itself, so
+/// the test holds while later phases add art (and is empty once every wired name is rendered).
 #[test]
 fn lint_lists_entries_waiting_for_art_as_warnings() {
-    let out = bin().args(["lint", "--pack"]).arg(root().join("mascots/bear")).arg("--json").output().unwrap();
-    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stdout));
-    let j: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    let waits: Vec<&serde_json::Value> = j["issues"].as_array().unwrap().iter().filter(|i| i["code"] == "waits_for_art").collect();
-    assert_eq!(waits.len(), 62, "32 idle entries, 25 emotes, 5 activities (lean has art since p1)");
-    assert!(waits.iter().all(|i| i["severity"] == "warn" && i["name"].is_string() && i["clip"].is_string()));
-    let ws = waits.iter().find(|i| i["name"] == "weight_shift").unwrap();
-    assert_eq!(ws["clip"], "fid_weight_shift");
-    // set_lean is rendered: lean no longer waits
-    assert!(waits.iter().all(|i| i["name"] != "lean"));
-    assert_eq!(j["errors"], 0);
+    // the bear has all its A4 art (p2), so lint a copy without stage f's sources: its fidgets wait
+    let real = root().join("mascots/bear");
+    let mut v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(real.join("pack.json")).unwrap()).unwrap();
+    let abs = |s: &serde_json::Value| serde_json::json!(real.join(s.as_str().unwrap()));
+    v["art_root"] = abs(&v["art_root"]);
+    v["palettes"] = serde_json::Value::Array(v["palettes"].as_array().unwrap().iter().map(abs).collect());
+    v["sources"].as_array_mut().unwrap().retain(|s| !s["path"].as_str().unwrap().starts_with("anim_f/"));
+    let dir = tmp("waits-for-art");
+    std::fs::write(dir.join("pack.json"), v.to_string()).unwrap();
+    for (pack, waits_some) in [(real.clone(), false), (dir.clone(), true)] {
+        let out = bin().args(["lint", "--pack"]).arg(&pack).arg("--json").output().unwrap();
+        assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stdout));
+        let j: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        let waits: Vec<&serde_json::Value> = j["issues"].as_array().unwrap().iter().filter(|i| i["code"] == "waits_for_art").collect();
+        assert!(waits.iter().all(|i| i["severity"] == "warn" && i["name"].is_string() && i["clip"].is_string()), "{waits:?}");
+        let p = mascot_core::pack::load(&pack).unwrap();
+        let want: Vec<(String, String)> = p.waiting().into_iter().map(|w| (w.name, w.clip)).collect();
+        let got: Vec<(String, String)> = waits.iter().map(|i| (i["name"].as_str().unwrap().to_string(), i["clip"].as_str().unwrap().to_string())).collect();
+        assert_eq!(got, want, "{}", pack.display());
+        assert_eq!(!got.is_empty(), waits_some, "{}: {got:?}", pack.display());
+        // a waiting entry is one whose art is missing, never one that has it; lean (set_lean, p1) never waits
+        for (name, clip) in &got {
+            assert!(!p.clips.contains_key(clip), "{name} waits for {clip}, which is loaded");
+            assert!(name != "lean");
+        }
+        if waits_some {
+            assert!(got.iter().any(|(n, c)| n == "weight_shift" && c == "fid_weight_shift"), "{got:?}");
+        }
+        assert_eq!(j["errors"], 0);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

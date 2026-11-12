@@ -1,0 +1,7 @@
+{
+ "id": "p",
+ "kind": "clips",
+ "module": "clips_p",
+ "verify": "verify_p.py",
+ "note": "Stage p (postures): sit_floor (down / loop / up), sit_sway, lie_belly, lie_back, floor_nap, squat; 16 clips in S SE E W SW. Frame 132x123 anchor [66,107], squat 84x123 anchor [42,107]. Down clips start and up clips end on idle#0; each loop starts on its down clip's last frame and its up clip starts on the loop's frame 0. Output out/bear3d/anim_p/."
+}

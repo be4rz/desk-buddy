@@ -1,0 +1,7 @@
+{
+ "id": "g",
+ "kind": "clips",
+ "module": "clips_g",
+ "verify": "verify_g.py",
+ "note": "Stage g (fidgets-b): eight baked-face idle fidgets (fid_rock_heels, fid_head_tilt, fid_scratch, stretch, fid_yawn, fid_shake_off, fid_sneeze, fid_nod_off) in S SE E W SW, Stage A's 84x123 frame, idle#0 hand-offs at both ends. Output out/bear3d/anim_g/."
+}

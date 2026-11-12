@@ -264,31 +264,69 @@ fn a_when_entry_is_picked_only_inside_its_window() {
     assert!(count(15 * 60) > 0);
 }
 
-/// `#hidden-log`: the bear's wired A4 entries load, wait, and never play.
+/// The bear without the art of some sources (`anim_f/`, …): a temp `pack.json` beside the real one
+/// pointing at the real art, those sources left out. Removed on drop.
+struct BearWithout(PathBuf);
+
+impl Drop for BearWithout {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn bear_without(dirs: &[&str]) -> (BearWithout, Arc<PackMeta>) {
+    let real = repo().join("mascots/bear");
+    let mut v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(real.join("pack.json")).unwrap()).unwrap();
+    let abs = |s: &serde_json::Value| serde_json::json!(real.join(s.as_str().unwrap()));
+    v["art_root"] = abs(&v["art_root"]);
+    v["palettes"] = serde_json::Value::Array(v["palettes"].as_array().unwrap().iter().map(abs).collect());
+    v["sources"].as_array_mut().unwrap().retain(|s| !dirs.iter().any(|d| s["path"].as_str().unwrap().starts_with(&format!("{d}/"))));
+    let dir = std::env::temp_dir().join(format!("mascot-core-bear-without-{}-{}", std::process::id(), dirs.join("-")));
+    std::fs::create_dir_all(&dir).unwrap();
+    let guard = BearWithout(dir.clone()); // removes the dir even when the load below panics
+    std::fs::write(dir.join("pack.json"), v.to_string()).unwrap();
+    let p = Arc::new(pack::load(&dir).unwrap_or_else(|e| panic!("{e}")));
+    (guard, p)
+}
+
+/// `#hidden-log`: wired entries whose art is missing load, wait, and never play. The bear has all
+/// its A4 art since p2, so the test drops the five p2 stages' sources from a copy of it.
 #[test]
 fn hidden_entries_wait_and_never_play() {
-    let p = bear();
+    let (_tmp, p) = bear_without(&["anim_f", "anim_g", "anim_p", "anim_m", "anim_t"]);
     let w = p.waiting();
     let names: BTreeSet<&str> = w.iter().map(|x| x.name.as_str()).collect();
-    for n in ["weight_shift", "butt_wiggle", "sit_floor", "tiptoe", "chase", "spin", "stretch"] {
-        assert!(names.contains(n), "{n} waits");
+    for n in ["weight_shift", "butt_wiggle", "sit_floor", "tiptoe", "chase", "spin", "stretch", "ear_twitch"] {
+        assert!(names.contains(n), "{n} waits: {names:?}");
     }
+    // (the real bear has every A4 entry: tests/bear_pack.rs, AC12)
     // the art kit rendered set_lean (p1): lean is a live long entry with face layers from its face part
     assert!(!names.contains("lean") && p.available("lean"), "lean plays");
     let face = p.face.as_ref().expect("face");
     for ori in [Ori::A, Ori::B] {
         assert!(face.set_face("lean", ori).is_some(), "lean {ori:?} has a face");
     }
-    assert_eq!(p.waiting_line().unwrap(), "pack: 62 entries wait for art: weight_shift, ear_twitch, look_up, look_down, tummy_rub, wave_small, peek, butt_wiggle, rock_heels, head_tilt, scratch, stretch, … (idle 32, emotes 25, activities 5)");
+    let line = p.waiting_line().unwrap();
+    let head = format!("pack: {} entries wait for art: weight_shift, ear_twitch, ", w.len());
+    assert!(line.starts_with(&head) && line.contains(", … (idle "), "{line}");
     let mut b = brain(p.clone(), 4);
     let shows = run_until(&mut b, 0, 1_800_000);
     let played: BTreeSet<&str> = shows.iter().map(|(_, s)| s.behavior.as_str()).collect();
-    assert!(played.is_subset(&["rest", "look_around", "wander", "dash", "read", "nap", "desk", "lean"].into()), "{played:?}");
+    assert!(played.iter().all(|n| !names.contains(n)), "{played:?}");
     let picked: BTreeSet<String> = b.trace().iter().filter(|l| l.what == "pick").filter_map(|l| l.note.split_once(" total ").map(|x| x.0.to_string())).collect();
-    assert!(picked.iter().all(|n| !names.contains(n.as_str())), "{picked:?}");
-    // an emote waiting for art is not offered
+    assert!(!picked.is_empty() && picked.iter().all(|n| !names.contains(n.as_str())), "{picked:?}");
+    // an emote waiting for art is not offered, and `buddy mascot list` leaves waiting entries out
     let r = b.body(&crate::body::BodyReq::Emote { name: "ear_twitch".into() }, 1_800_000);
     assert!(r.error.is_some(), "{r:?}");
+    let list = serde_json::to_value(b.body(&crate::body::BodyReq::List, 1_800_000)).unwrap();
+    for (k, kind) in [("activities", "activity"), ("emotes", "emote")] {
+        // by kind: `spin` the idle entry waits for its clip while `spin` the gesture emote plays its intent's
+        let waits: BTreeSet<&str> = w.iter().filter(|x| x.kind == kind).map(|x| x.name.as_str()).collect();
+        let listed: Vec<&str> = list[k].as_array().unwrap().iter().map(|a| a["name"].as_str().unwrap()).collect();
+        assert!(!waits.is_empty() && !listed.is_empty() && listed.iter().all(|n| !waits.contains(n)), "{k}: {listed:?}, waiting {waits:?}");
+    }
+    let listed: Vec<&str> = list["emotes"].as_array().unwrap().iter().map(|a| a["name"].as_str().unwrap()).collect();
+    assert!(!listed.contains(&"ear_twitch") && !listed.contains(&"hop"), "{listed:?}");
 }
 
 

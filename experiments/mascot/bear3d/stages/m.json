@@ -1,0 +1,7 @@
+{
+ "id": "m",
+ "kind": "clips",
+ "module": "clips_m",
+ "verify": "verify_m.py",
+ "note": "Stage m (gaits, aliveness p2): tiptoe, skip, shuffle (sleepy), back_waddle; each <x>_start / loop / <x>_stop in 8 directions, Stage A's 84x123 frame, root_px per frame (no foot slide; back_waddle moves opposite to the facing), no face. Output out/bear3d/anim_m/."
+}

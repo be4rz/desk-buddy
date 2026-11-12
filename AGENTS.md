@@ -56,7 +56,10 @@ and talks through speech bubbles, powered by an LLM.
   YouTube). Real-window browser test: `cargo build -p host --bin buddy && cargo test -p buddy-app --test browser_widget -- --ignored`.
   Spike record: `docs/spikes/media.md`.
   Studio (p6): `crates/studio` (headless, pixel-stable: `buddy studio render|sheet|gif|diff|lint|audit|comments|import-aseprite`,
-  also the `buddy-studio` binary; `--json` everywhere, exit 0 ok / 1 findings or error / 2 usage) + `src/studio/` (window
+  also the `buddy-studio` binary; `--json` everywhere, exit 0 ok / 1 findings or error / 2 usage;
+  `audit --pack <dir> [--minutes 10] [--seed N | --seeds 1,2,3] [--start 2026-11-16T10:00] [--temperament energy=1.0,…]`
+  exits 1 when a run breaks the pack's `variety` rules or targets: the bear's gate is `--minutes 10` and `30` on seeds
+  1,2,3) + `src/studio/` (window
   `studio`, page `web/studio/index.html?mock=1|lint-error|empty`, only it may call `studio_*`). Tray **Studio…**, or
   `cargo run -p buddy-app -- --studio [<pack-dir>]` (only the studio window: no lock, settings, host.json or sidecar).
   It only shows and checks art; comments go to `<pack>/review/comments.jsonl`. Human desktop checks: `docs/handover.md`.
@@ -111,6 +114,9 @@ and talks through speech bubbles, powered by an LLM.
   verifier fails if they differ). Face parts `out/bear3d/*/face_<id>.json` are separate files (face.json is never
   edited by the kit); verify_face.py reads them all, and a clip in face.json and a part, or in two parts, is an error.
   `python3 stagekit.py --self-test` (exit 1 = works), `sheet|preview <id>`, `freeze`, `check <sha> [--own <dir>…]`.
+  A clip may set `frame` [W,H] / `anchor` [W/2,y] (default 84×123 [42,107]; `run_stage.sh` passes `--canvas W,H,y` per clip);
+  `handoff` ends may be `idle0` or `<Stage A clip>#<frame>` (e.g. `run_stop#0`); Rig K `tumble` (deg, about the body
+  centre) and `lift` (world z), plus lean/roll up to ±90, are allowed only for face baked/none clips.
   Freeze: `stages/freeze_p1.sha` = sha256 of every file in `anim anim_b anim_c anim_l anim_d props props_d cute face
   set_lean`; `python3 stagekit.py check stages/freeze_p1.sha` must be clean (a later stage passes `--own <its dir>`).
   Stage lean (`stages/lean.json`, `set_lean.py`): `sh run_stage.sh lean` (~1.5 min) → `out/bear3d/set_lean/`:
@@ -119,6 +125,25 @@ and talks through speech bubbles, powered by an LLM.
   (a back lean hides the block behind the round body): ori A faces SE with the left mitten on a toy block's top (NE on
   screen), ori B = 3D mirror (SW). Canvas 108×116. `python3 verify_lean.py` (`--self-test`, exit 1 = works): the kit's
   set checks + the block never moves + art never touches the canvas edge.
+  The A4 clip stages (p2) are `kind` clips handing off at idle#0 (except where Stage t says otherwise) and render with
+  `sh run_stage.sh <id>` → `out/bear3d/anim_<id>/` (`anim_<id>.json`, strips + gifs, `sheet_<id>.png` (too big for Pillow's
+  default limit: read strips), `preview_<id>.html`); each `python3 verify_<id>.py` (`--self-test`, exit 1 = works) runs the
+  kit checks plus its own. Freeze check after p2: `check stages/freeze_p1.sha --own anim_f anim_g anim_p anim_m anim_t`.
+  Stage f (`stages/f.json`, `clips_f.py`, fidgets): 8 one-shots 84×123, S SE E W SW (`fid_butt_wiggle` N NE NW): weight_shift,
+  ear_twitch, tummy_rub, wave_small (face layers, `face_f.json`), look_up, look_down, peek (baked), butt_wiggle (none);
+  `verify_f.py`: no root motion, art off the canvas edge, the face part covers exactly the layers clips.
+  Stage g (`stages/g.json`, `clips_g.py`, fidgets): 8 baked one-shots 84×123, S SE E W SW: rock_heels, head_tilt, scratch,
+  stretch, yawn, shake_off, sneeze, nod_off; no face part; `verify_g.py`: no root motion, idle0 both ends.
+  Stage p (`stages/p.json`, `clips_p.py`, floor postures): 16 clips in S SE E W SW, 132×123 [66,107] (squat 84×123):
+  down → loop → up for sit_floor (layers, `face_p.json`), sit_sway (chains on sit_floor_down/up), belly, back, curl (nap),
+  squat; `verify_p.py`: down[last] = loop[0] = up[0], loop seams.
+  Stage m (`stages/m.json`, `clips_m.py`, gaits): tiptoe, skip, shuffle, back_waddle as start → loop → stop in 8 dirs,
+  84×123, face none, root motion like Stage A's walk; `verify_m.py`: planted feet never slide (≤ 0.5 px), travel sign
+  (back_waddle moves opposite to the facing).
+  Stage t (`stages/t.json`, `clips_t.py`, tumbles): `sh run_stage.sh t` (~25 min, 848 frames), 6 one-shots in 8 dirs,
+  face none: hop, spin 84×123; roll, trip 132×135; pounce, slide_stop 132×123 (anchors [W/2,107]); pounce and slide_stop
+  start at Stage A `run_stop#0` (chase = run_start → run → pounce; slide = … → slide_stop). `python3 verify_t.py`: kit
+  checks + forward/in-place root tracks + art ≥ 2 px from every canvas edge.
 - `python3 verify_b.py`: Stage B hand-off frames must be pixel-identical to props + the idle sprite; run it after any re-render.
 - `python3 verify_face.py [--part FILE]` (`--self-test`: in-memory mutations (3 with face.json v2, 4 with `set_clips`, 5 with a face part), each must be caught, exit 1): the face invariant
   "T" (amends design §3.4). Default patches drawn at each frame's position must equal the expected frame (the anim_c
@@ -130,7 +155,7 @@ and talks through speech bubbles, powered by an LLM.
 - Pixel rules: iso 2:1 ortho camera, 8 directions, 12 fps, ppu 40.07, alpha 0/255 only, 1px ink outline, palette =
   `bear-proto/palette-bear.json` + `scene-proto/palette.json` (+ `bear3d/palette-ext.json` for furniture).
 - Preview: `python3 -m http.server 8771 --directory experiments/mascot/out`, then open
-  `bear3d/anim/preview.html`, `bear3d/anim_b/preview_b.html` or `bear3d/anim_c/preview_c.html` (Stage C + face sheets) or `bear3d/anim_l/preview_l.html` (listen + turns) or `bear3d/anim_d/preview_d.html` (desk set) or `bear3d/set_lean/preview_lean.html` (lean).
+  `bear3d/anim/preview.html`, `bear3d/anim_b/preview_b.html` or `bear3d/anim_c/preview_c.html` (Stage C + face sheets) or `bear3d/anim_l/preview_l.html` (listen + turns) or `bear3d/anim_d/preview_d.html` (desk set) or `bear3d/set_lean/preview_lean.html` (lean) or `bear3d/anim_<f|g|p|m|t>/preview_<id>.html` (A4 clips).
 
 ## Gotchas
 

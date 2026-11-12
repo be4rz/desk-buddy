@@ -38,6 +38,9 @@
 #     toy objects in a 'Kit' collection (never 'Bear', so render_anim.py's pixel fit is unchanged), each on its own
 #     bone obj_<name> under its socket (root, head, paw_L, paw_R), shown by vis_<name> = 1, offset by ox_/oy_/oz_<name>
 #     (world units) and orz_<name> (deg);
+#   - lean / roll (|x| <= 90) tilt the body at the floor as Stage A (feet planted, the face carried rigidly) and tumble
+#     (deg, any) turns the whole bear about BODY_C on the root bone, lift (world units) raises it there; only for clips
+#     with face baked / none (check_k);
 #   - tx / ty_px are the root track (bear-local, world units), written to the clips json, never to a bone;
 #   - a set module (SETS) is keyed once per orientation as actions '<clip>@A' and '<clip>@B' (B = anim_clips.mirror_k),
 #     the placement X, Y, Z, yaw on the root bone (render_set.py only picks action + frame).
@@ -124,6 +127,8 @@ PIV = {
     'face': Vector(((ev[:, 0].min() + ev[:, 0].max()) / 2, ev[:, 1].mean(), (ev[:, 2].min() + ev[:, 2].max()) / 2)),
     'clover': Vector(stem[stem[:, 2].argmin()]),
 }
+bz = wverts(O['body'])[:, 2]
+BODY_C = Vector((0, 0, float(bz.min() + bz.max()) / 2))   # Stage K tumble pivot: the body's centre
 PARENT = {'root': None, 'body': 'root', 'foot_L': 'root', 'foot_R': 'root', 'arm_L': 'root', 'arm_R': 'root',
           'ear_L': 'root', 'ear_R': 'root', 'face': 'root', 'eyes': 'face', 'hat': 'root', 'clover': 'hat'}
 BIND = {'body': 'body', 'pants': 'body', 'stitch': 'body', 'eyes': 'eyes', 'hat': 'hat',
@@ -296,11 +301,14 @@ def deltas(q):
     D['eyes'] = about(PIV['eyes'], scl(1, 1, q['blink']))
     D['clover'] = about(PIV['clover'], ry(q['clY']) @ rx(q['clX']))
     if STAGE_C:
-        assert q['roll'] == 0 and q['lean'] == 0, 'Stage C poses keep the head upright (face patches)'
+        assert STAGE_K or (q['roll'] == 0 and q['lean'] == 0), 'Stage C poses keep the head upright (face patches)'
         for s, k in (('L', 1), ('R', -1)):
             sh = PIV['arm_' + s]
             D['arm_' + s] = carry(sh) @ about(sh, rx(-q['arm' + s])) @ about(sh, ry(-k * q.get('sp' + s, 0.0)))
-        D['eyes'] = face_shift(PIV['eyes'], D) @ D['eyes']; D['mouth'] = face_shift(PIV['mouth'], D)
+        if q['roll'] or q['lean']:   # Stage K baked / none clips (check_k): eyes and mouth ride the tilted body (Stage A)
+            D['eyes'] = D['face'] @ D['eyes']; D['mouth'] = D['face']
+        else:
+            D['eyes'] = face_shift(PIV['eyes'], D) @ D['eyes']; D['mouth'] = face_shift(PIV['mouth'], D)
     if STAGE_L:
         Rh = Matrix.Translation((0, 0, q['hb'] * PXZ)) @ Matrix.Rotation(math.radians(q['hy']), 4, 'Z')
         D['head'] = D['body'] @ Rh
@@ -316,6 +324,8 @@ def deltas(q):
         for n in ('arm_L', 'arm_R'): D[n] = aw @ Matrix.Rotation(math.radians(q['hy'] * ARM_W), 4, 'Z').inverted() @ D[n]
         if IS_SET:
             D['root'] = Matrix.Translation((q['X'], q['Y'], q['Z'])) @ rz(q['yaw']) @ D['root']
+        if q['tumble'] or q['lift']:  # the whole bear (feet included) turns as one rigid lump about the body centre
+            D['root'] = D['root'] @ Matrix.Translation((0, 0, q['lift'])) @ about(BODY_C, rx(q['tumble']))
         def hidden(n):
             # tucked inside the (placed) body and scaled to 1e-6, as a delta under n's posed parent
             return chain(PARENT[n], D).inverted() @ D['root'] @ Matrix.Translation(TUCK) @ scl(1e-6, 1e-6, 1e-6) @ Matrix.Translation(-PIV[n])

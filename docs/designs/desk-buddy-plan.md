@@ -482,7 +482,7 @@ experiments/
 - **P3:** widgets (media, browser) + screen awareness
 - **P4:** studio + mascot SDK for users
 
-### Roadmap (status as of 2026-11-10)
+### Roadmap (status as of 2026-11-12)
 
 Each step is one autopilot ticket unless it says otherwise. Do them in order,
 because each one builds on the one before it.
@@ -519,7 +519,7 @@ animation plugs into it.
 | A1 | **Body tools + system prompt** (code only) | ✅ built (`buddy mascot do\|stop\|list\|emote`, pack `body` block) | p3 harness |
 | A2 | **Listen:** face the user on click | ✅ built (prompt pokes, listen slot, turn planner, face v2 `patch_dirs`, `anim_l` listen + turn clips) | A1 |
 | A3 | **Working animations** for long turns | ✅ built (desk station: pack `stations` + `work`, seated turns, seated `talk`/`ask` with face v2 `set_clips`, `buddy mascot do computer`, `anim_d` desk set) | A1, A2 |
-| A4 | **Idle life:** fidgets and postures | ⬜ | A2's turn-in-place clip |
+| A4 | **Idle life:** fidgets and postures | ✅ built (pack v2 idle brain: `variety` rule, `for_s` holds, turn first, hidden entries; stage kit; art stages f g p m t + lean, all in the bear's idle pool; `buddy studio audit` v2 passes 10 and 30 min on seeds 1,2,3) | A2's turn-in-place clip |
 | A5 | **Real clips for the borrowed intents** | ⬜ | A1 |
 | A6 | **Desktop reactions, prop activities, rare surprises** | ⬜ | A4 |
 

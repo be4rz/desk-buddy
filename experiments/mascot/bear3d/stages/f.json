@@ -1,0 +1,7 @@
+{
+ "id": "f",
+ "kind": "clips",
+ "module": "clips_f",
+ "verify": "verify_f.py",
+ "note": "Stage f (fidgets-a, p2 aliveness): 8 small idle fidgets in Stage A's 84x123 frame, anchor [42,107], every clip starts and ends on idle#0. weight_shift, ear_twitch, look_up, look_down, tummy_rub, wave_small, peek in S SE E W SW; butt_wiggle in N NE NW. Face: layers on weight_shift, ear_twitch, tummy_rub, wave_small (face part face_f.json); baked on look_up, look_down, peek; none on butt_wiggle. Output out/bear3d/anim_f/."
+}

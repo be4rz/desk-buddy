@@ -22,6 +22,14 @@ Interfaces (CLAUDE.md "Stage kit"; the design anchors are in brackets):
 [#anim-stage] clip stage output anim_<id>/anim_<id>.json: Stage A's format ("anims", frames[i].dur and
   frames[i].root_px{dir}) plus per clip "stage", "face" ("layers" | "baked" | null), "handoff", "root_track" (bear-local
   [tx, ty_px] world units per frame + one after the last) and a clip-level "root_px" {dir: [[dx, dy], ...]}.
+  Per clip the module may give "frame" [W, H] and "anchor" [W / 2, y] (default Stage A's [84, 123] / [42, 107]; e.g.
+  [132, 123] / [66, 107] for floor and tumble clips): run_stage.sh renders at that canvas, make_stage.py writes it as
+  frame_w / frame_h / anchor, check_clips verifies it. "handoff" {"start" | "end": "idle0" | "<Stage A clip>#<frame>"}
+  (e.g. "run_stop#0"): that end is rebuilt as the Stage A frame (after the HANDOFF_NOISE check) and verified
+  pixel-equal, anchors aligned (stage_a_frame). Rig K (anim_clips.check_k): a clip with face "baked" / "none" may use
+  lean / roll (|x| <= 90, Stage A's body tilt at the floor, feet planted, the face riding rigidly) and tumble (deg,
+  any, + = forward: the whole bear turns as one rigid lump about the body centre, feet included) with lift (world
+  units, the whole bear up; keeps the lowest point on the floor); "layers" clips keep all four at 0.
   frames[i].root_px and root_px[dir][i] are ONE track written twice with identical values (Stage A's loader moves the
   sprite by frames[i].root_px): a loader applies one of them, never both. verify_main checks they are equal and equal
   the projection of root_track.
@@ -154,6 +162,21 @@ def idle0(d):
         a = json.load(open(os.path.join(REAL_OUT, 'anim', 'anim.json')))['anims']['idle']
         _IDLE0[k] = (load(os.path.join(REAL_OUT, 'anim', a['files'][d]))[:, :a['frame_w']].copy(), tuple(a['anchor']))
     spr, anc = _IDLE0[k]
+    return spr.copy(), anc
+
+
+_STAGE_A = {}
+def stage_a_frame(clip, frame, d):
+    """Stage A <clip> frame <frame> in direction d and its anchor (the real out/bear3d): the target of a
+    '<clip>#<frame>' hand-off (idle0 = stage_a_frame('idle', 0, d))."""
+    if clip == 'idle' and frame == 0: return idle0(d)
+    k = (REAL_OUT, clip, frame, d)
+    if k not in _STAGE_A:
+        a = json.load(open(os.path.join(REAL_OUT, 'anim', 'anim.json')))['anims'][clip]
+        if not 0 <= frame < a['frames_n']: raise ValueError(f'hand-off {clip}#{frame}: {clip} has {a["frames_n"]} frames')
+        w = a['frame_w']
+        _STAGE_A[k] = (load(os.path.join(REAL_OUT, 'anim', a['files'][d]))[:, frame * w:(frame + 1) * w].copy(), tuple(a['anchor']))
+    spr, anc = _STAGE_A[k]
     return spr.copy(), anc
 
 
@@ -509,17 +532,27 @@ def check_clips(st):
         if sorted(a['files']) != sorted(dirs): e.append(f'{c}: dirs {sorted(a["files"])} != {sorted(dirs)}')
         if cd and a['frames_n'] != cd['frames']: e.append(f'{c}: {a["frames_n"]} frames != {cd["frames"]}')
         if cd and a['loop'] != cd.get('loop', False): e.append(f'{c}: loop flag')
+        fw = [a['frame_w'], a['frame_h'], *a['anchor']]
+        if cd and fw != [*(cd.get('frame') or (84, 123)), *(cd.get('anchor') or (42, 107))]:
+            e.append(f'{c}: frame {fw[0]}x{fw[1]} anchor {fw[2:]} != the module\'s {cd.get("frame") or [84, 123]} {cd.get("anchor") or [42, 107]}')
         tr = a.get('root_track')
         if not tr or len(tr) != a['frames_n'] + 1: e.append(f'{c}: root_track missing or not frames_n + 1 long'); tr = None
         for d in a['files']:
             fs = st.frames.get((c, d))
             if fs is None: continue
             if len(fs) != a['frames_n']: e.append(f'{c} {d}: {len(fs)} frames != {a["frames_n"]}')
-            spr, sa = idle0(d)
+            if fs[0].shape[:2] != (a['frame_h'], a['frame_w']): e.append(f'{c} {d}: frames {fs[0].shape[1]}x{fs[0].shape[0]} != frame_w x frame_h')
             for at, i in (('start', 0), ('end', len(fs) - 1)):
-                if (a.get('handoff') or {}).get(at) == 'idle0':
+                h = (a.get('handoff') or {}).get(at)
+                if h == 'idle0':
+                    spr, sa = idle0(d)
                     n, _ = aligned_diff(fs[i], a['anchor'], spr, sa)
                     if n: e.append(f'{c} {d}: hand-off ({at}) frame {i} differs from idle_{d}#0 in {n} px (anchors aligned)')
+                elif h and '#' in h:
+                    src, fr = h.split('#')[0], int(h.split('#')[1])
+                    spr, sa = stage_a_frame(src, fr, d)
+                    n, _ = aligned_diff(fs[i], a['anchor'], spr, sa)
+                    if n: e.append(f'{c} {d}: hand-off ({at}) frame {i} differs from {src}_{d}#{fr} in {n} px (anchors aligned)')
             if a['loop']: e += seam_errors(fs, f'{c} {d}')
             one = [f['root_px'].get(d) for f in a['frames']]; two = (a.get('root_px') or {}).get(d)
             if one != two: e.append(f'{c} {d}: frames[].root_px and root_px[{d}] differ (they are ONE track)')
@@ -572,7 +605,18 @@ def _std_mutations(st):
     def m_rootpx(s):
         c = next(iter(s.J['anims'])); a = s.J['anims'][c]; d = sorted(a['files'])[0]
         a['root_px'][d] = [[p[0] + 1, p[1]] for p in a['root_px'][d]]; return 'ONE track'
-    extra = [('the two root_px forms differ', m_rootpx)] if st.man['kind'] == 'clips' else []
+    def m_frame(s):
+        c = next(iter(s.J['anims'])); s.J['anims'][c]['frame_w'] += 2; return 'frame'
+    def m_stagea(s):
+        for c, a in s.J['anims'].items():
+            for at, h in (a.get('handoff') or {}).items():
+                if isinstance(h, str) and '#' in h:
+                    d = next(iter(a['files'])); fs = s.frames[(c, d)]; i = 0 if at == 'start' else len(fs) - 1
+                    fs[i] = np.roll(fs[i], 1, 1); return f'differs from {h.split("#")[0]}_'
+    extra = [('the two root_px forms differ', m_rootpx), ('a clip frame size != its module frame', m_frame)] \
+        if st.man['kind'] == 'clips' else []
+    if st.man['kind'] == 'clips' and any('#' in str(h) for a in st.J['anims'].values() for h in (a.get('handoff') or {}).values()):
+        extra.append(('a <clip>#<frame> hand-off frame shifted 1 px', m_stagea))
     return extra + [('alpha 128 on one pixel', m_alpha), ('a colour outside the palette', m_palette),
             ('a gap in the 1 px ink outline', m_outline), ('a hand-off frame shifted 1 px', m_handoff),
             ('a missing ' + ('ori' if st.man['kind'] == 'set' else 'dir'), m_missing)]
@@ -636,6 +680,16 @@ def self_test():
     t('snap: whole-pixel screen offset', abs(p[0] - dx) < 1e-6 and abs(p[1] - dy) < 1e-6)
     t('root_px: forward at SE (yaw 90) moves right/down', root_px(40.0, 90, 0, 1.0)[0] > 0 and root_px(40.0, 90, 0, 1.0)[1] > 0)
     t('root_px: forward at S is straight down', abs(root_px(40.0, 45, 0, 1.0)[0]) < 1e-3 and root_px(40.0, 45, 0, 1.0)[1] > 0)
+    import anim_clips as AC
+    def k_ok(q, face):
+        try: AC.check_k(q, 'x', face); return True
+        except AssertionError: return False
+    t('check_k: a layers clip with lean != 0 is refused', not k_ok(AC.KP(lean=5.0), 'layers'))
+    t('check_k: a layers clip with tumble / lift != 0 is refused', not k_ok(AC.KP(tumble=30.0), 'layers')
+      and not k_ok(AC.KP(lift=0.1), 'layers'))
+    t('check_k: a baked / none clip may lean, roll (<= 90) and tumble', k_ok(AC.KP(lean=40.0, roll=-20.0, tumble=270.0), 'none')
+      and k_ok(AC.KP(lean=7.0), 'baked') and k_ok(AC.KP(lean=7.0), None))
+    t('check_k: lean beyond 90 is refused', not k_ok(AC.KP(lean=95.0), 'none'))
     tmp = tempfile.mkdtemp(prefix='stagekit_')
     try:
         os.makedirs(os.path.join(tmp, 'out', 'x')); os.makedirs(os.path.join(tmp, 'out', 'mine'))

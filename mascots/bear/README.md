@@ -70,9 +70,10 @@ v2 key in a v1 pack is lint error `v2_key_in_v1_pack`). The loader reads version
 - **Hidden entries.** A pool, activity or emote entry whose clips are missing is *waiting for
   art*: weight 0, never picked, not counted as a behavior, left out of `buddy mascot list`
   (text and `--json`) and the prompt. The app logs one line at start, e.g.
-  `[buddy] pack: 62 entries wait for art: weight_shift, ear_twitch, … (idle 32, emotes 25, activities 5)`,
+  `[buddy] pack: N entries wait for art: <the first 12 names>, … (idle I, emotes E, activities A)`,
   and `buddy studio lint` lists each as a warning. Rendering the art turns an entry on with no
-  pack edit. Today's bear picks and audits exactly as if they weren't there.
+  pack edit. The pack picks and audits exactly as if they weren't there. Since p2 every A4
+  entry of the bear has its art (nothing waits; `tests/bear_pack.rs` keeps it so).
 - **`idle_pool` entries** gain `kind` (`stand fidget posture move long rare react other`,
   default `other`), `group` (the variety key; default the entry's name), `when`
   (`{"hours": [from, to)` local, wrapping midnight; `"months": [1..12]`; `"context": name}` —
@@ -82,7 +83,7 @@ v2 key in a v1 pack is lint error `v2_key_in_v1_pack`). The loader reads version
   intent idle. A turn that opens while it types takes the seat over (the usual seated turn).
 - **`"loops": {"for_s": [a, b]}`** on a behavior step holds whole loops until a seeded draw in
   `[a, b]` s has passed (`read` 40–180 s, `nap` 60–240 s). An activity's `--for` deadline wins.
-- **`"variety"`** (optional; the bear has none until idle-tune): `no_repeat` (never the same
+- **`"variety"`** (optional; the bear's is below): `no_repeat` (never the same
   group twice in a row), `window` + `max_in_window` (≤ N picks of a group in any W picks in a row, this one included),
   `max_moves_in_row` (0 = off), and `targets` (what the audit checks: `minutes`, `stand_max`,
   `stand_move_max`, `distinct_min`, `share_max`, `long_len_s`). The rules are hard: when they
@@ -101,6 +102,41 @@ v2 key in a v1 pack is lint error `v2_key_in_v1_pack`). The loader reads version
   findings / 2 usage; `--timeline` keeps the v1 timeline. Lint adds `waits_for_art` (warn),
   `v2_key_in_v1_pack`, `canvas_too_big` (> 176×160) and `dir_set_mismatch` (errors); a bad
   station pool entry is a load error.
+
+## The bear's idle life (A4, tuned in p2)
+
+The idle pool holds every A4 behavior (stages f g p m t + lean) next to `rest`, `look_around`,
+`wander`, `dash`, `read`, `nap` and the desk. Its `variety` block:
+
+```json
+"variety": {"no_repeat": true, "window": 20, "max_in_window": 2, "max_moves_in_row": 2,
+            "targets": {"minutes": 10, "stand_max": 0.25, "stand_move_max": 0.45,
+                        "distinct_min": 20, "share_max": 0.15, "long_len_s": [20, 300]}}
+```
+
+Tuning (start values from the storyboard's idle column, then):
+
+- `rest` weight 2, `loops [1, 2]` (it was 6 and `[1, 3]`, most of the idle time).
+- The long ones share `"group": "long"` (`read` 0.7 / 420 s cooldown, `nap` 0.6, desk 0.9, `lean`
+  0.8): two long visits never follow each other and at most 2 in 20 picks, so a 10-minute
+  stretch is never spent in two long ones back to back. The lying postures share
+  `"group": "lie"` (`lie_belly`, `lie_back`, `floor_nap`) for the same reason; `look_up` /
+  `look_down` share `look`, and `sit_floor` / `sit_sway` share `sit` (both sit down and stand up
+  again, so one never follows the other).
+- The six postures (`sit_floor`, `sit_sway`, `lie_belly`, `lie_back`, `floor_nap`, `squat`) carry
+  `"exit": true`: a click, an agent turn or a reaction plays their get-up clip (`*_up`) before
+  `listen_in`, instead of jumping from the floor to standing (`bear_pack.rs` checks it).
+- Moves are `kind: "move"` (Stage A wander, dash and every A4 gait and tumble), at most 2 in a
+  row.
+
+Check it with `buddy studio audit --pack mascots/bear --minutes 10 --seeds 1,2,3` (AC11: stand
+< 25 %, stand + walk + run < 45 %, ≥ 20 behaviors) and `--minutes 30` (AC17: no repeat, no
+group > 15 %, ≤ 2 moves in a row, 0 relaxed picks); both exit 0. The gate is seeds 1,2,3: on
+seeds 1–20 every 30-minute run passes, but 10 minutes is short enough that a seed drawing several
+long visits can land under `distinct_min` (seed 14: 17 behaviors). An energetic
+(`--temperament energy=1.0`) or sleepy run keeps 0 violations too. Quiet hours play only `nap`
+and `rest`: those two can't keep 2 in 20, so the brain relaxes `max_in_window` (and a cooldown)
+and traces `pick relaxed <rule>`, but never repeats one back to back (`bear_pack.rs`).
 
 Contract notes (lead decisions for p1):
 

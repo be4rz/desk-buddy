@@ -172,8 +172,13 @@ need eyes on the real window.
   **Expect:** the preview switches to the clip the brain picks, the trace lists the events, and the
   live bear on your desktop does nothing (the simulator has its own brain).
 - [ ] **Audit.** Run the Audit tab with 30 min and seed 3.
-  **Expect:** the bars match `buddy studio audit --pack mascots/bear --minutes 30 --seed 3 --out /tmp/a`,
-  in `/tmp/a/audit.png` and `audit.json`.
+  **Expect:** the tab is the one-seed quiet-day chart (a v1 audit: distinct, max same in a row,
+  entropy, starts). Its numbers match the v1 CLI run on an empty 10:00 timeline:
+  `echo '{"timeline_version":1,"seed":3,"duration_ms":1800000,"start_local":"10:00","weekday":0,"items":[]}' > /tmp/q.json`,
+  then `buddy studio audit --pack mascots/bear --timeline /tmp/q.json --out /tmp/a` (`/tmp/a/audit.json` +
+  `audit.png`). Without `--timeline` the CLI writes the v2 variety report instead
+  (`{pack, minutes, seeds, pass, runs[]}`, exit 0 pass / 1 findings); for the bear,
+  `buddy studio audit --pack mascots/bear --minutes 30 --seeds 1,2,3` exits 0.
 
 ## Known limitations to judge
 
