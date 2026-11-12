@@ -5,7 +5,9 @@
 //! - a long seeded run keeps the variety rules with an energetic temperament and in quiet hours;
 //! - (A5: AC13) each of the 11 intents plays its own clip, the new gestures are listed emotes, and
 //!   without their art the intents fall back down their chains;
-//! - (p4: AC14) the reactions and contexts play stage r/s/w art, and only nightcap waits (p5).
+//! - (p4: AC14) the reactions and contexts play stage r/s/w art;
+//! - (p5: AC19, AC18) every prop activity and rare surprise is rendered, in the idle pool and listed,
+//!   rare ones on a long cooldown, hats and winter props only in their months; nothing waits for art.
 //!
 //! `buddy studio audit` (AC11, AC17) measures time shares and targets; this file pins what the
 //! pack itself must hold, so a pack edit that drops an A4 entry or breaks the rules fails here.
@@ -14,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use mascot_core::{body, pack, replay, Brain, BrainConfig, DndAction, Intent, LocalTime, NowPlaying, PackMeta, Senses};
-use mascot_protocol::pack::{PoolKind, Temperament};
+use mascot_protocol::pack::{Loops, PoolKind, Temperament};
 
 fn bear() -> Arc<PackMeta> {
     let dir: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../mascots/bear");
@@ -90,10 +92,15 @@ fn run(seed: u64, minutes: u64, temperament: Option<Temperament>, quiet_hours: b
 
 /// `run` with these senses held all along (10:00, November).
 fn run_senses(seed: u64, minutes: u64, temperament: Option<Temperament>, senses: Senses) -> (Vec<Pick>, Vec<String>) {
+    run_at(seed, minutes, temperament, Senses { local: LocalTime { minutes: 10 * 60, weekday: 0 }, month: 11, ..senses })
+}
+
+/// `run` with exactly these senses (local time and month included) held all along.
+fn run_at(seed: u64, minutes: u64, temperament: Option<Temperament>, senses: Senses) -> (Vec<Pick>, Vec<String>) {
     let p = bear();
     let dur = minutes * 60_000;
     let mut brain = Brain::new(p.clone(), BrainConfig { seed, temperament, dnd_action: DndAction::Hide }, 0);
-    brain.senses(&Senses { local: LocalTime { minutes: 10 * 60, weekday: 0 }, month: 11, ..senses }, 0);
+    brain.senses(&senses, 0);
     let mut trace = vec![];
     let mut t = 0;
     brain.tick(0);
@@ -292,8 +299,9 @@ fn the_emotes_fixture_plays_each_gesture_with_its_own_behavior() {
     assert_eq!(names.iter().cloned().collect::<std::collections::BTreeSet<_>>(), gestures, "the fixture has each gesture emote once");
     assert_eq!(names.len(), gestures.len());
     let end = items.last().unwrap().at_ms + 8000;
-    // seed 3: no idle desk spell overlaps an emote (an emote at the desk is refused as busy)
-    let tl = replay::Timeline { timeline_version: replay::TIMELINE_VERSION, seed: 3, duration_ms: end, start_local: "10:00".into(), weekday: 2, items };
+    // seed 1: no idle desk spell or long prop set overlaps an emote (an emote at the desk is refused as busy, one
+    // during a prop set waits for its exit; p5's sets moved seed 3's picks)
+    let tl = replay::Timeline { timeline_version: replay::TIMELINE_VERSION, seed: 1, duration_ms: end, start_local: "10:00".into(), weekday: 2, items };
     let log = replay::run(p, &tl);
     let items = &tl.items;
     for (k, name) in names.iter().enumerate() {
@@ -310,8 +318,8 @@ fn the_emotes_fixture_plays_each_gesture_with_its_own_behavior() {
 }
 
 /// p4 (react-brain, AC14): the stage r/s/w art is wired. Every reaction plays a rendered behavior
-/// (morning's `greet` is an intent), every context has its own rendered pool entries, and the only
-/// entry waiting for art is nightcap (p5), never a pick in quiet hours.
+/// (morning's `greet` is an intent) and every context has its own rendered pool entries. Since p5
+/// nothing waits for art and nightcap (set bed_cap) is a quiet-hours pick.
 #[test]
 fn the_p4_reactions_and_contexts_play_on_the_real_art() {
     let p = bear();
@@ -330,9 +338,18 @@ fn the_p4_reactions_and_contexts_play_on_the_real_art() {
         }
     }
     let waiting: Vec<(&str, String)> = p.waiting().into_iter().map(|w| (w.kind, w.name)).collect();
-    assert_eq!(waiting, [("idle", "nightcap".to_string())], "only nightcap waits (p5 art)");
-    let (picks, _) = run(3, 30, None, true);
-    assert!(!picks.is_empty() && picks.iter().all(|k| k.1 != "nightcap"), "nightcap is never a pick before its art");
+    assert_eq!(waiting, [], "nothing waits for art after p5");
+    assert!(p.available("nightcap") && p.behavior("nightcap").and_then(|b| b.set.as_deref()) == Some("bed_cap"));
+    // its idle entry holds 23:00-07:00 only: a 23:30 quiet hour picks it, a 10:00 one never does
+    let at = |minutes, seed| {
+        let s = Senses { quiet_hours: true, local: LocalTime { minutes, weekday: 0 }, month: 11, ..Senses::default() };
+        run_at(seed, 60, None, s).0.into_iter().map(|k| k.1).collect::<Vec<String>>()
+    };
+    let night: Vec<String> = (1..=3).flat_map(|seed| at(23 * 60 + 30, seed)).collect();
+    assert!(night.iter().any(|n| n == "nightcap"), "nightcap is a quiet-hours pick: {night:?}");
+    assert!(night.iter().all(|n| ["nap", "rest", "nightcap"].contains(&n.as_str())), "sleepy pool only: {night:?}");
+    let day: Vec<String> = (1..=3).flat_map(|seed| at(10 * 60, seed)).collect();
+    assert!(!day.iter().any(|n| n == "nightcap"), "nightcap outside its hours: {day:?}");
 }
 
 /// p4: the drag fixture on the real bear: it dangles while held, lands with a squash, and the
@@ -376,4 +393,98 @@ fn thirty_minutes_of_music_keep_the_variety_rule_and_react_entries_stay_a_minori
         let share = react as f64 / picks.len() as f64;
         assert!(react > 0 && share <= 0.35, "seed {seed}: react {react} of {} picks", picks.len());
     }
+}
+
+/// Storyboard rows 71–86 (prototype `#sb-props-*`): (behavior, set, body group).
+const A6_PROPS: [(&str, &str, &str); 16] = [
+    ("tea", "tea", "pastime"), ("snack", "snack", "pastime"), ("knit", "knit", "pastime"),
+    ("notebook", "notebook", "pastime"), ("laptop", "laptop", "pastime"), ("headphones", "phones", "pastime"),
+    ("umbrella", "umbrella", "play"),
+    ("ball", "ball", "play"), ("bubbles", "bubbles", "play"), ("yoyo", "yoyo", "play"), ("blocks", "blocks", "play"),
+    ("balloon", "balloon", "play"),
+    ("plant", "plant", "pastime"), ("sweep", "sweep", "pastime"), ("snowman", "snowman", "play"),
+    ("fishing", "fishing", "pastime"),
+];
+
+/// Storyboard rows 88–98 (prototype `#sb-rare`): (behavior, months it may play in, empty = all year).
+const A6_RARE: [(&str, &[u8]); 11] = [
+    ("windmill", &[]), ("hiccups", &[]), ("find_coin", &[]), ("snowflake_nose", &[12, 1, 2]),
+    ("butterfly_ear", &[4, 5, 6, 7, 8, 9]), ("peekaboo", &[]), ("moonwalk", &[]),
+    ("hat_spring", &[3, 4, 5]), ("hat_summer", &[6, 7, 8]), ("hat_autumn", &[9, 10, 11]), ("hat_winter", &[12, 1, 2]),
+];
+
+/// p5 (props-wire, AC19, AC18): every prop activity and rare surprise is rendered, in the idle pool
+/// (props `long` 20–300 s, rare ones weight ≤ 0.3 and cooldown ≥ 1800 s), and listed for the agent.
+#[test]
+fn every_a6_prop_and_rare_surprise_is_rendered_in_the_pool_and_listed() {
+    let p = bear();
+    let (acts, emos, prompt) = (body::activities(&p), body::emotes(&p), body::prompt_text(&p).unwrap());
+    let range = p.variety.as_ref().and_then(|v| v.targets.as_ref()).unwrap().long_len_s;
+    let mut bad = vec![];
+    for (name, set, group) in A6_PROPS {
+        let b = p.behavior(name).unwrap_or_else(|| panic!("{name}: no behavior"));
+        if !p.available(name) || b.set.as_deref() != Some(set) {
+            bad.push(format!("{name}: available {} set {:?} (want {set})", p.available(name), b.set));
+        }
+        let entries: Vec<_> = p.idle_pool.iter().filter(|e| e.name() == name).collect();
+        if entries.is_empty() {
+            bad.push(format!("{name}: not in the idle pool"));
+        }
+        for e in &entries {
+            if e.kind != PoolKind::Long || e.weight <= 0.0 || !(600.0..=1800.0).contains(&e.cooldown_s) {
+                bad.push(format!("{name}: kind {:?} weight {} cooldown {}", e.kind, e.weight, e.cooldown_s));
+            }
+        }
+        // the loop step's for_s keeps a visit inside targets.long_len_s with its enter and exit
+        let held = b.seq.iter().find_map(|st| if let Loops::For { for_s } = st.loops { Some(for_s) } else { None });
+        if !held.is_some_and(|[lo, hi]| lo >= range[0] && hi <= range[1] - 30.0) {
+            bad.push(format!("{name}: loop for_s {held:?} outside {range:?}"));
+        }
+        match acts.iter().find(|a| a.name == name) {
+            Some(a) if a.group == group && prompt.contains(&format!("- {name}: {}\n", a.about)) => {}
+            other => bad.push(format!("{name}: activity {other:?}, not group {group} in list and prompt")),
+        }
+    }
+    assert!(acts.iter().any(|a| a.name == "nightcap"), "nightcap is an activity");
+    let cap = p.behavior("nightcap").unwrap().seq.iter().find_map(|st| if let Loops::For { for_s } = st.loops { Some(for_s) } else { None });
+    assert!(cap.is_some_and(|[lo, hi]| lo >= range[0] && hi <= range[1] - 30.0), "nightcap for_s {cap:?}");
+    assert!(p.warmup.exclude.iter().any(|n| n == "nightcap"), "no bed at launch");
+    for (name, months) in A6_RARE {
+        if !p.available(name) {
+            bad.push(format!("{name}: not rendered ({:?})", p.missing_clip(name)));
+        }
+        match p.idle_pool.iter().find(|e| e.name() == name) {
+            None => bad.push(format!("{name}: not in the idle pool")),
+            Some(e) => {
+                let want_kind = if name == "moonwalk" { PoolKind::Move } else { PoolKind::Rare };
+                let got: &[u8] = e.when.as_ref().and_then(|w| w.months.as_deref()).unwrap_or(&[]);
+                if e.kind != want_kind || !(e.weight > 0.0 && e.weight <= 0.3) || e.cooldown_s < 1800.0 || got != months {
+                    bad.push(format!("{name}: kind {:?} weight {} cooldown {} months {got:?}", e.kind, e.weight, e.cooldown_s));
+                }
+            }
+        }
+        if !emos.iter().any(|e| e.name == name && e.group == "surprise") {
+            bad.push(format!("{name}: not a surprise emote"));
+        }
+    }
+    assert!(bad.is_empty(), "{bad:#?}");
+    assert!(prompt.contains("\nSurprises: windmill, "), "the prompt lists the surprises:\n{prompt}");
+    assert_eq!(p.waiting().len(), 0, "{:?}", p.waiting().iter().map(|w| &w.name).collect::<Vec<_>>());
+}
+
+/// Non-happy (AC19): a month-gated entry never plays outside its months. Two July hours on three
+/// seeds may show the summer hat, never another hat, the snowflake, the snowman or ice fishing;
+/// and in winter the snowman shows up.
+#[test]
+fn hats_and_winter_props_keep_to_their_months() {
+    let at = |month: u8, hour: u16| Senses { local: LocalTime { minutes: hour * 60, weekday: 2 }, month, ..Senses::default() };
+    let july: Vec<String> = (1..=3).flat_map(|seed| run_at(seed, 120, None, at(7, 10)).0).map(|k| k.1).collect();
+    for never in ["hat_spring", "hat_autumn", "hat_winter", "snowflake_nose", "snowman", "fishing", "tea"] {
+        assert!(!july.iter().any(|n| n == never), "July 10:00: {never} played");
+    }
+    let winter: Vec<String> = (1..=3).flat_map(|seed| run_at(seed, 120, None, at(12, 15)).0).map(|k| k.1).collect();
+    for want in ["snowman", "fishing", "tea"] {
+        assert!(winter.iter().any(|n| n == want), "December 15:00: no {want}");
+    }
+    assert!(!winter.iter().any(|n| n == "hat_summer" || n == "butterfly_ear"), "December: a summer surprise played");
 }

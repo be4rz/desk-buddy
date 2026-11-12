@@ -1,0 +1,7 @@
+{
+ "id": "sit_b",
+ "kind": "set",
+ "module": "set_sit_b",
+ "verify": "verify_sit_b.py",
+ "note": "Stage sit_b (p5 props): four prop sets, notebook / laptop / phones / umbrella (storyboard rows 74-77), ori A faces SE, ori B (3D mirror) faces SW; moving props placed by set_sit_b.prop_state. Output out/bear3d/set_sit_b/."
+}

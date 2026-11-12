@@ -1,0 +1,1486 @@
+{
+ "note": "Stage play ball: ball_get -> ball_bounce (loop) -> ball_drop; a big striped beach ball. Stage B format: each frame is the whole set (toys + bear) baked on one canvas; anchor = pixel of the set origin (the hand-off spot). Hand-off: the enter clip's frame 0 and the exit clip's last frame are pixel-identical to the props-only frame + the Stage A idle sprite (frame 0) at handoff.px from the anchor. Stage play bubbles: bubbles_get -> bubbles_blow (loop) -> bubbles_put; a bottle + wand, baked bubbles (none at the loop seam). Stage B format: each frame is the whole set (toys + bear) baked on one canvas; anchor = pixel of the set origin (the hand-off spot). Hand-off: the enter clip's frame 0 and the exit clip's last frame are pixel-identical to the props-only frame + the Stage A idle sprite (frame 0) at handoff.px from the anchor. Stage play yoyo: yoyo_get -> yoyo (loop, face layers from face_play.json set_clips, patch in face_patch_dir) -> yoyo_put. Stage B format: each frame is the whole set (toys + bear) baked on one canvas; anchor = pixel of the set origin (the hand-off spot). Hand-off: the enter clip's frame 0 and the exit clip's last frame are pixel-identical to the props-only frame + the Stage A idle sprite (frame 0) at handoff.px from the anchor. Stage play blocks: blocks_sit -> blocks_build (loop: three blocks stacked, the tower topples back to frame 0) -> blocks_stand. Stage B format: each frame is the whole set (toys + bear) baked on one canvas; anchor = pixel of the set origin (the hand-off spot). Hand-off: the enter clip's frame 0 and the exit clip's last frame are pixel-identical to the props-only frame + the Stage A idle sprite (frame 0) at handoff.px from the anchor. Stage play balloon: balloon_get -> balloon_bob (loop) -> balloon_let_go; the balloon is tethered to a toy weight, let go it springs back to the tether. Stage B format: each frame is the whole set (toys + bear) baked on one canvas; anchor = pixel of the set origin (the hand-off spot). Hand-off: the enter clip's frame 0 and the exit clip's last frame are pixel-identical to the props-only frame + the Stage A idle sprite (frame 0) at handoff.px from the anchor.",
+ "sorting": "As Stage B: outside these clips draw the props (prop_*.png or props_<set>_<ori>.png) and the free bear as separate sprites sorted by floor depth; from the first to the last frame of a set clip hide them and draw the baked frame at the set anchor. face_patch_dir is per ori.",
+ "stage": "play",
+ "fps": 12,
+ "ppu": 40.0719967705934,
+ "sets": {
+  "ball": {
+   "A": {
+    "frame_w": 96,
+    "frame_h": 122,
+    "anchor": [
+     32,
+     97
+    ],
+    "props_frame": "props_ball_A.png",
+    "orientation": "the bear faces SE, the toy on its left / front-left (E / NE on screen)"
+   },
+   "B": {
+    "frame_w": 96,
+    "frame_h": 122,
+    "anchor": [
+     63,
+     97
+    ],
+    "props_frame": "props_ball_B.png",
+    "orientation": "mirror of A: the bear faces SW, the toy on its right (W / NW on screen)"
+   }
+  },
+  "bubbles": {
+   "A": {
+    "frame_w": 102,
+    "frame_h": 112,
+    "anchor": [
+     32,
+     99
+    ],
+    "props_frame": "props_bubbles_A.png",
+    "orientation": "the bear faces SE, the toy on its left / front-left (E / NE on screen)"
+   },
+   "B": {
+    "frame_w": 102,
+    "frame_h": 112,
+    "anchor": [
+     70,
+     99
+    ],
+    "props_frame": "props_bubbles_B.png",
+    "orientation": "mirror of A: the bear faces SW, the toy on its right (W / NW on screen)"
+   }
+  },
+  "yoyo": {
+   "A": {
+    "frame_w": 94,
+    "frame_h": 114,
+    "anchor": [
+     32,
+     97
+    ],
+    "props_frame": "props_yoyo_A.png",
+    "orientation": "the bear faces SE, the toy on its left / front-left (E / NE on screen)"
+   },
+   "B": {
+    "frame_w": 94,
+    "frame_h": 114,
+    "anchor": [
+     62,
+     97
+    ],
+    "props_frame": "props_yoyo_B.png",
+    "orientation": "mirror of A: the bear faces SW, the toy on its right (W / NW on screen)"
+   }
+  },
+  "blocks": {
+   "A": {
+    "frame_w": 110,
+    "frame_h": 120,
+    "anchor": [
+     32,
+     101
+    ],
+    "props_frame": "props_blocks_A.png",
+    "orientation": "the bear faces SE, the toy on its left / front-left (E / NE on screen)"
+   },
+   "B": {
+    "frame_w": 110,
+    "frame_h": 120,
+    "anchor": [
+     77,
+     101
+    ],
+    "props_frame": "props_blocks_B.png",
+    "orientation": "mirror of A: the bear faces SW, the toy on its right (W / NW on screen)"
+   }
+  },
+  "balloon": {
+   "A": {
+    "frame_w": 98,
+    "frame_h": 122,
+    "anchor": [
+     32,
+     108
+    ],
+    "props_frame": "props_balloon_A.png",
+    "orientation": "the bear faces SE, the toy on its left / front-left (E / NE on screen)"
+   },
+   "B": {
+    "frame_w": 98,
+    "frame_h": 122,
+    "anchor": [
+     65,
+     108
+    ],
+    "props_frame": "props_balloon_B.png",
+    "orientation": "mirror of A: the bear faces SW, the toy on its right (W / NW on screen)"
+   }
+  }
+ },
+ "anims": {
+  "ball_get": {
+   "set": "ball",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 12,
+   "files": {
+    "A": "ball_get_A.png",
+    "B": "ball_get_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      0.0,
+      0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      -0.0,
+      -0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "ball_bounce"
+  },
+  "ball_bounce": {
+   "set": "ball",
+   "loop": true,
+   "fps": 12,
+   "frames_n": 24,
+   "files": {
+    "A": "ball_bounce_A.png",
+    "B": "ball_bounce_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "ball_bounce or ball_drop"
+  },
+  "ball_drop": {
+   "set": "ball",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 12,
+   "files": {
+    "A": "ball_drop_A.png",
+    "B": "ball_drop_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "end",
+     "frame": 11,
+     "pos_world": [
+      0.0,
+      0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "end",
+     "frame": 11,
+     "pos_world": [
+      -0.0,
+      -0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "Stage A idle (rest pose, same spot and facing)"
+  },
+  "bubbles_get": {
+   "set": "bubbles",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 12,
+   "files": {
+    "A": "bubbles_get_A.png",
+    "B": "bubbles_get_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      0.0,
+      0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      -0.0,
+      -0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "bubbles_blow"
+  },
+  "bubbles_blow": {
+   "set": "bubbles",
+   "loop": true,
+   "fps": 12,
+   "frames_n": 32,
+   "files": {
+    "A": "bubbles_blow_A.png",
+    "B": "bubbles_blow_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "bubbles_blow or bubbles_put"
+  },
+  "bubbles_put": {
+   "set": "bubbles",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 12,
+   "files": {
+    "A": "bubbles_put_A.png",
+    "B": "bubbles_put_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "end",
+     "frame": 11,
+     "pos_world": [
+      0.0,
+      0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "end",
+     "frame": 11,
+     "pos_world": [
+      -0.0,
+      -0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "Stage A idle (rest pose, same spot and facing)"
+  },
+  "yoyo_get": {
+   "set": "yoyo",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 10,
+   "files": {
+    "A": "yoyo_get_A.png",
+    "B": "yoyo_get_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      0.0,
+      0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      -0.0,
+      -0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "yoyo"
+  },
+  "yoyo": {
+   "set": "yoyo",
+   "loop": true,
+   "fps": 12,
+   "frames_n": 24,
+   "files": {
+    "A": "yoyo_A.png",
+    "B": "yoyo_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "yoyo or yoyo_put",
+   "face_patch_dir": {
+    "A": "SE",
+    "B": "SW"
+   }
+  },
+  "yoyo_put": {
+   "set": "yoyo",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 10,
+   "files": {
+    "A": "yoyo_put_A.png",
+    "B": "yoyo_put_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "end",
+     "frame": 9,
+     "pos_world": [
+      0.0,
+      0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "end",
+     "frame": 9,
+     "pos_world": [
+      -0.0,
+      -0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "Stage A idle (rest pose, same spot and facing)"
+  },
+  "blocks_sit": {
+   "set": "blocks",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 12,
+   "files": {
+    "A": "blocks_sit_A.png",
+    "B": "blocks_sit_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      0.0,
+      0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      -0.0,
+      -0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "blocks_build"
+  },
+  "blocks_build": {
+   "set": "blocks",
+   "loop": true,
+   "fps": 12,
+   "frames_n": 48,
+   "files": {
+    "A": "blocks_build_A.png",
+    "B": "blocks_build_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "blocks_build or blocks_stand"
+  },
+  "blocks_stand": {
+   "set": "blocks",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 12,
+   "files": {
+    "A": "blocks_stand_A.png",
+    "B": "blocks_stand_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "end",
+     "frame": 11,
+     "pos_world": [
+      0.0,
+      0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "end",
+     "frame": 11,
+     "pos_world": [
+      -0.0,
+      -0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "Stage A idle (rest pose, same spot and facing)"
+  },
+  "balloon_get": {
+   "set": "balloon",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 12,
+   "files": {
+    "A": "balloon_get_A.png",
+    "B": "balloon_get_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      0.0,
+      0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      -0.0,
+      -0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "balloon_bob"
+  },
+  "balloon_bob": {
+   "set": "balloon",
+   "loop": true,
+   "fps": 12,
+   "frames_n": 32,
+   "files": {
+    "A": "balloon_bob_A.png",
+    "B": "balloon_bob_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "balloon_bob or balloon_let_go"
+  },
+  "balloon_let_go": {
+   "set": "balloon",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 18,
+   "files": {
+    "A": "balloon_let_go_A.png",
+    "B": "balloon_let_go_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "end",
+     "frame": 17,
+     "pos_world": [
+      0.0,
+      0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "end",
+     "frame": 17,
+     "pos_world": [
+      -0.0,
+      -0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "Stage A idle (rest pose, same spot and facing)"
+  }
+ }
+}

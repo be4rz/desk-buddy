@@ -1,0 +1,1546 @@
+{
+ "note": "Stage out plant: plant_get -> plant_water (loop) -> plant_put. Stage B format: each frame is the whole set baked on one canvas; anchor = pixel of the set origin (the hand-off spot). Hand-off: plant_get frame 0 and plant_put's last frame are pixel-identical to the props-only frame + the Stage A idle sprite (frame 0). Joins: plant_get last = plant_water 0 = plant_put 0. Face baked. Stage out sweep: sweep_get -> sweep (loop) -> sweep_put. Stage B format: each frame is the whole set baked on one canvas; anchor = pixel of the set origin (the hand-off spot). Hand-off: sweep_get frame 0 and sweep_put's last frame are pixel-identical to the props-only frame + the Stage A idle sprite (frame 0). Joins: sweep_get last = sweep 0 = sweep_put 0. Face baked. Stage out snow: snow_kneel -> snow_build (loop) -> snow_stand. Stage B format: each frame is the whole set baked on one canvas; anchor = pixel of the set origin (the hand-off spot). Hand-off: snow_kneel frame 0 and snow_stand's last frame are pixel-identical to the props-only frame + the Stage A idle sprite (frame 0). Joins: snow_kneel last = snow_build 0 = snow_stand 0. Face baked. Stage out fish: fish_sit -> fish_wait (loop) -> fish_stand. Stage B format: each frame is the whole set baked on one canvas; anchor = pixel of the set origin (the hand-off spot). Hand-off: fish_sit frame 0 and fish_stand's last frame are pixel-identical to the props-only frame + the Stage A idle sprite (frame 0). Joins: fish_sit last = fish_wait 0 = fish_stand 0. fish_wait: face layers from face_out.json set_clips (patch in face_patch_dir); the rest baked. Stage out cap: cap_get_in_bed -> cap_sleep (loop) -> cap_wake_up. Stage B format: each frame is the whole set baked on one canvas; anchor = pixel of the set origin (the hand-off spot). Hand-off: cap_get_in_bed frame 0 and cap_wake_up's last frame are pixel-identical to the props-only frame + the Stage A idle sprite (frame 0). Joins: cap_get_in_bed last = cap_sleep 0 = cap_wake_up 0. Face baked.",
+ "sorting": "As Stage B: outside these clips draw the props (prop_*.png or props_<set>_<ori>.png) and the free bear as separate sprites sorted by floor depth; from the first to the last frame of a set clip hide them and draw the baked frame at the set anchor. face_patch_dir is per ori.",
+ "stage": "out",
+ "fps": 12,
+ "ppu": 40.0719967705934,
+ "sets": {
+  "plant": {
+   "A": {
+    "frame_w": 94,
+    "frame_h": 136,
+    "anchor": [
+     32,
+     98
+    ],
+    "props_frame": "props_plant_A.png",
+    "orientation": "the bear faces SE, the can on its left (NE), the potted sprout ahead-left (E)"
+   },
+   "B": {
+    "frame_w": 94,
+    "frame_h": 136,
+    "anchor": [
+     61,
+     98
+    ],
+    "props_frame": "props_plant_B.png",
+    "orientation": "mirror of A: faces SW, the can NW, the sprout W"
+   }
+  },
+  "sweep": {
+   "A": {
+    "frame_w": 108,
+    "frame_h": 120,
+    "anchor": [
+     32,
+     98
+    ],
+    "props_frame": "props_sweep_A.png",
+    "orientation": "the bear faces SE, the broom lies on its left (NE)"
+   },
+   "B": {
+    "frame_w": 108,
+    "frame_h": 120,
+    "anchor": [
+     76,
+     98
+    ],
+    "props_frame": "props_sweep_B.png",
+    "orientation": "mirror of A: faces SW, the broom NW"
+   }
+  },
+  "snowman": {
+   "A": {
+    "frame_w": 98,
+    "frame_h": 126,
+    "anchor": [
+     32,
+     100
+    ],
+    "props_frame": "props_snowman_A.png",
+    "orientation": "the bear faces SE, the snow mound ahead-left (E)"
+   },
+   "B": {
+    "frame_w": 98,
+    "frame_h": 126,
+    "anchor": [
+     66,
+     100
+    ],
+    "props_frame": "props_snowman_B.png",
+    "orientation": "mirror of A: faces SW, the mound W"
+   }
+  },
+  "fishing": {
+   "A": {
+    "frame_w": 106,
+    "frame_h": 140,
+    "anchor": [
+     35,
+     101
+    ],
+    "props_frame": "props_fishing_A.png",
+    "orientation": "the bear faces SE, the ice hole ahead-left (E), the rod on its left (NE)"
+   },
+   "B": {
+    "frame_w": 106,
+    "frame_h": 140,
+    "anchor": [
+     71,
+     101
+    ],
+    "props_frame": "props_fishing_B.png",
+    "orientation": "mirror of A: faces SW, the hole W, the rod NW"
+   }
+  },
+  "bed_cap": {
+   "A": {
+    "frame_w": 152,
+    "frame_h": 148,
+    "anchor": [
+     80,
+     109
+    ],
+    "props_frame": "props_bed_cap_A.png",
+    "orientation": "the bear stands SW of the bed (head end NW) facing SE; the nightcap lies on the pillow"
+   },
+   "B": {
+    "frame_w": 152,
+    "frame_h": 148,
+    "anchor": [
+     72,
+     109
+    ],
+    "props_frame": "props_bed_cap_B.png",
+    "orientation": "mirror of A: SE of the bed (head end NE) facing SW"
+   }
+  }
+ },
+ "anims": {
+  "plant_get": {
+   "set": "plant",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 12,
+   "files": {
+    "A": "plant_get_A.png",
+    "B": "plant_get_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      0.0,
+      0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      -0.0,
+      -0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "plant_water"
+  },
+  "plant_water": {
+   "set": "plant",
+   "loop": true,
+   "fps": 12,
+   "frames_n": 30,
+   "files": {
+    "A": "plant_water_A.png",
+    "B": "plant_water_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "plant_water or plant_put"
+  },
+  "plant_put": {
+   "set": "plant",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 12,
+   "files": {
+    "A": "plant_put_A.png",
+    "B": "plant_put_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "end",
+     "frame": 11,
+     "pos_world": [
+      0.0,
+      0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "end",
+     "frame": 11,
+     "pos_world": [
+      -0.0,
+      -0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "Stage A idle (rest pose, same spot and facing)"
+  },
+  "sweep_get": {
+   "set": "sweep",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 12,
+   "files": {
+    "A": "sweep_get_A.png",
+    "B": "sweep_get_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      0.0,
+      0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      -0.0,
+      -0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "sweep"
+  },
+  "sweep": {
+   "set": "sweep",
+   "loop": true,
+   "fps": 12,
+   "frames_n": 24,
+   "files": {
+    "A": "sweep_A.png",
+    "B": "sweep_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "sweep or sweep_put"
+  },
+  "sweep_put": {
+   "set": "sweep",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 12,
+   "files": {
+    "A": "sweep_put_A.png",
+    "B": "sweep_put_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "end",
+     "frame": 11,
+     "pos_world": [
+      0.0,
+      0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "end",
+     "frame": 11,
+     "pos_world": [
+      -0.0,
+      -0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "Stage A idle (rest pose, same spot and facing)"
+  },
+  "snow_kneel": {
+   "set": "snowman",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 12,
+   "files": {
+    "A": "snow_kneel_A.png",
+    "B": "snow_kneel_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      0.0,
+      0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      -0.0,
+      -0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "snow_build"
+  },
+  "snow_build": {
+   "set": "snowman",
+   "loop": true,
+   "fps": 12,
+   "frames_n": 48,
+   "files": {
+    "A": "snow_build_A.png",
+    "B": "snow_build_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "snow_build or snow_stand"
+  },
+  "snow_stand": {
+   "set": "snowman",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 12,
+   "files": {
+    "A": "snow_stand_A.png",
+    "B": "snow_stand_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "end",
+     "frame": 11,
+     "pos_world": [
+      0.0,
+      0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "end",
+     "frame": 11,
+     "pos_world": [
+      -0.0,
+      -0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "Stage A idle (rest pose, same spot and facing)"
+  },
+  "fish_sit": {
+   "set": "fishing",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 12,
+   "files": {
+    "A": "fish_sit_A.png",
+    "B": "fish_sit_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      0.0,
+      0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      -0.0,
+      -0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "fish_wait"
+  },
+  "fish_wait": {
+   "set": "fishing",
+   "loop": true,
+   "fps": 12,
+   "frames_n": 36,
+   "files": {
+    "A": "fish_wait_A.png",
+    "B": "fish_wait_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "fish_wait or fish_stand",
+   "face_patch_dir": {
+    "A": "SE",
+    "B": "SW"
+   }
+  },
+  "fish_stand": {
+   "set": "fishing",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 12,
+   "files": {
+    "A": "fish_stand_A.png",
+    "B": "fish_stand_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "end",
+     "frame": 11,
+     "pos_world": [
+      0.0,
+      0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "end",
+     "frame": 11,
+     "pos_world": [
+      -0.0,
+      -0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "Stage A idle (rest pose, same spot and facing)"
+  },
+  "cap_get_in_bed": {
+   "set": "bed_cap",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 16,
+   "files": {
+    "A": "cap_get_in_bed_A.png",
+    "B": "cap_get_in_bed_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      0.1059,
+      -1.6587
+     ],
+     "px": [
+      -44,
+      25
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      1.6587,
+      -0.1059
+     ],
+     "px": [
+      44,
+      25
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "cap_sleep"
+  },
+  "cap_sleep": {
+   "set": "bed_cap",
+   "loop": true,
+   "fps": 12,
+   "frames_n": 36,
+   "files": {
+    "A": "cap_sleep_A.png",
+    "B": "cap_sleep_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "cap_sleep or cap_wake_up"
+  },
+  "cap_wake_up": {
+   "set": "bed_cap",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 16,
+   "files": {
+    "A": "cap_wake_up_A.png",
+    "B": "cap_wake_up_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "end",
+     "frame": 15,
+     "pos_world": [
+      0.1059,
+      -1.6587
+     ],
+     "px": [
+      -44,
+      25
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "end",
+     "frame": 15,
+     "pos_world": [
+      1.6587,
+      -0.1059
+     ],
+     "px": [
+      44,
+      25
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "Stage A idle (rest pose, same spot and facing)"
+  }
+ }
+}

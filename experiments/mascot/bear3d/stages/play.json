@@ -1,0 +1,7 @@
+{
+ "id": "play",
+ "kind": "set",
+ "module": "set_play",
+ "verify": "verify_play.py",
+ "note": "Stage play: five toy sets (ball, bubbles, yoyo, blocks, balloon), each enter -> loop -> exit; ori A faces SE, ori B (3D mirror) faces SW; the toys move (set_play.prop_state places them each frame). Output out/bear3d/set_play/."
+}

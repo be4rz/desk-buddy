@@ -365,43 +365,51 @@ fn fixture(name: &str) -> PathBuf {
 
 /// `#hidden-log`: entries the bear wires before their art lands are warnings only (exit 0), one per
 /// waiting entry with its name and missing clip. The expected list comes from the pack itself, so
-/// the test holds while later phases add art (and is empty once every wired name is rendered).
+/// the test holds while later phases add art (the real bear's list is empty since p5).
 #[test]
 fn lint_lists_entries_waiting_for_art_as_warnings() {
-    // the bear has all its A4 art (p2), so lint a copy without stage f's sources: its fidgets wait
+    // the bear has all its art since p5, so lint copies without stage f's sources (its fidgets wait)
+    // and without set_out's (nightcap and the out props wait)
     let real = root().join("mascots/bear");
-    let mut v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(real.join("pack.json")).unwrap()).unwrap();
-    let abs = |s: &serde_json::Value| serde_json::json!(real.join(s.as_str().unwrap()));
-    v["art_root"] = abs(&v["art_root"]);
-    v["palettes"] = serde_json::Value::Array(v["palettes"].as_array().unwrap().iter().map(abs).collect());
-    v["sources"].as_array_mut().unwrap().retain(|s| !s["path"].as_str().unwrap().starts_with("anim_f/"));
-    let dir = tmp("waits-for-art");
-    std::fs::write(dir.join("pack.json"), v.to_string()).unwrap();
-    // the real bear waits only for nightcap's p5 art (react-brain p4: hidden, never a pick)
-    for (pack, waits_some) in [(real.clone(), false), (dir.clone(), true)] {
-        let out = bin().args(["lint", "--pack"]).arg(&pack).arg("--json").output().unwrap();
+    let copy = |name: &str, drop: &str| {
+        let mut v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(real.join("pack.json")).unwrap()).unwrap();
+        let abs = |s: &serde_json::Value| serde_json::json!(real.join(s.as_str().unwrap()));
+        v["art_root"] = abs(&v["art_root"]);
+        v["palettes"] = serde_json::Value::Array(v["palettes"].as_array().unwrap().iter().map(abs).collect());
+        v["sources"].as_array_mut().unwrap().retain(|s| !s["path"].as_str().unwrap().starts_with(drop));
+        let dir = tmp(name);
+        std::fs::write(dir.join("pack.json"), v.to_string()).unwrap();
+        dir
+    };
+    let (no_f, no_out) = (copy("waits-for-art", "anim_f/"), copy("waits-for-out", "set_out/"));
+    let cases: [(&PathBuf, &[(&str, &str)]); 3] = [
+        (&real, &[]),
+        (&no_f, &[("weight_shift", "fid_weight_shift")]),
+        (&no_out, &[("nightcap", "cap_get_in_bed"), ("snowman", "snow_kneel"), ("fishing", "fish_sit"), ("plant", "plant_get")]),
+    ];
+    for (pack, some) in cases {
+        let out = bin().args(["lint", "--pack"]).arg(pack).arg("--json").output().unwrap();
         assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stdout));
         let j: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
         let waits: Vec<&serde_json::Value> = j["issues"].as_array().unwrap().iter().filter(|i| i["code"] == "waits_for_art").collect();
         assert!(waits.iter().all(|i| i["severity"] == "warn" && i["name"].is_string() && i["clip"].is_string()), "{waits:?}");
-        let p = mascot_core::pack::load(&pack).unwrap();
+        let p = mascot_core::pack::load(pack).unwrap();
         let want: Vec<(String, String)> = p.waiting().into_iter().map(|w| (w.name, w.clip)).collect();
         let got: Vec<(String, String)> = waits.iter().map(|i| (i["name"].as_str().unwrap().to_string(), i["clip"].as_str().unwrap().to_string())).collect();
         assert_eq!(got, want, "{}", pack.display());
-        let others = got.iter().filter(|(n, _)| n != "nightcap").count();
-        assert_eq!(others > 0, waits_some, "{}: {got:?}", pack.display());
-        assert!(got.iter().any(|(n, _)| n == "nightcap"), "nightcap waits for its art: {got:?}");
+        assert_eq!(got.is_empty(), some.is_empty(), "{}: {got:?}", pack.display());
         // a waiting entry is one whose art is missing, never one that has it; lean (set_lean, p1) never waits
         for (name, clip) in &got {
             assert!(!p.clips.contains_key(clip), "{name} waits for {clip}, which is loaded");
             assert!(name != "lean");
         }
-        if waits_some {
-            assert!(got.iter().any(|(n, c)| n == "weight_shift" && c == "fid_weight_shift"), "{got:?}");
+        for (n, c) in some {
+            assert!(got.iter().any(|(gn, gc)| gn == n && gc == c), "{n} waits for {c}: {got:?}");
         }
         assert_eq!(j["errors"], 0);
     }
-    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&no_f);
+    let _ = std::fs::remove_dir_all(&no_out);
 }
 
 #[test]

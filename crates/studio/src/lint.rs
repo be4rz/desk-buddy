@@ -422,9 +422,9 @@ mod tests {
         let r = lint(&p);
         assert_eq!(r.errors, 0, "{:?}", r.issues.iter().filter(|i| i.severity == "error").collect::<Vec<_>>());
         assert!(!r.issues.iter().any(|i| i.code == "waits_for_art"), "every r/s/w clip is in");
-        // a quiet-hours name whose art is not in (nightcap until p5), and a reaction whose only behavior has no art
+        // a quiet-hours name whose art is not in (a nightcap on a clip no stage renders), and a reaction whose only behavior has no art
         let mut cap = p.behaviors["dizzy"].clone();
-        cap.seq[0].clip = "cap_sleep".into();
+        cap.seq[0].clip = "cap_sleep_v2".into();
         p.behaviors.insert("nightcap".into(), cap);
         p.quiet_hours.pool.push("nightcap".into());
         let mut dz = p.behaviors["dizzy"].clone();
@@ -432,7 +432,7 @@ mod tests {
         p.behaviors.insert("dizzy".into(), dz);
         let r = lint(&p);
         let waits: Vec<_> = r.issues.iter().filter(|i| i.code == "waits_for_art").map(|i| (i.severity, i.name.as_deref().unwrap(), i.clip.as_deref().unwrap())).collect();
-        assert_eq!(waits, vec![("warn", "nightcap", "cap_sleep"), ("warn", "dizzy", "dizzy_v2")], "{waits:?}");
+        assert_eq!(waits, vec![("warn", "nightcap", "cap_sleep_v2"), ("warn", "dizzy", "dizzy_v2")], "{waits:?}");
         assert_eq!(r.errors, 0);
         assert!(p.waiting_line().unwrap().ends_with("(idle 1, emotes 0, activities 0, reactions 1)"), "{:?}", p.waiting_line());
         // land_squash (8 dirs) then dizzy (5): v2 error, v1 warning

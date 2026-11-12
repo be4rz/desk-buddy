@@ -203,7 +203,8 @@ fn bear_loads_and_every_intent_resolves_before_the_art_round() {
     assert_eq!(p.clips["get_in_bed"].handoff[&Ori::A].facing, Dir::SW);
     assert!(p.sets["read"].oris[&Ori::B].props.iter().any(|pr| pr.name == "book"));
     assert!(p.face.is_none());
-    assert_eq!(p.palettes.len(), 3);
+    // the three base palettes + palette-ext-out.json (p5 props-out: snow, terracotta, …)
+    assert_eq!(p.palettes.len(), 4);
     for i in Intent::ALL {
         assert!(p.available(p.resolve(i)), "{i:?} → {}", p.resolve(i));
     }
@@ -651,11 +652,13 @@ fn energy_shifts_wander_and_dash_share() {
 }
 
 #[test]
-fn quiet_hours_pool_is_nap_and_rest() {
+fn quiet_hours_pool_is_nap_rest_and_nightcap() {
     let mut b = brain_with(no_cooldowns(&bear()), 2);
     b.quiet = true;
     let w = b._named_weights(0);
-    assert!(w.iter().all(|(n, _)| n == "nap" || n == "rest"));
+    // nightcap (p5) is in the pool by its idle entry (night hours only): the brain's clock is 00:00 until a
+    // sense sample, so it may be in here
+    assert!(w.iter().all(|(n, _)| ["nap", "rest", "nightcap"].contains(&n.as_str())), "{w:?}");
     let nap = w.iter().find(|(n, _)| n == "nap").unwrap().1;
     let normal = {
         b.quiet = false;
@@ -665,7 +668,7 @@ fn quiet_hours_pool_is_nap_and_rest() {
     assert!((nap - 4.0 * normal).abs() < 1e-9);
     b.quiet = true;
     let v = picks(&mut b, 2000);
-    assert!(v.iter().all(|x| x == "nap" || x == "rest"));
+    assert!(v.iter().all(|x| ["nap", "rest", "nightcap"].contains(&x.as_str())), "{v:?}");
 }
 
 /// Blink starts (Open → Closed) seen while dragging (a covered idle hold).
@@ -842,11 +845,15 @@ fn warmup_keeps_nap_out_of_the_first_minutes() {
 #[test]
 fn quiet_pool_and_warmup_come_from_pack_data() {
     let bear = bear();
-    // the bear adds nightcap (hidden until its p5 art lands: waiting(), never a pick)
-    let want = crate::pack::QuietPool { pool: vec!["nap".into(), "rest".into(), "nightcap".into()], ..Default::default() };
+    // the bear adds nightcap (stage out, p5: the bed_cap set), boosted like nap
+    let want = crate::pack::QuietPool {
+        pool: vec!["nap".into(), "rest".into(), "nightcap".into()],
+        boost: [("nap".into(), 4.0), ("nightcap".into(), 4.0)].into(),
+    };
     assert_eq!(bear.quiet_hours, want);
-    assert!(!bear.available("nightcap"));
-    assert_eq!(bear.warmup, crate::pack::Warmup::default());
+    assert!(bear.available("nightcap"));
+    // …and keeps nightcap out of the warm-up like nap
+    assert_eq!(bear.warmup, crate::pack::Warmup { exclude: vec!["nap".into(), "nightcap".into()], ..Default::default() });
     // an older pack without the keys loads with today's values
     let t = TempPack::new("noquiet");
     t.edit(|v| {
@@ -898,7 +905,7 @@ fn quiet_hours_play_the_sleepy_pool_with_no_reflex() {
     assert!(b.cue.is_empty(), "no reflex in quiet hours");
     assert!(!b.unprompted_allowed());
     let shows = run_until(&mut b, 1000, 3_600_000);
-    assert!(shows.iter().all(|(_, s)| ["rest", "nap"].contains(&s.behavior.as_str())), "sleepy pool only");
+    assert!(shows.iter().all(|(_, s)| ["rest", "nap", "nightcap"].contains(&s.behavior.as_str())), "sleepy pool only");
     assert!(shows.iter().any(|(_, s)| s.behavior == "nap"));
     assert_eq!(shows.last().unwrap().1.visibility, Visibility::Shown, "quiet hours stay shown");
 }
@@ -1615,7 +1622,24 @@ others start after your reply. They last 2m unless you give --for, at most 30m.
 `buddy mascot stop` ends one.
 - read: sit down and read a book
 - nap: get into bed and sleep
+- tea: sit on a cushion and sip a mug of tea
+- snack: sit on a cushion and munch a cookie
+- knit: sit on a cushion and knit
+- notebook: doodle in a notebook at a little table
+- laptop: type on a toy laptop at a little table
+- headphones: put on headphones and vibe
+- plant: water a potted plant
+- sweep: sweep with a toy broom
+- fishing: fish through a hole in the ice
+- nightcap: put on a nightcap and sleep in bed
 - dance: dance
+- umbrella: stand in the rain under an umbrella
+- ball: bounce a ball
+- bubbles: blow bubbles
+- yoyo: play with a yoyo
+- blocks: build a tower of toy blocks
+- balloon: hold a balloon on a string
+- snowman: build a little snowman
 - lean: lean on a toy block and rest
 - sit_floor: sit on the floor
 - sit_sway: sit on the floor and sway
@@ -1650,9 +1674,10 @@ Gestures (`buddy mascot emote <name>`; a short gesture during your reply):
 Fidgets: weight_shift, ear_twitch, look_up, look_down, tummy_rub, wave_small, peek, butt_wiggle, rock_heels, head_tilt, scratch, yawn, shake_off, sneeze, nod_off, squat
 Moves: tiptoe, skip, shuffle, back_waddle, hop, roll, trip, chase, slide
 Reactions: giggle, head_bob, foot_tap, flinch, check_watch, dizzy, morning_stretch, evening_yawn
+Surprises: windmill, hiccups, find_coin, snowflake_nose, butterfly_ear, peekaboo, moonwalk, hat_spring, hat_summer, hat_autumn, hat_winter
 
 When to use them:
-- If the user asks you to read, nap, dance, lean, sit_floor, sit_sway, lie_belly, lie_back, floor_nap, computer or do another listed activity, run the command
+- If the user asks you to read, nap, tea, snack, knit, notebook, laptop, headphones, plant, sweep, fishing, nightcap, dance, umbrella, ball, bubbles, yoyo, blocks, balloon, snowman, lean, sit_floor, sit_sway, lie_belly, lie_back, floor_nap, computer or do another listed activity, run the command
   and say so briefly.
 - Use at most one emote per reply, only when it matches the mood. Most short
   replies need none.

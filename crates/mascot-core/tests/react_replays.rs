@@ -126,11 +126,12 @@ fn time_has_the_morning_the_evening_yawn_and_quiet_hours() {
     assert!(log.iter().any(|l| l.t_ms > stretch_t && l.t_ms < 60_000 && l.intent == Intent::Greet), "greet after the stretch: {s:?}");
     assert!(s.iter().any(|(t, b)| (60_000..1_260_000).contains(t) && b == "evening_yawn"), "evening: {s:?}");
     assert!(!s.iter().any(|(t, b)| *t < 60_000 && b == "evening_yawn"), "{s:?}");
-    // quiet: no reaction or context entry (nightcap waits for its art in the bear)
+    // quiet: no reaction or context entry, only the sleepy pool (nap, rest and, since p5, nightcap)
     let quiet: Vec<_> = s.iter().filter(|(t, _)| *t >= 1_265_000).map(|(_, b)| b.as_str()).collect();
     for b in ["evening_yawn", "head_bob", "dance", "giggle", "tap_glass", "cursor_watch"] {
         assert!(!quiet.contains(&b), "quiet hours: {quiet:?}");
     }
+    assert!(quiet.iter().all(|b| ["nap", "rest", "nightcap"].contains(b)), "quiet hours: {quiet:?}");
 }
 
 #[test]

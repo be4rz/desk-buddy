@@ -1,0 +1,9 @@
+{
+  "note": "Stage out local palette extension (props-out: plant, sweep, snowman, fishing, bed_cap). Muted pastel, hue-shifted like palette-ext.json, ramps dark -> light. Leaves use pip, wood uses wood, the can fabric_quilt, the bed Stage B's ramps, the nightcap fabric_rose + fabric_cream.",
+  "terracotta": ["#6a4248", "#9a5f55", "#c3815f", "#e0a67a", "#f2c99e"],
+  "straw":      ["#6e5a4a", "#a08660", "#c8ab72", "#e4cc8e", "#f4e6b4"],
+  "snow":       ["#6c7590", "#9aa6c0", "#c3cde0", "#e2e8f2", "#f7f9fc"],
+  "carrot":     ["#7a4a44", "#b8664a", "#e08a52", "#f2ad6e", "#f8d09a"],
+  "ice":        ["#3e5a74", "#5f86a2", "#8db4cc", "#b8d8e6", "#e0f0f6"],
+  "fish":       ["#7a4652", "#b0606a", "#de8c84", "#f2b8a4", "#fadccc"]
+}

@@ -1,0 +1,367 @@
+{
+ "note": "Stage sit_b props (render_set.py, chunky superellipsoid toy shapes), pre-rendered with the Stage A camera and pixel step. Each prop sprite = that prop rendered alone with its own ink outline; anchor = pixel of the prop origin. props_<set>_<ori>.png = the props-only frame on the clip canvas.",
+ "ppu": 40.0719967705934,
+ "pass_ids": {
+  "nb_cover": 50,
+  "nb_page": 51,
+  "nb_doodle": 52,
+  "crayon": 53,
+  "crayon_tip": 54,
+  "lt_body": 55,
+  "lt_keys": 56,
+  "lt_screen": 57,
+  "lt_sticker": 58,
+  "stand_wood": 59,
+  "tray": 68,
+  "ph_band": 60,
+  "ph_cup": 61,
+  "ph_pad": 62,
+  "bucket": 63,
+  "bucket_band": 64,
+  "um_canopy": 65,
+  "um_shaft": 66,
+  "drop": 67
+ },
+ "props": {
+  "crayon": {
+   "set": "notebook",
+   "A": {
+    "file": "prop_crayon_A.png",
+    "size": [
+     10,
+     13
+    ],
+    "anchor": [
+     3,
+     36
+    ],
+    "offset_px_in_set": [
+     18,
+     15
+    ],
+    "layer_key": "crayon_81bee3313ec3"
+   },
+   "B": {
+    "file": "prop_crayon_B.png",
+    "size": [
+     10,
+     13
+    ],
+    "anchor": [
+     7,
+     36
+    ],
+    "offset_px_in_set": [
+     -18,
+     15
+    ],
+    "layer_key": "crayon_e5aca8997db8"
+   },
+   "footprint_world": {
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    0.84,
+    -0.2,
+    0.76
+   ],
+   "note": "a fat toy crayon: on the page at the hand-offs, in the right mitten while doodling"
+  },
+  "notebook": {
+   "set": "notebook",
+   "A": {
+    "file": "prop_notebook_A.png",
+    "size": [
+     38,
+     42
+    ],
+    "anchor": [
+     19,
+     32
+    ],
+    "offset_px_in_set": [
+     27,
+     13
+    ],
+    "layer_key": "notebook_0"
+   },
+   "B": {
+    "file": "prop_notebook_B.png",
+    "size": [
+     38,
+     42
+    ],
+    "anchor": [
+     19,
+     32
+    ],
+    "offset_px_in_set": [
+     -27,
+     13
+    ],
+    "layer_key": "notebook_0"
+   },
+   "footprint_world": {
+    "x": [
+     0.6799999999999999,
+     1.22
+    ],
+    "y": [
+     -0.42,
+     0.42
+    ],
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    0.95,
+    0.0,
+    0.0
+   ],
+   "note": "a low wooden toy tray-table with an open sketchbook (quilt-blue cover, cream pages, a rose doodle) lying on it"
+  },
+  "laptop": {
+   "set": "laptop",
+   "A": {
+    "file": "prop_laptop_A.png",
+    "size": [
+     38,
+     50
+    ],
+    "anchor": [
+     19,
+     40
+    ],
+    "offset_px_in_set": [
+     27,
+     13
+    ],
+    "layer_key": "laptop_0"
+   },
+   "B": {
+    "file": "prop_laptop_B.png",
+    "size": [
+     38,
+     50
+    ],
+    "anchor": [
+     19,
+     40
+    ],
+    "offset_px_in_set": [
+     -27,
+     13
+    ],
+    "layer_key": "laptop_0"
+   },
+   "footprint_world": {
+    "x": [
+     0.6799999999999999,
+     1.22
+    ],
+    "y": [
+     -0.42,
+     0.42
+    ],
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    0.95,
+    0.0,
+    0.0
+   ],
+   "note": "a low wooden toy tray-table with a chunky rounded toy laptop (cream-pink plastic, a rose heart sticker), lid open"
+  },
+  "headphones": {
+   "set": "phones",
+   "A": {
+    "file": "prop_headphones_A.png",
+    "size": [
+     16,
+     51
+    ],
+    "anchor": [
+     8,
+     7
+    ],
+    "offset_px_in_set": [
+     29,
+     -63
+    ],
+    "layer_key": "headphones_6d24d453bb2f"
+   },
+   "B": {
+    "file": "prop_headphones_B.png",
+    "size": [
+     16,
+     51
+    ],
+    "anchor": [
+     8,
+     7
+    ],
+    "offset_px_in_set": [
+     -29,
+     -63
+    ],
+    "layer_key": "headphones_1b2ee12dc8d4"
+   },
+   "footprint_world": {
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    -0.06,
+    1.08,
+    1.34
+   ],
+   "note": "mint headphones with a rose band: on the stand at the hand-offs, on the head in phones_vibe"
+  },
+  "phone_stand": {
+   "set": "phones",
+   "A": {
+    "file": "prop_phone_stand_A.png",
+    "size": [
+     21,
+     55
+    ],
+    "anchor": [
+     11,
+     50
+    ],
+    "offset_px_in_set": [
+     29,
+     -16
+    ],
+    "layer_key": "phone_stand_0"
+   },
+   "B": {
+    "file": "prop_phone_stand_B.png",
+    "size": [
+     21,
+     55
+    ],
+    "anchor": [
+     10,
+     50
+    ],
+    "offset_px_in_set": [
+     -29,
+     -16
+    ],
+    "layer_key": "phone_stand_0"
+   },
+   "footprint_world": {
+    "x": [
+     -0.32,
+     0.2
+    ],
+    "y": [
+     0.8200000000000001,
+     1.34
+    ],
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    -0.06,
+    1.08,
+    0.0
+   ],
+   "note": "a little wooden headphone stand (round base, post, knob)"
+  },
+  "bucket": {
+   "set": "umbrella",
+   "A": {
+    "file": "prop_bucket_A.png",
+    "size": [
+     22,
+     24
+    ],
+    "anchor": [
+     11,
+     19
+    ],
+    "offset_px_in_set": [
+     28,
+     -15
+    ],
+    "layer_key": "bucket_0"
+   },
+   "B": {
+    "file": "prop_bucket_B.png",
+    "size": [
+     22,
+     24
+    ],
+    "anchor": [
+     11,
+     19
+    ],
+    "offset_px_in_set": [
+     -28,
+     -15
+    ],
+    "layer_key": "bucket_0"
+   },
+   "footprint_world": {
+    "x": [
+     -0.27999999999999997,
+     0.19999999999999998
+    ],
+    "y": [
+     0.78,
+     1.26
+    ],
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    -0.04,
+    1.02,
+    0.0
+   ],
+   "note": "a wooden umbrella bucket with a sage band"
+  },
+  "umbrella": {
+   "set": "umbrella",
+   "A": {
+    "file": "prop_umbrella_A.png",
+    "size": [
+     14,
+     55
+    ],
+    "anchor": [
+     7,
+     6
+    ],
+    "offset_px_in_set": [
+     28,
+     -62
+    ],
+    "layer_key": "umbrella_d664a67f24ea"
+   },
+   "B": {
+    "file": "prop_umbrella_B.png",
+    "size": [
+     13,
+     57
+    ],
+    "anchor": [
+     6,
+     8
+    ],
+    "offset_px_in_set": [
+     -28,
+     -62
+    ],
+    "layer_key": "umbrella_d27101743c7c"
+   },
+   "footprint_world": {
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    -0.04,
+    1.02,
+    1.36
+   ],
+   "note": "a rose umbrella (closed in the bucket at the hand-offs) and the rain drops (hidden at the hand-offs)"
+  }
+ }
+}

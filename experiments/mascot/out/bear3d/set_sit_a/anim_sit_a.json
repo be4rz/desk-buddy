@@ -1,0 +1,912 @@
+{
+ "note": "Stage sit_a tea: tea_sit -> tea_sip (loop) -> tea_stand. The bear sips from a mug held in both mittens (face baked). Stage B format: each frame is the whole set (cushion + props + bear) baked on one canvas; anchor = pixel of the set origin (the cushion centre on the floor). Hand-off: tea_sit frame 0 and tea_stand's last frame are pixel-identical to the props-only frame + the Stage A idle sprite (frame 0) at handoff.px from the anchor. Joins: tea_sit last = tea_sip 0 = tea_stand 0. Stage sit_a snack: snack_sit -> snack_munch (loop) -> snack_stand. The bear munches cookies from a cookie jar (face baked). Stage B format: each frame is the whole set (cushion + props + bear) baked on one canvas; anchor = pixel of the set origin (the cushion centre on the floor). Hand-off: snack_sit frame 0 and snack_stand's last frame are pixel-identical to the props-only frame + the Stage A idle sprite (frame 0) at handoff.px from the anchor. Joins: snack_sit last = snack_munch 0 = snack_stand 0. Stage sit_a knit: knit_sit -> knit (loop) -> knit_stand. The bear knits a little swatch (face layers from face_sit_a.json set_clips, patch in face_patch_dir). Stage B format: each frame is the whole set (cushion + props + bear) baked on one canvas; anchor = pixel of the set origin (the cushion centre on the floor). Hand-off: knit_sit frame 0 and knit_stand's last frame are pixel-identical to the props-only frame + the Stage A idle sprite (frame 0) at handoff.px from the anchor. Joins: knit_sit last = knit 0 = knit_stand 0.",
+ "sorting": "As Stage B: outside these clips draw the props (prop_*.png or props_<set>_<ori>.png) and the free bear as separate sprites sorted by floor depth; from the first to the last frame of a set clip hide them and draw the baked frame at the set anchor. face_patch_dir is per ori.",
+ "stage": "sit_a",
+ "fps": 12,
+ "ppu": 40.0719967705934,
+ "sets": {
+  "tea": {
+   "A": {
+    "frame_w": 96,
+    "frame_h": 134,
+    "anchor": [
+     36,
+     108
+    ],
+    "props_frame": "props_tea_A.png",
+    "orientation": "the bear faces SE on the floor cushion, the mug on its right (SW on screen)"
+   },
+   "B": {
+    "frame_w": 96,
+    "frame_h": 134,
+    "anchor": [
+     60,
+     108
+    ],
+    "props_frame": "props_tea_B.png",
+    "orientation": "mirror of A: the bear faces SW, the mug on its left (SE on screen)"
+   }
+  },
+  "snack": {
+   "A": {
+    "frame_w": 96,
+    "frame_h": 134,
+    "anchor": [
+     36,
+     108
+    ],
+    "props_frame": "props_snack_A.png",
+    "orientation": "the bear faces SE on the floor cushion, the cookie jar on its right (SW on screen)"
+   },
+   "B": {
+    "frame_w": 96,
+    "frame_h": 134,
+    "anchor": [
+     60,
+     108
+    ],
+    "props_frame": "props_snack_B.png",
+    "orientation": "mirror of A: the bear faces SW, the cookie jar on its left (SE on screen)"
+   }
+  },
+  "knit": {
+   "A": {
+    "frame_w": 96,
+    "frame_h": 134,
+    "anchor": [
+     36,
+     108
+    ],
+    "props_frame": "props_knit_A.png",
+    "orientation": "the bear faces SE on the floor cushion, the yarn ball on its right (SW on screen)"
+   },
+   "B": {
+    "frame_w": 96,
+    "frame_h": 134,
+    "anchor": [
+     60,
+     108
+    ],
+    "props_frame": "props_knit_B.png",
+    "orientation": "mirror of A: the bear faces SW, the yarn ball on its left (SE on screen)"
+   }
+  }
+ },
+ "anims": {
+  "tea_sit": {
+   "set": "tea",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 12,
+   "files": {
+    "A": "tea_sit_A.png",
+    "B": "tea_sit_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      0.8646,
+      0.0176
+     ],
+     "px": [
+      25,
+      12
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      -0.0176,
+      -0.8646
+     ],
+     "px": [
+      -25,
+      12
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "tea_sip"
+  },
+  "tea_sip": {
+   "set": "tea",
+   "loop": true,
+   "fps": 12,
+   "frames_n": 36,
+   "files": {
+    "A": "tea_sip_A.png",
+    "B": "tea_sip_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "tea_sip or tea_stand"
+  },
+  "tea_stand": {
+   "set": "tea",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 12,
+   "files": {
+    "A": "tea_stand_A.png",
+    "B": "tea_stand_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "end",
+     "frame": 11,
+     "pos_world": [
+      0.8646,
+      0.0176
+     ],
+     "px": [
+      25,
+      12
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "end",
+     "frame": 11,
+     "pos_world": [
+      -0.0176,
+      -0.8646
+     ],
+     "px": [
+      -25,
+      12
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "Stage A idle (rest pose, same spot and facing)"
+  },
+  "snack_sit": {
+   "set": "snack",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 12,
+   "files": {
+    "A": "snack_sit_A.png",
+    "B": "snack_sit_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      0.8646,
+      0.0176
+     ],
+     "px": [
+      25,
+      12
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      -0.0176,
+      -0.8646
+     ],
+     "px": [
+      -25,
+      12
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "snack_munch"
+  },
+  "snack_munch": {
+   "set": "snack",
+   "loop": true,
+   "fps": 12,
+   "frames_n": 30,
+   "files": {
+    "A": "snack_munch_A.png",
+    "B": "snack_munch_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "snack_munch or snack_stand"
+  },
+  "snack_stand": {
+   "set": "snack",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 12,
+   "files": {
+    "A": "snack_stand_A.png",
+    "B": "snack_stand_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "end",
+     "frame": 11,
+     "pos_world": [
+      0.8646,
+      0.0176
+     ],
+     "px": [
+      25,
+      12
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "end",
+     "frame": 11,
+     "pos_world": [
+      -0.0176,
+      -0.8646
+     ],
+     "px": [
+      -25,
+      12
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "Stage A idle (rest pose, same spot and facing)"
+  },
+  "knit_sit": {
+   "set": "knit",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 12,
+   "files": {
+    "A": "knit_sit_A.png",
+    "B": "knit_sit_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      0.8646,
+      0.0176
+     ],
+     "px": [
+      25,
+      12
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      -0.0176,
+      -0.8646
+     ],
+     "px": [
+      -25,
+      12
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "knit"
+  },
+  "knit": {
+   "set": "knit",
+   "loop": true,
+   "fps": 12,
+   "frames_n": 36,
+   "files": {
+    "A": "knit_A.png",
+    "B": "knit_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "knit or knit_stand",
+   "face_patch_dir": {
+    "A": "SE",
+    "B": "SW"
+   }
+  },
+  "knit_stand": {
+   "set": "knit",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 12,
+   "files": {
+    "A": "knit_stand_A.png",
+    "B": "knit_stand_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "end",
+     "frame": 11,
+     "pos_world": [
+      0.8646,
+      0.0176
+     ],
+     "px": [
+      25,
+      12
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "end",
+     "frame": 11,
+     "pos_world": [
+      -0.0176,
+      -0.8646
+     ],
+     "px": [
+      -25,
+      12
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "Stage A idle (rest pose, same spot and facing)"
+  }
+ }
+}

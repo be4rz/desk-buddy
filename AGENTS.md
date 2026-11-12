@@ -121,7 +121,8 @@ and talks through speech bubbles, powered by an LLM.
   `handoff` ends may be `idle0` or `<Stage A clip>#<frame>` (e.g. `run_stop#0`); Rig K `tumble` (deg, about the body
   centre) and `lift` (world z), plus lean/roll up to ±90, are allowed only for face baked/none clips.
   Freeze: `stages/freeze_p1.sha` = sha256 of every file in `anim anim_b anim_c anim_l anim_d props props_d cute face
-  set_lean`; `python3 stagekit.py check stages/freeze_p1.sha` must be clean (a later stage passes `--own <its dir>`).
+  set_lean`; `python3 stagekit.py check stages/freeze_p1.sha` must be clean (a later stage passes `--own <its dir>`;
+  the one allowed extra is the p5 index `out/bear3d/sheets.html`, shown as `added`).
   Stage lean (`stages/lean.json`, `set_lean.py`): `sh run_stage.sh lean` (~1.5 min) → `out/bear3d/set_lean/`:
   `anim_lean.json` (Stage B format), `props_lean.json` (Stage B props format), `face_lean.json` (set_clips `lean`, patch
   SE / SW, + exact frames), `sheet_lean.png`, `preview_lean.html`. lean_in 10 → lean 30 (loop) → lean_out 10; a side lean
@@ -153,6 +154,19 @@ and talks through speech bubbles, powered by an LLM.
   point_bubble, shy_hide, laugh, pout, proud, head_scratch (shrug/thumbs_up/point_bubble/proud layers, `face_x.json`).
   `python3 verify_e.py` / `verify_x.py` (`--self-test`, exit 1 = works). Freeze check after p3: add `--own anim_e anim_x`.
   The pack wires them as the 11 intents' own clips and 16 gesture emotes (`mascots/bear/README.md` § gestures).
+  The A6 stages: p4 clip stages r, s (reactions, 84×123) and w (window edge, 84×139 [42,107], legs hang below the anchor),
+  `sh run_stage.sh r|s|w` → `anim_<id>/`; p5 set stages (`kind` set, ori A faces SE, B = 3D mirror SW, canvases ≤ 176×160,
+  each set enter → loop → exit, hand-offs = props + idle#0): sit_a (`set_sit_a.py`: tea, snack, knit on a floor cushion),
+  sit_b (`set_sit_b.py`: notebook and laptop on a low toy tray-table, headphones `phones`, umbrella with baked rain),
+  play (`set_play.py`: ball, bubbles, yoyo, blocks, tethered balloon), out (`set_out.py`: plant, sweep, snowman, fishing,
+  `bed_cap` = the nightcap bed; its colours are `palette-ext-out.json`, listed in pack.json `palettes`), each
+  `sh run_stage.sh <id>` → `set_<id>/` (`anim_<id>.json`, `props_<id>.json`, `face_<id>.json`, `sheet_<id>.png`,
+  `preview_<id>.html`) and `python3 verify_<id>.py` (`--self-test`, exit 1 = works); p5 clip stage z (`clips_z.py`, rare
+  surprises + four seasonal hats, F5 84×123, moonwalk 8 dirs) → `anim_z/`. Freeze check after p5: `check
+  stages/freeze_p1.sha --own anim_f anim_g anim_p anim_m anim_t anim_e anim_x anim_r anim_s anim_w set_sit_a set_sit_b
+  set_play set_out anim_z`; it reports `added: sheets.html` (the index below; `--own` takes dirs only), nothing else. The pack wires them as idle `long` / `rare` entries, activities and `surprise` emotes
+  (`mascots/bear/README.md` § props and surprises). Every sheet and preview of the run: `out/bear3d/sheets.html`
+  (`python3 make_sheets.py` rewrites it).
 - `python3 verify_b.py`: Stage B hand-off frames must be pixel-identical to props + the idle sprite; run it after any re-render.
 - `python3 verify_face.py [--part FILE]` (`--self-test`: in-memory mutations (3 with face.json v2, 4 with `set_clips`, 5 with a face part), each must be caught, exit 1): the face invariant
   "T" (amends design §3.4). Default patches drawn at each frame's position must equal the expected frame (the anim_c

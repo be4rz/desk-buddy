@@ -234,7 +234,8 @@ mod tests {
     fn the_idle_long_fixture_holds_read_nap_and_desk_twenty_to_three_hundred_seconds() {
         use mascot_core::Intent;
         let mut seen = std::collections::BTreeSet::new();
-        for seed in [7, 8] {
+        // three idle hours: since p5 sixteen prop activities share the long slots with read, nap and desk
+        for seed in [7, 8, 9] {
             let log = desk_replay("idle_long.jsonl", BEAR, seed, 3_600_000);
             let mut k = 0;
             while k < log.len() {
@@ -260,7 +261,7 @@ mod tests {
                 k = j;
             }
         }
-        assert_eq!(seen.len(), 3, "read, nap and desk each come up in two idle hours: {seen:?}");
+        assert_eq!(seen.len(), 3, "read, nap and desk each come up in three idle hours: {seen:?}");
     }
 
     /// §1.5 turn-first: `idle_front` on the variety fixture: front-only and back-only fidgets play only in

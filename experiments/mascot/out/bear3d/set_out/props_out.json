@@ -1,0 +1,402 @@
+{
+ "note": "Stage out props (render_set.py, chunky superellipsoid toy shapes), pre-rendered with the Stage A camera and pixel step. Each prop sprite = that prop rendered alone with its own ink outline; anchor = pixel of the prop origin. props_<set>_<ori>.png = the props-only frame on the clip canvas.",
+ "ppu": 40.0719967705934,
+ "pass_ids": {
+  "pot": 50,
+  "pot_rim": 51,
+  "soil": 52,
+  "leaf": 53,
+  "can": 54,
+  "can_cap": 55,
+  "drop": 56,
+  "stick": 57,
+  "straw": 58,
+  "band": 59,
+  "dust": 60,
+  "snow": 61,
+  "carrot": 62,
+  "coal": 63,
+  "ice": 64,
+  "hole": 65,
+  "rod": 66,
+  "rod_tip": 67,
+  "line": 68,
+  "bobber": 69,
+  "fish": 70,
+  "bed_frame": 71,
+  "mattress": 72,
+  "quilt": 73,
+  "cap": 74,
+  "cap_trim": 75
+ },
+ "props": {
+  "can": {
+   "set": "plant",
+   "A": {
+    "file": "prop_can_A.png",
+    "size": [
+     24,
+     20
+    ],
+    "anchor": [
+     10,
+     5
+    ],
+    "offset_px_in_set": [
+     29,
+     -20
+    ],
+    "layer_key": "can_274adde0a7"
+   },
+   "B": {
+    "file": "prop_can_B.png",
+    "size": [
+     24,
+     20
+    ],
+    "anchor": [
+     14,
+     5
+    ],
+    "offset_px_in_set": [
+     -29,
+     -20
+    ],
+    "layer_key": "can_274adde0a7"
+   },
+   "footprint_world": {
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    0.2,
+    0.82,
+    0.33
+   ],
+   "note": "a small toy watering can (+ the water drops it pours)"
+  },
+  "pot": {
+   "set": "plant",
+   "A": {
+    "file": "prop_pot_A.png",
+    "size": [
+     22,
+     32
+    ],
+    "anchor": [
+     11,
+     28
+    ],
+    "offset_px_in_set": [
+     47,
+     6
+    ],
+    "layer_key": "pot_02a1d3a641"
+   },
+   "B": {
+    "file": "prop_pot_B.png",
+    "size": [
+     22,
+     32
+    ],
+    "anchor": [
+     11,
+     28
+    ],
+    "offset_px_in_set": [
+     -47,
+     6
+    ],
+    "layer_key": "pot_02a1d3a641"
+   },
+   "footprint_world": {
+    "x": [
+     -0.26,
+     0.26
+    ],
+    "y": [
+     -0.26,
+     0.26
+    ],
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    1.05,
+    0.62,
+    0.0
+   ],
+   "note": "a terracotta pot with a two-leaf sprout (the sprout perks up when watered)"
+  },
+  "broom": {
+   "set": "sweep",
+   "A": {
+    "file": "prop_broom_A.png",
+    "size": [
+     46,
+     26
+    ],
+    "anchor": [
+     9,
+     5
+    ],
+    "offset_px_in_set": [
+     13,
+     -20
+    ],
+    "layer_key": "broom_8b7b517dde"
+   },
+   "B": {
+    "file": "prop_broom_B.png",
+    "size": [
+     46,
+     26
+    ],
+    "anchor": [
+     37,
+     5
+    ],
+    "offset_px_in_set": [
+     -13,
+     -20
+    ],
+    "layer_key": "broom_8b7b517dde"
+   },
+   "footprint_world": {
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    -0.38,
+    0.84,
+    0.075
+   ],
+   "note": "a toy broom, wood stick and straw head (+ dust puffs)"
+  },
+  "snow": {
+   "set": "snowman",
+   "A": {
+    "file": "prop_snow_A.png",
+    "size": [
+     51,
+     28
+    ],
+    "anchor": [
+     28,
+     13
+    ],
+    "offset_px_in_set": [
+     40,
+     8
+    ],
+    "layer_key": "snow_4fb89b0dd2"
+   },
+   "B": {
+    "file": "prop_snow_B.png",
+    "size": [
+     51,
+     28
+    ],
+    "anchor": [
+     23,
+     13
+    ],
+    "offset_px_in_set": [
+     -40,
+     8
+    ],
+    "layer_key": "snow_4fb89b0dd2"
+   },
+   "footprint_world": {
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    1.0,
+    0.42,
+    0.0
+   ],
+   "note": "a snow patch with a mound (+ the snowman built on it)"
+  },
+  "ice": {
+   "set": "fishing",
+   "A": {
+    "file": "prop_ice_A.png",
+    "size": [
+     61,
+     33
+    ],
+    "anchor": [
+     31,
+     15
+    ],
+    "offset_px_in_set": [
+     38,
+     12
+    ],
+    "layer_key": "ice_544f02af09"
+   },
+   "B": {
+    "file": "prop_ice_B.png",
+    "size": [
+     61,
+     33
+    ],
+    "anchor": [
+     30,
+     15
+    ],
+    "offset_px_in_set": [
+     -38,
+     12
+    ],
+    "layer_key": "ice_544f02af09"
+   },
+   "footprint_world": {
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    1.08,
+    0.25,
+    0.0
+   ],
+   "note": "an ice patch with a fishing hole (+ the bobber and a fish)"
+  },
+  "rod": {
+   "set": "fishing",
+   "A": {
+    "file": "prop_rod_A.png",
+    "size": [
+     29,
+     12
+    ],
+    "anchor": [
+     5,
+     4
+    ],
+    "offset_px_in_set": [
+     20,
+     -14
+    ],
+    "layer_key": "rod_bbfe57ef1e"
+   },
+   "B": {
+    "file": "prop_rod_B.png",
+    "size": [
+     29,
+     12
+    ],
+    "anchor": [
+     24,
+     4
+    ],
+    "offset_px_in_set": [
+     -20,
+     -14
+    ],
+    "layer_key": "rod_bbfe57ef1e"
+   },
+   "footprint_world": {
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    -0.1,
+    0.8,
+    0.03
+   ],
+   "note": "a toy fishing rod (+ its line while fishing)"
+  },
+  "bed": {
+   "set": "bed_cap",
+   "A": {
+    "file": "prop_bed_A.png",
+    "size": [
+     140,
+     104
+    ],
+    "anchor": [
+     70,
+     73
+    ],
+    "offset_px_in_set": [
+     0,
+     0
+    ],
+    "layer_key": "bed_c72f4e1219"
+   },
+   "B": {
+    "file": "prop_bed_B.png",
+    "size": [
+     140,
+     104
+    ],
+    "anchor": [
+     70,
+     73
+    ],
+    "offset_px_in_set": [
+     0,
+     0
+    ],
+    "layer_key": "bed_c72f4e1219"
+   },
+   "footprint_world": {
+    "x": [
+     -1.57,
+     1.57
+    ],
+    "y": [
+     -0.88,
+     0.88
+    ],
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "note": "a small toy bed in Stage B's look (wood frame, cream mattress and pillow, blue quilt)"
+  },
+  "cap": {
+   "set": "bed_cap",
+   "A": {
+    "file": "prop_cap_A.png",
+    "size": [
+     27,
+     36
+    ],
+    "anchor": [
+     12,
+     15
+    ],
+    "offset_px_in_set": [
+     -29,
+     -49
+    ],
+    "layer_key": "cap_b0f77b1a35"
+   },
+   "B": {
+    "file": "prop_cap_B.png",
+    "size": [
+     27,
+     36
+    ],
+    "anchor": [
+     15,
+     15
+    ],
+    "offset_px_in_set": [
+     29,
+     -49
+    ],
+    "layer_key": "cap_b0f77b1a35"
+   },
+   "footprint_world": {
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    -1.04,
+    0.0,
+    0.98
+   ],
+   "note": "a rose nightcap with a cream trim and pom-pom"
+  }
+ }
+}

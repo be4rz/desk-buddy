@@ -6,7 +6,8 @@
  "palettes": [
   "../../../../../experiments/bear-proto/palette-bear.json",
   "../../../../../experiments/scene-proto/palette.json",
-  "../../../../../experiments/mascot/bear3d/palette-ext.json"
+  "../../../../../experiments/mascot/bear3d/palette-ext.json",
+  "../../../../../experiments/mascot/bear3d/palette-ext-out.json"
  ],
  "sources": [
   {

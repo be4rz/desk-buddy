@@ -1,0 +1,283 @@
+{
+ "note": "Stage play props (render_set.py, chunky superellipsoid toy shapes), pre-rendered with the Stage A camera and pixel step. Each prop sprite = that prop rendered alone with its own ink outline; anchor = pixel of the prop origin. props_<set>_<ori>.png = the props-only frame on the clip canvas.",
+ "ppu": 40.0719967705934,
+ "pass_ids": {
+  "ball_skin": 50,
+  "ball_band": 51,
+  "bottle": 52,
+  "bottle_cap": 53,
+  "wand_stick": 54,
+  "wand_ring": 55,
+  "bubble": 56,
+  "yoyo_disc": 57,
+  "yoyo_hub": 58,
+  "cord": 59,
+  "block_rose": 60,
+  "block_sage": 61,
+  "block_quilt": 62,
+  "weight": 63,
+  "balloon": 64
+ },
+ "props": {
+  "ball": {
+   "set": "ball",
+   "A": {
+    "file": "prop_ball_A.png",
+    "size": [
+     28,
+     27
+    ],
+    "anchor": [
+     14,
+     25
+    ],
+    "offset_px_in_set": [
+     45,
+     13
+    ],
+    "layer_key": "ball_de747430cdf3"
+   },
+   "B": {
+    "file": "prop_ball_B.png",
+    "size": [
+     28,
+     27
+    ],
+    "anchor": [
+     14,
+     25
+    ],
+    "offset_px_in_set": [
+     -45,
+     13
+    ],
+    "layer_key": "ball_0c32471bd455"
+   },
+   "footprint_world": {
+    "x": [
+     -0.32,
+     0.32
+    ],
+    "y": [
+     -0.32,
+     0.32
+    ],
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    1.25,
+    0.35,
+    0.0
+   ],
+   "note": "a big striped toy beach ball"
+  },
+  "bubbles": {
+   "set": "bubbles",
+   "A": {
+    "file": "prop_bubbles_A.png",
+    "size": [
+     12,
+     28
+    ],
+    "anchor": [
+     6,
+     26
+    ],
+    "offset_px_in_set": [
+     44,
+     5
+    ],
+    "layer_key": "bubbles_cb399bd9f641"
+   },
+   "B": {
+    "file": "prop_bubbles_B.png",
+    "size": [
+     12,
+     28
+    ],
+    "anchor": [
+     6,
+     26
+    ],
+    "offset_px_in_set": [
+     -44,
+     5
+    ],
+    "layer_key": "bubbles_2fcb97b61038"
+   },
+   "footprint_world": {
+    "x": [
+     -0.13,
+     0.13
+    ],
+    "y": [
+     -0.13,
+     0.13
+    ],
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    0.95,
+    0.6,
+    0.0
+   ],
+   "note": "a bubble bottle with the wand standing in it (bubbles only while blowing)"
+  },
+  "yoyo": {
+   "set": "yoyo",
+   "A": {
+    "file": "prop_yoyo_A.png",
+    "size": [
+     12,
+     12
+    ],
+    "anchor": [
+     6,
+     10
+    ],
+    "offset_px_in_set": [
+     41,
+     8
+    ],
+    "layer_key": "yoyo_93b771ca7c15"
+   },
+   "B": {
+    "file": "prop_yoyo_B.png",
+    "size": [
+     12,
+     12
+    ],
+    "anchor": [
+     6,
+     10
+    ],
+    "offset_px_in_set": [
+     -41,
+     8
+    ],
+    "layer_key": "yoyo_164de502305c"
+   },
+   "footprint_world": {
+    "x": [
+     -0.11,
+     0.11
+    ],
+    "y": [
+     -0.06,
+     0.06
+    ],
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    1.0,
+    0.45,
+    0.0
+   ],
+   "note": "a chunky yoyo on its cord"
+  },
+  "blocks": {
+   "set": "blocks",
+   "A": {
+    "file": "prop_blocks_A.png",
+    "size": [
+     32,
+     37
+    ],
+    "anchor": [
+     11,
+     16
+    ],
+    "offset_px_in_set": [
+     47,
+     -8
+    ],
+    "layer_key": "blocks_319d10c24dff"
+   },
+   "B": {
+    "file": "prop_blocks_B.png",
+    "size": [
+     32,
+     37
+    ],
+    "anchor": [
+     21,
+     16
+    ],
+    "offset_px_in_set": [
+     -47,
+     -8
+    ],
+    "layer_key": "blocks_a33276397435"
+   },
+   "footprint_world": {
+    "x": [
+     -0.17,
+     0.17
+    ],
+    "y": [
+     -0.17,
+     0.17
+    ],
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    0.55,
+    1.1,
+    0.0
+   ],
+   "note": "three soft toy blocks (rose, sage, blue)"
+  },
+  "balloon": {
+   "set": "balloon",
+   "A": {
+    "file": "prop_balloon_A.png",
+    "size": [
+     24,
+     97
+    ],
+    "anchor": [
+     12,
+     94
+    ],
+    "offset_px_in_set": [
+     38,
+     -11
+    ],
+    "layer_key": "balloon_231f23a1fb37"
+   },
+   "B": {
+    "file": "prop_balloon_B.png",
+    "size": [
+     24,
+     97
+    ],
+    "anchor": [
+     12,
+     94
+    ],
+    "offset_px_in_set": [
+     -38,
+     -11
+    ],
+    "layer_key": "balloon_8c0183d1eaa7"
+   },
+   "footprint_world": {
+    "x": [
+     -0.1,
+     0.1
+    ],
+    "y": [
+     -0.1,
+     0.1
+    ],
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    0.3,
+    1.05,
+    0.0
+   ],
+   "note": "a balloon on a cord tied to a toy weight"
+  }
+ }
+}

@@ -161,7 +161,7 @@ Stage e (`anim_e/`, gestures-a) and stage x (`anim_x/`, gestures-b) are one-shot
 - **Reminders.** A `reminder` event holds intent `remind` for the bubble's time, and `remind`
   is a one-shot (1.7 s, idle#0 at both ends), so the bear repeats the paw wag until the bubble
   goes (it held `ask` before).
-- **Dodge** steps aside by its `root_px` (the panel moves, as for walks) and ends on idle#0 at
+- **Dodge** steps aside by its `root_px` (the floor camera scrolls under the bear, as for walks) and ends on idle#0 at
   the new spot. Lint warns `non_integer_root` on dodge S/E/W (sub-pixel iso steps), a warning only.
 - **Gesture emotes** (group `gesture`): the intent emotes `wave nod shake jump spin greet
   stretch sad surprised dodge` and the `plays` emotes `remind` and stage x's `shrug facepalm
@@ -196,18 +196,55 @@ Two pack blocks wire them; both are data, so a pack without them reacts to nothi
   and `edge_land` → `edge_sit` (`edge_stand` on leaving).
 - **Priority.** A click, a drag and the agent always win. A reaction waits for the running
   behavior's exit (a posture or the desk gets up first). Do-not-disturb and quiet hours stop
-  every reaction and context entry except the drag dangle and the landing.
+  every reaction and context entry except the drag dangle and the landing (with DND set to
+  `Still` nothing plays at all: the frame stays pinned).
 - **The cursor** is read only by the panel's existing near-poll (no new permission), as
   points from the bear's feet rounded to 8 pt, at most 10 Hz, and only within 180 pt. It goes
   to the brain alone: never to the sense ring, `BUDDY_SENSES_LOG`, a prompt, the agent or disk.
 - **Reaction emotes** (group `reaction`): `giggle head_bob foot_tap flinch check_watch dizzy
   morning_stretch evening_yawn`; the activity `dance` (group `play`).
-- **Nightcap** is in `quiet_hours.pool` but waits for its p5 art (set `bed_cap`, clips
-  `cap_get_in_bed cap_sleep cap_wake_up`): it is listed by `waiting()` and lint as
-  `waits_for_art` (a warning), and it is never picked until the art lands.
+- **Nightcap** is in `quiet_hours.pool` (set `bed_cap` from stage out, p5: `cap_get_in_bed` →
+  `cap_sleep` for 120–270 s → `cap_wake_up`), next to `nap` and `rest`, both boosted ×4. The quiet pool keeps
+  only `idle_pool` entries, so nightcap has one too: `long`, `when.hours [23, 7]` (inside the default quiet hours
+  22:30–07:30, so it is a quiet-hours pick only; quiet hours set elsewhere leave it out), kept out of the warm-up like `nap`.
 - Replays: `crates/buddy-app/tests/fixtures/{music,edge_react,drag,cursor,time,away,approval_wait}.jsonl`
   (checked by `crates/mascot-core/tests/react_replays.rs`, also `BUDDY_EVENTS=`). A senses
   patch's `cursor` is read from a replay but never written back out (logs, the sense ring).
+
+## The bear's props and surprises (A6, p5)
+
+Set stages sit_a, sit_b, play and out (`set_<s>/`, ori A faces SE, ori B is its 3D mirror)
+give 16 prop activities; stage z (`anim_z/`) gives 11 rare surprises. All are pack data.
+
+- **Prop behaviors** are one set each, enter → loop (`loops.for_s`) → exit, exactly as
+  `read` and `lean`: `tea` (tea_sit / tea_sip / tea_stand), `snack`, `knit` (floor cushion),
+  `notebook` and `laptop` (a low toy tray-table is part of the set's prop layer), `headphones`
+  (set `phones`), `umbrella` (baked rain inside the canvas), `ball`, `bubbles`, `yoyo`,
+  `blocks` (the tower topples back to its first frame each loop), `balloon` (tethered),
+  `plant`, `sweep`, `snowman`, `fishing`. Their colours outside the base palettes are
+  `bear3d/palette-ext-out.json` (terracotta, straw, snow, carrot, ice, fish), listed in
+  `palettes`.
+- **In idle** each is a `kind: "long"` entry in `"group": "long"` (with read, nap, the desk and
+  lean), so two long visits never follow each other and at most 2 come in 20 picks. Weights
+  0.3–0.8 and cooldowns 600–1800 s are the storyboard's; `for_s` lower bounds are at least
+  20 s so every visit lasts 20–300 s (`targets.long_len_s`). Conditions: `tea` only
+  `when.hours` [14, 18), `snowman` and `fishing` only `when.months` [12, 1, 2]; `headphones`
+  has a second entry `when.context: "music"` (the same behavior, so the same cooldown): twice
+  as likely while music plays.
+- **For the agent** each is an activity (`buddy mascot do tea [--for 5m]`, group `pastime` or
+  `play`), plus `nightcap`. An activity ignores the idle conditions (the agent may ask for a
+  snowman in July); do-not-disturb and quiet hours refuse it as any other.
+- **Rare surprises** (`kind: "rare"`, one clip each, idle#0 at both ends): `windmill`,
+  `hiccups`, `find_coin`, `snowflake_nose` (months 12–2), `butterfly_ear` (4–9), `peekaboo`,
+  and the hats `hat_spring` (3–5), `hat_summer` (6–8), `hat_autumn` (9–11), `hat_winter`
+  (12–2). Weights 0.15–0.3, cooldowns 2400–3600 s, so one shows up about once an hour at
+  most. `moonwalk` (8 dirs, `loops [2, 3]`, backwards root motion) is `kind: "move"` so the
+  two-moves-in-a-row rule counts it. Each is also an emote in group `surprise`.
+- **Checks.** `crates/mascot-core/tests/bear_pack.rs` pins all of the above;
+  `buddy studio audit --pack mascots/bear --minutes 120 --seeds 1,2,3 --start 2026-12-15T15:00`
+  shows every long entry (the audit holds the start's hour and month for the whole run, so the
+  start must be inside tea's hours and the winter months); `--start 2026-07-01T10:00` never
+  plays a non-summer hat. The sheets: `experiments/mascot/out/bear3d/sheets.html`.
 
 ## The body block (what the agent can do)
 

@@ -1,0 +1,7 @@
+{
+ "id": "out",
+ "kind": "set",
+ "module": "set_out",
+ "verify": "verify_out.py",
+ "note": "Stage out (props-out): plant, sweep, snowman, fishing, bed_cap sets (enter -> loop -> exit), ori A faces SE, ori B (3D mirror) faces SW. Moving/held props are placed by set_out.prop_state. Output out/bear3d/set_out/."
+}

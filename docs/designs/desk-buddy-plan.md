@@ -521,7 +521,7 @@ animation plugs into it.
 | A3 | **Working animations** for long turns | ✅ built (desk station: pack `stations` + `work`, seated turns, seated `talk`/`ask` with face v2 `set_clips`, `buddy mascot do computer`, `anim_d` desk set) | A1, A2 |
 | A4 | **Idle life:** fidgets and postures | ✅ built (pack v2 idle brain: `variety` rule, `for_s` holds, turn first, hidden entries; stage kit; art stages f g p m t + lean, all in the bear's idle pool; `buddy studio audit` v2 passes 10 and 30 min on seeds 1,2,3) | A2's turn-in-place clip |
 | A5 | **Real clips for the borrowed intents** | ✅ built (stages e + x, 19 one-shots; the 11 intents play their own clip first with the old chain behind; 16 new gesture emotes in `mascot list` and the prompt; `emotes.jsonl` replay) | A1 |
-| A6 | **Desktop reactions, prop activities, rare surprises** | 🟡 reactions built (p4: pack `contexts` + `reactions`, cursor sense, drag dangle/land/dizzy, flinch/pet/follow, morning, evening, away, approval_wait, edge entries; stages r s w); prop activities and rare surprises (p5) ⬜ | A4 |
+| A6 | **Desktop reactions, prop activities, rare surprises** | ✅ built (p4 reactions: pack `contexts` + `reactions`, cursor sense, drag dangle/land/dizzy, flinch/pet/follow, morning, evening, away, approval_wait, edge entries; stages r s w. p5: 16 prop activities in set stages sit_a sit_b play out + nightcap, idle `long` entries and `buddy mascot do`; 11 rare surprises in stage z on 2400–3600 s cooldowns, seasonal hats by month; sheet index `out/bear3d/sheets.html`) | A4 |
 
 **Who decides an animation** (applies to every step):
 

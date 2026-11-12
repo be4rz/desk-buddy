@@ -1,0 +1,488 @@
+{
+ "note": "Stage sit_a props (render_set.py, chunky superellipsoid toy shapes), pre-rendered with the Stage A camera and pixel step. Each prop sprite = that prop rendered alone with its own ink outline; anchor = pixel of the prop origin. props_<set>_<ori>.png = the props-only frame on the clip canvas.",
+ "ppu": 40.0719967705934,
+ "pass_ids": {
+  "cushion": 52,
+  "cushion_tuft": 53,
+  "mug": 54,
+  "mug_band": 55,
+  "tea": 56,
+  "jar": 57,
+  "jar_lid": 58,
+  "cookie": 59,
+  "chip": 60,
+  "yarn": 61,
+  "needle": 62,
+  "swatch": 63
+ },
+ "props": {
+  "cushion": {
+   "set": "tea",
+   "A": {
+    "file": "prop_cushion_A.png",
+    "size": [
+     66,
+     37
+    ],
+    "anchor": [
+     33,
+     21
+    ],
+    "offset_px_in_set": [
+     0,
+     0
+    ],
+    "layer_key": "cushion_0"
+   },
+   "B": {
+    "file": "prop_cushion_B.png",
+    "size": [
+     66,
+     37
+    ],
+    "anchor": [
+     33,
+     21
+    ],
+    "offset_px_in_set": [
+     0,
+     0
+    ],
+    "layer_key": "cushion_0"
+   },
+   "footprint_world": {
+    "x": [
+     -0.62,
+     0.62
+    ],
+    "y": [
+     -0.62,
+     0.62
+    ],
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "note": "a flat sage floor cushion with a cream button tuft"
+  },
+  "mug": {
+   "set": "tea",
+   "A": {
+    "file": "prop_mug_A.png",
+    "size": [
+     14,
+     15
+    ],
+    "anchor": [
+     7,
+     12
+    ],
+    "offset_px_in_set": [
+     -24,
+     12
+    ],
+    "layer_key": "mug_b09f6a8c0b"
+   },
+   "B": {
+    "file": "prop_mug_B.png",
+    "size": [
+     14,
+     15
+    ],
+    "anchor": [
+     7,
+     12
+    ],
+    "offset_px_in_set": [
+     24,
+     12
+    ],
+    "layer_key": "mug_42ac6c4ad3"
+   },
+   "footprint_world": {
+    "x": [
+     -0.16,
+     0.2
+    ],
+    "y": [
+     -0.16,
+     0.16
+    ],
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    0.0,
+    -0.86,
+    0.0
+   ],
+   "note": "a cream mug with a rose band, tea inside; held in both mittens in tea_sip"
+  },
+  "cookie": {
+   "set": "snack",
+   "A": {
+    "file": "prop_cookie_A.png",
+    "size": [
+     7,
+     10
+    ],
+    "anchor": [
+     4,
+     12
+    ],
+    "offset_px_in_set": [
+     -24,
+     12
+    ],
+    "layer_key": "cookie_0372cb2046"
+   },
+   "B": {
+    "file": "prop_cookie_B.png",
+    "size": [
+     7,
+     10
+    ],
+    "anchor": [
+     3,
+     12
+    ],
+    "offset_px_in_set": [
+     24,
+     12
+    ],
+    "layer_key": "cookie_8792a9eb85"
+   },
+   "footprint_world": {
+    "x": [
+     -0.1,
+     0.1
+    ],
+    "y": [
+     -0.1,
+     0.1
+    ],
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    0.0,
+    -0.86,
+    0.2
+   ],
+   "note": "the cookie the bear eats (parked inside the jar when not held)"
+  },
+  "cookie_bit": {
+   "set": "snack",
+   "A": {
+    "file": "prop_cookie_bit_A.png",
+    "size": [
+     6,
+     9
+    ],
+    "anchor": [
+     4,
+     11
+    ],
+    "offset_px_in_set": [
+     -24,
+     12
+    ],
+    "layer_key": "cookie_bit_0372cb2046"
+   },
+   "B": {
+    "file": "prop_cookie_bit_B.png",
+    "size": [
+     6,
+     9
+    ],
+    "anchor": [
+     2,
+     11
+    ],
+    "offset_px_in_set": [
+     24,
+     12
+    ],
+    "layer_key": "cookie_bit_8792a9eb85"
+   },
+   "footprint_world": {
+    "x": [
+     -0.1,
+     0.1
+    ],
+    "y": [
+     -0.1,
+     0.1
+    ],
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    0.0,
+    -0.86,
+    0.2
+   ],
+   "note": "the cookie after one bite (parked inside the jar when not held)"
+  },
+  "cookie_bit2": {
+   "set": "snack",
+   "A": {
+    "file": "prop_cookie_bit2_A.png",
+    "size": [
+     6,
+     7
+    ],
+    "anchor": [
+     4,
+     10
+    ],
+    "offset_px_in_set": [
+     -24,
+     12
+    ],
+    "layer_key": "cookie_bit2_0372cb2046"
+   },
+   "B": {
+    "file": "prop_cookie_bit2_B.png",
+    "size": [
+     6,
+     7
+    ],
+    "anchor": [
+     2,
+     10
+    ],
+    "offset_px_in_set": [
+     24,
+     12
+    ],
+    "layer_key": "cookie_bit2_8792a9eb85"
+   },
+   "footprint_world": {
+    "x": [
+     -0.1,
+     0.1
+    ],
+    "y": [
+     -0.1,
+     0.1
+    ],
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    0.0,
+    -0.86,
+    0.2
+   ],
+   "note": "the cookie after two bites (parked inside the jar when not held)"
+  },
+  "cookie_jar": {
+   "set": "snack",
+   "A": {
+    "file": "prop_cookie_jar_A.png",
+    "size": [
+     19,
+     25
+    ],
+    "anchor": [
+     10,
+     21
+    ],
+    "offset_px_in_set": [
+     -24,
+     12
+    ],
+    "layer_key": "cookie_jar_0"
+   },
+   "B": {
+    "file": "prop_cookie_jar_B.png",
+    "size": [
+     19,
+     25
+    ],
+    "anchor": [
+     9,
+     21
+    ],
+    "offset_px_in_set": [
+     24,
+     12
+    ],
+    "layer_key": "cookie_jar_0"
+   },
+   "footprint_world": {
+    "x": [
+     -0.22,
+     0.22
+    ],
+    "y": [
+     -0.22,
+     0.22
+    ],
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    0.0,
+    -0.86,
+    0.0
+   ],
+   "note": "a round blue jar, cookies peeking over the rim"
+  },
+  "needles": {
+   "set": "knit",
+   "A": {
+    "file": "prop_needles_A.png",
+    "size": [
+     13,
+     20
+    ],
+    "anchor": [
+     6,
+     24
+    ],
+    "offset_px_in_set": [
+     -24,
+     12
+    ],
+    "layer_key": "needles_1567b7987c"
+   },
+   "B": {
+    "file": "prop_needles_B.png",
+    "size": [
+     13,
+     20
+    ],
+    "anchor": [
+     7,
+     24
+    ],
+    "offset_px_in_set": [
+     24,
+     12
+    ],
+    "layer_key": "needles_6cb8613be6"
+   },
+   "footprint_world": {
+    "x": [
+     -0.2,
+     0.2
+    ],
+    "y": [
+     -0.2,
+     0.2
+    ],
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    0.0,
+    -0.86,
+    0.31
+   ],
+   "note": "two wooden knitting needles with a little rose swatch; rest on the yarn ball"
+  },
+  "strand": {
+   "set": "knit",
+   "A": {
+    "file": "prop_strand_A.png",
+    "size": [
+     5,
+     5
+    ],
+    "anchor": [
+     3,
+     11
+    ],
+    "offset_px_in_set": [
+     -24,
+     12
+    ],
+    "layer_key": "strand_b3eec1937e"
+   },
+   "B": {
+    "file": "prop_strand_B.png",
+    "size": [
+     5,
+     5
+    ],
+    "anchor": [
+     2,
+     11
+    ],
+    "offset_px_in_set": [
+     24,
+     12
+    ],
+    "layer_key": "strand_cfd05235fe"
+   },
+   "footprint_world": {
+    "x": [
+     -0.5,
+     0.5
+    ],
+    "y": [
+     -0.5,
+     0.5
+    ],
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    0.0,
+    -0.86,
+    0.0
+   ],
+   "note": "the yarn strand from the ball to the needles (follows the needles)"
+  },
+  "yarn": {
+   "set": "knit",
+   "A": {
+    "file": "prop_yarn_A.png",
+    "size": [
+     15,
+     15
+    ],
+    "anchor": [
+     8,
+     13
+    ],
+    "offset_px_in_set": [
+     -24,
+     12
+    ],
+    "layer_key": "yarn_0"
+   },
+   "B": {
+    "file": "prop_yarn_B.png",
+    "size": [
+     15,
+     15
+    ],
+    "anchor": [
+     7,
+     13
+    ],
+    "offset_px_in_set": [
+     24,
+     12
+    ],
+    "layer_key": "yarn_0"
+   },
+   "footprint_world": {
+    "x": [
+     -0.19,
+     0.19
+    ],
+    "y": [
+     -0.19,
+     0.19
+    ],
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    0.0,
+    -0.86,
+    0.0
+   ],
+   "note": "a rose yarn ball"
+  }
+ }
+}

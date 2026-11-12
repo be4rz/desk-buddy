@@ -1,0 +1,7 @@
+{
+ "id": "sit_a",
+ "kind": "set",
+ "module": "set_sit_a",
+ "verify": "verify_sit_a.py",
+ "note": "Stage sit_a (props-sit-a, p5 aliveness): three floor-cushion pastimes, each <x>_sit -> loop -> <x>_stand: tea (tea_sit 12, tea_sip 36 loop, tea_stand 12; a mug held in both mittens; face baked), snack (snack_sit 12, snack_munch 30 loop, snack_stand 12; cookies from a jar; face baked), knit (knit_sit 12, knit 36 loop, knit_stand 12; needles + swatch, yarn ball and strand; face layers on knit, face_sit_a.json set_clips). Ori A faces SE (the prop on the bear's left, NE on screen), ori B = 3D mirror (SW). Output out/bear3d/set_sit_a/."
+}

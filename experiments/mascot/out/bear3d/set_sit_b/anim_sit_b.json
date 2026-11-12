@@ -1,0 +1,1191 @@
+{
+ "note": "Set notebook: note_sit -> note_doodle (loop, face layers) -> note_stand; an open sketchbook on a low wooden toy tray-table in front of the floor-sitting bear and a fat toy crayon (on the page at the hand-offs, in the right mitten while doodling). Set laptop: laptop_sit -> laptop_type (loop, face layers) -> laptop_stand; a chunky toy laptop on a low wooden toy tray-table in front of the floor-sitting bear, lid always open. Set phones: phones_on -> phones_vibe (loop, baked) -> phones_off; headphones on a little wooden stand on the bear's left at the hand-offs, on its head in phones_vibe. Set umbrella: umbrella_open -> umbrella_rain (loop, baked) -> umbrella_close; a closed umbrella in a bucket on the bear's left at the hand-offs, open overhead in the rain loop; rain drops are baked into the frames (none on the hand-off frames).",
+ "sorting": "As Stage B: outside these clips draw the props (prop_*.png or props_<set>_<ori>.png) and the free bear as separate sprites sorted by floor depth; from the first to the last frame of a set clip hide them and draw the baked frame at the set anchor. face_patch_dir is per ori.",
+ "stage": "sit_b",
+ "fps": 12,
+ "ppu": 40.0719967705934,
+ "sets": {
+  "notebook": {
+   "A": {
+    "frame_w": 106,
+    "frame_h": 124,
+    "anchor": [
+     57,
+     99
+    ],
+    "props_frame": "props_notebook_A.png",
+    "orientation": "the bear faces SE, the props in front (SE) or on its left (NE on screen)"
+   },
+   "B": {
+    "frame_w": 106,
+    "frame_h": 124,
+    "anchor": [
+     48,
+     99
+    ],
+    "props_frame": "props_notebook_B.png",
+    "orientation": "mirror of A: the bear faces SW, the props in front (SW) or on its right (NW on screen)"
+   }
+  },
+  "laptop": {
+   "A": {
+    "frame_w": 106,
+    "frame_h": 124,
+    "anchor": [
+     57,
+     99
+    ],
+    "props_frame": "props_laptop_A.png",
+    "orientation": "the bear faces SE, the props in front (SE) or on its left (NE on screen)"
+   },
+   "B": {
+    "frame_w": 106,
+    "frame_h": 124,
+    "anchor": [
+     48,
+     99
+    ],
+    "props_frame": "props_laptop_B.png",
+    "orientation": "mirror of A: the bear faces SW, the props in front (SW) or on its right (NW on screen)"
+   }
+  },
+  "phones": {
+   "A": {
+    "frame_w": 84,
+    "frame_h": 112,
+    "anchor": [
+     33,
+     99
+    ],
+    "props_frame": "props_phones_A.png",
+    "orientation": "the bear faces SE, the props in front (SE) or on its left (NE on screen)"
+   },
+   "B": {
+    "frame_w": 84,
+    "frame_h": 112,
+    "anchor": [
+     50,
+     99
+    ],
+    "props_frame": "props_phones_B.png",
+    "orientation": "mirror of A: the bear faces SW, the props in front (SW) or on its right (NW on screen)"
+   }
+  },
+  "umbrella": {
+   "A": {
+    "frame_w": 134,
+    "frame_h": 152,
+    "anchor": [
+     36,
+     128
+    ],
+    "props_frame": "props_umbrella_A.png",
+    "orientation": "the bear faces SE, the props in front (SE) or on its left (NE on screen)"
+   },
+   "B": {
+    "frame_w": 134,
+    "frame_h": 152,
+    "anchor": [
+     97,
+     128
+    ],
+    "props_frame": "props_umbrella_B.png",
+    "orientation": "mirror of A: the bear faces SW, the props in front (SW) or on its right (NW on screen)"
+   }
+  }
+ },
+ "anims": {
+  "note_sit": {
+   "set": "notebook",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 12,
+   "files": {
+    "A": "note_sit_A.png",
+    "B": "note_sit_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      -0.0176,
+      -0.8646
+     ],
+     "px": [
+      -25,
+      12
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      0.8646,
+      0.0176
+     ],
+     "px": [
+      25,
+      12
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "note_doodle"
+  },
+  "note_doodle": {
+   "set": "notebook",
+   "loop": true,
+   "fps": 12,
+   "frames_n": 32,
+   "files": {
+    "A": "note_doodle_A.png",
+    "B": "note_doodle_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "note_doodle or note_stand",
+   "face_patch_dir": {
+    "A": "SE",
+    "B": "SW"
+   }
+  },
+  "note_stand": {
+   "set": "notebook",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 12,
+   "files": {
+    "A": "note_stand_A.png",
+    "B": "note_stand_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "end",
+     "frame": 11,
+     "pos_world": [
+      -0.0176,
+      -0.8646
+     ],
+     "px": [
+      -25,
+      12
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "end",
+     "frame": 11,
+     "pos_world": [
+      0.8646,
+      0.0176
+     ],
+     "px": [
+      25,
+      12
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "Stage A idle (rest pose, same spot and facing)"
+  },
+  "laptop_sit": {
+   "set": "laptop",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 12,
+   "files": {
+    "A": "laptop_sit_A.png",
+    "B": "laptop_sit_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      -0.0176,
+      -0.8646
+     ],
+     "px": [
+      -25,
+      12
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      0.8646,
+      0.0176
+     ],
+     "px": [
+      25,
+      12
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "laptop_type"
+  },
+  "laptop_type": {
+   "set": "laptop",
+   "loop": true,
+   "fps": 12,
+   "frames_n": 24,
+   "files": {
+    "A": "laptop_type_A.png",
+    "B": "laptop_type_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "laptop_type or laptop_stand",
+   "face_patch_dir": {
+    "A": "SE",
+    "B": "SW"
+   }
+  },
+  "laptop_stand": {
+   "set": "laptop",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 12,
+   "files": {
+    "A": "laptop_stand_A.png",
+    "B": "laptop_stand_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "end",
+     "frame": 11,
+     "pos_world": [
+      -0.0176,
+      -0.8646
+     ],
+     "px": [
+      -25,
+      12
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "end",
+     "frame": 11,
+     "pos_world": [
+      0.8646,
+      0.0176
+     ],
+     "px": [
+      25,
+      12
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "Stage A idle (rest pose, same spot and facing)"
+  },
+  "phones_on": {
+   "set": "phones",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 14,
+   "files": {
+    "A": "phones_on_A.png",
+    "B": "phones_on_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      0.0,
+      0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      -0.0,
+      -0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "phones_vibe"
+  },
+  "phones_vibe": {
+   "set": "phones",
+   "loop": true,
+   "fps": 12,
+   "frames_n": 32,
+   "files": {
+    "A": "phones_vibe_A.png",
+    "B": "phones_vibe_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "phones_vibe or phones_off"
+  },
+  "phones_off": {
+   "set": "phones",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 14,
+   "files": {
+    "A": "phones_off_A.png",
+    "B": "phones_off_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "end",
+     "frame": 13,
+     "pos_world": [
+      0.0,
+      0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "end",
+     "frame": 13,
+     "pos_world": [
+      -0.0,
+      -0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "Stage A idle (rest pose, same spot and facing)"
+  },
+  "umbrella_open": {
+   "set": "umbrella",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 14,
+   "files": {
+    "A": "umbrella_open_A.png",
+    "B": "umbrella_open_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      0.0,
+      0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      -0.0,
+      -0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "umbrella_rain"
+  },
+  "umbrella_rain": {
+   "set": "umbrella",
+   "loop": true,
+   "fps": 12,
+   "frames_n": 32,
+   "files": {
+    "A": "umbrella_rain_A.png",
+    "B": "umbrella_rain_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "umbrella_rain or umbrella_close"
+  },
+  "umbrella_close": {
+   "set": "umbrella",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 14,
+   "files": {
+    "A": "umbrella_close_A.png",
+    "B": "umbrella_close_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "end",
+     "frame": 13,
+     "pos_world": [
+      0.0,
+      0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "end",
+     "frame": 13,
+     "pos_world": [
+      -0.0,
+      -0.0
+     ],
+     "px": [
+      0,
+      0
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "Stage A idle (rest pose, same spot and facing)"
+  }
+ }
+}
