@@ -24,15 +24,18 @@
 //!   isn't the set clip's frame count or the patch dir has no layer for a slot.
 //! - `bad_body`: a problem in pack.json's `body` block (activities and emotes), one per entry, from
 //!   `pack::load_report` (the app refuses such a pack).
-//! - `waits_for_art` (warn, v2 `#hidden-log`): a wired idle entry, emote or activity whose art is not
+//! - `waits_for_art` (warn, v2 `#hidden-log`): a wired idle entry (or quiet-hours pool name), emote,
+//!   activity or reaction (`#pack-reactions`: none of its behaviors can play) whose art is not
 //!   loaded yet (an optional source not rendered); it is skipped until it lands. Carries `name`,
-//!   `clip` and, when the pack's layout names it, `source`.
+//!   `clip` and, when the pack's layout names it, `source`. An unknown context or reaction name, or
+//!   a reaction naming an undefined behavior, is a load error (`cannot load mascot …`).
 //! - `v2_key_in_v1_pack`: a v2-only key (`variety`, `idle_pool[i].kind`, `loops: {"for_s"}`, a body
 //!   `group`, a `face_part` source, …) in a pack that says `pack_version: 1`.
 //! - `canvas_too_big`: a clip frame above 176×160 (the panel's canvas).
 //! - `dir_set_mismatch`: the free (non-turn) clips of one loaded behavior are drawn in different
 //!   direction sets (the brain turns once, before the first clip, `#flow-front`; in a v2 pack a
 //!   behavior whose later clip lacks a dir of the first one is not available, so it never plays).
+//!   A warning in a v1 pack (it plays there, snapping).
 //! - Bad station entries in `idle_pool` (unknown station, `hold_s` missing or reversed, `hold_s` on a
 //!   behavior entry) are load errors (`cannot load mascot …`), so lint never sees them.
 
@@ -216,7 +219,9 @@ pub fn lint(pack: &PackMeta) -> Report {
             for (other, d) in &sets[1..] {
                 if d != dirs {
                     let names = |v: &[Dir]| v.iter().map(|d| d.as_str()).collect::<Vec<_>>().join(" ");
-                    r.push(issue("dir_set_mismatch", "error", other, format!("behavior {bname}: {other} has {} but {first} has {}", names(d), names(dirs))));
+                    // v1 packs never refused such a behavior (it snaps): a warning there
+                    let sev = if pack.pack_version >= 2 { "error" } else { "warn" };
+                    r.push(issue("dir_set_mismatch", sev, other, format!("behavior {bname}: {other} has {} but {first} has {}", names(d), names(dirs))));
                 }
             }
         }
@@ -406,6 +411,39 @@ mod tests {
         let bad: Vec<_> = r.issues.iter().filter(|i| i.code == "bad_body").map(|i| (i.severity, i.file.as_str(), i.detail.as_str())).collect();
         assert_eq!(bad, vec![("error", "pack.json", "body: activities.juggle: unknown behavior \"juggle\"")]);
         assert!(r.errors >= 1);
+    }
+
+    /// p4 reactions: the react fixture lints clean; a quiet-hours name and a reaction without art
+    /// wait (warn); a behavior mixing dir sets is an error in v2 and a warning in v1.
+    #[test]
+    fn reactions_and_quiet_names_wait_and_dir_sets_warn_in_v1() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut p = mascot_core::pack::load_report(&root.join("crates/mascot-core/tests/fixtures/react_pack")).unwrap();
+        let r = lint(&p);
+        assert_eq!(r.errors, 0, "{:?}", r.issues.iter().filter(|i| i.severity == "error").collect::<Vec<_>>());
+        assert!(!r.issues.iter().any(|i| i.code == "waits_for_art"), "every r/s/w clip is in");
+        // a quiet-hours name whose art is not in (nightcap until p5), and a reaction whose only behavior has no art
+        let mut cap = p.behaviors["dizzy"].clone();
+        cap.seq[0].clip = "cap_sleep".into();
+        p.behaviors.insert("nightcap".into(), cap);
+        p.quiet_hours.pool.push("nightcap".into());
+        let mut dz = p.behaviors["dizzy"].clone();
+        dz.seq[0].clip = "dizzy_v2".into();
+        p.behaviors.insert("dizzy".into(), dz);
+        let r = lint(&p);
+        let waits: Vec<_> = r.issues.iter().filter(|i| i.code == "waits_for_art").map(|i| (i.severity, i.name.as_deref().unwrap(), i.clip.as_deref().unwrap())).collect();
+        assert_eq!(waits, vec![("warn", "nightcap", "cap_sleep"), ("warn", "dizzy", "dizzy_v2")], "{waits:?}");
+        assert_eq!(r.errors, 0);
+        assert!(p.waiting_line().unwrap().ends_with("(idle 1, emotes 0, activities 0, reactions 1)"), "{:?}", p.waiting_line());
+        // land_squash (8 dirs) then dizzy (5): v2 error, v1 warning
+        let mut p = mascot_core::pack::load_report(&root.join("crates/mascot-core/tests/fixtures/react_pack")).unwrap();
+        let mut mix = p.behaviors["land_squash"].clone();
+        mix.seq.push(p.behaviors["dizzy"].seq[0].clone());
+        p.behaviors.insert("mix".into(), mix);
+        let sev = |p: &PackMeta| lint(p).issues.iter().filter(|i| i.code == "dir_set_mismatch").map(|i| i.severity).collect::<Vec<_>>();
+        assert_eq!(sev(&p), vec!["error"]);
+        p.pack_version = 1;
+        assert_eq!(sev(&p), vec!["warn"]);
     }
 
     /// p3 desk: the bear plays its desk (no warning); the bear without the `anim_d` source declares

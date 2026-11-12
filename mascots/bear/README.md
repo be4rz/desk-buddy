@@ -77,7 +77,7 @@ v2 key in a v1 pack is lint error `v2_key_in_v1_pack`). The loader reads version
 - **`idle_pool` entries** gain `kind` (`stand fidget posture move long rare react other`,
   default `other`), `group` (the variety key; default the entry's name), `when`
   (`{"hours": [from, to)` local, wrapping midnight; `"months": [1..12]`; `"context": name}` —
-  a context is never eligible until p4, an unknown month never matches) and, instead of
+  a context is eligible only while the brain holds it (p4, below), an unknown month never matches) and, instead of
   `behavior`, a station visit `{"station": "desk", "hold_s": [a, b]}`: the bear sits, types
   for a seeded draw of `hold_s` seconds (whole loops), then stands; traced as behavior `desk`,
   intent idle. A turn that opens while it types takes the seat over (the usual seated turn).
@@ -172,6 +172,42 @@ Stage e (`anim_e/`, gestures-a) and stage x (`anim_x/`, gestures-b) are one-shot
 - `point_bubble` and `thumbs_up` raise the left mitten (screen right in S, toward the bubble).
   `proud` is the subtlest gesture. Replay: `BUDDY_EVENTS=crates/buddy-app/tests/fixtures/emotes.jsonl`
   (every gesture emote once, 5 s apart).
+
+## The bear's reactions (A6, p4)
+
+Stages r (reactions), s (moments) and w (edge) give the bear clips that answer the desktop.
+Two pack blocks wire them; both are data, so a pack without them reacts to nothing.
+
+- **`contexts`** (names fixed in code): `music` (a player is playing), `edge` (sitting on a
+  window's top edge; `"only": true`: nothing but `edge_*` entries), `evening` (`hours`
+  [20, 23)), `away` (`after_min` 5 of user idle) and `away_long` (`after_min` 15, `only`,
+  `"hold": "floor_nap"`: the nap's middle loop holds until input returns, then it gets up
+  through `curl_up`). An `idle_pool` entry with `when.context` is eligible only while that
+  context holds; the bear's are `kind: "react"` (`head_bob foot_tap dance` for music,
+  `edge_dangle edge_peer edge_doze`, `evening_yawn`, `tap_glass` and `wave` for away).
+- **`reactions`** (names fixed in code), each `plays` a behavior or a `chain` of them:
+  `drag_hold` → `dangle` (held while dragged), `drag_land` → `land_squash`, `dizzy` (after a
+  drag of `min_ms` 1500 and `min_pt` 600), `flinch` (a cursor rushing within `near_pt` 60 at
+  `speed` 1500 pt/s; `cooldown_s` 20), `pet` → `giggle` (3 reversals over the bear within 2 s;
+  cooldown 10), `follow` → `cursor_watch` (a still cursor within 120 pt for 1.5 s: the bear
+  faces it, at most `max_s` 20, then `cooldown_s` 60), `morning` (`morning_stretch`, then the
+  `greet` intent), `approval_wait` (`foot_tap` / `check_watch`, no repeat, `after_s` 8 into a
+  standing permission card, then every 6–12 s; never at the desk, which keeps `desk_ask`),
+  and `edge_land` → `edge_sit` (`edge_stand` on leaving).
+- **Priority.** A click, a drag and the agent always win. A reaction waits for the running
+  behavior's exit (a posture or the desk gets up first). Do-not-disturb and quiet hours stop
+  every reaction and context entry except the drag dangle and the landing.
+- **The cursor** is read only by the panel's existing near-poll (no new permission), as
+  points from the bear's feet rounded to 8 pt, at most 10 Hz, and only within 180 pt. It goes
+  to the brain alone: never to the sense ring, `BUDDY_SENSES_LOG`, a prompt, the agent or disk.
+- **Reaction emotes** (group `reaction`): `giggle head_bob foot_tap flinch check_watch dizzy
+  morning_stretch evening_yawn`; the activity `dance` (group `play`).
+- **Nightcap** is in `quiet_hours.pool` but waits for its p5 art (set `bed_cap`, clips
+  `cap_get_in_bed cap_sleep cap_wake_up`): it is listed by `waiting()` and lint as
+  `waits_for_art` (a warning), and it is never picked until the art lands.
+- Replays: `crates/buddy-app/tests/fixtures/{music,edge_react,drag,cursor,time,away,approval_wait}.jsonl`
+  (checked by `crates/mascot-core/tests/react_replays.rs`, also `BUDDY_EVENTS=`). A senses
+  patch's `cursor` is read from a replay but never written back out (logs, the sense ring).
 
 ## The body block (what the agent can do)
 

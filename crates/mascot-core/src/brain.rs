@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::body::{self, BodyReply, BodyReq, Playing, Reason, Status};
 use crate::pack::{Dir, EmoteAct, Ori, PackMeta, Role};
+use crate::reaction::{self as react, Cursor, DragMeasure, Following, Tracker, Tuning};
 use crate::reflex::Reflexes;
 use crate::rng::Rng;
 
@@ -186,6 +187,10 @@ pub struct Senses {
     /// Local month 1..=12 for idle entries' `when.months`; 0 = unknown (those entries wait).
     #[serde(default)]
     pub month: u8,
+    /// Where the cursor is near the bear (`#senses-cursor`, p4). Never serialized: it stays in
+    /// the process (no log, no sense ring, no prompt).
+    #[serde(skip)]
+    pub cursor: Option<Cursor>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -311,21 +316,33 @@ enum Cue {
     Reflex(Intent),
     /// An emote declared with `plays`: this behavior once (intent `Emote`).
     Gesture(String),
+    /// A reaction (`#pack-reactions`, p4): this behavior, once or (`hold`, follow) until the
+    /// brain removes it. Shown as intent `Emote`; it yields like a reflex and is never a pick.
+    React { behavior: String, trigger: &'static str, hold: bool },
 }
 
 impl Cue {
     fn intent(&self) -> Intent {
         match *self {
             Cue::Timed { intent, .. } | Cue::Once(intent) | Cue::Reflex(intent) => intent,
-            Cue::Gesture(_) => Intent::Emote,
+            Cue::Gesture(_) | Cue::React { .. } => Intent::Emote,
         }
     }
 
     fn once(&self) -> Option<Intent> {
         match *self {
             Cue::Once(i) | Cue::Reflex(i) => Some(i),
-            Cue::Gesture(_) => Some(Intent::Emote),
-            Cue::Timed { .. } => None,
+            Cue::Gesture(_) | Cue::React { hold: false, .. } => Some(Intent::Emote),
+            Cue::Timed { .. } | Cue::React { hold: true, .. } => None,
+        }
+    }
+
+    /// The one-shot that `play` is playing ends with it: a reaction only when it is its behavior
+    /// (a reaction can wait behind another emote-labelled one, e.g. pet behind the follow watch).
+    fn ends_with(&self, intent: Intent, behavior: &str) -> bool {
+        match self {
+            Cue::React { behavior: b, .. } => self.once() == Some(intent) && b == behavior,
+            c => c.once() == Some(intent),
         }
     }
 }
@@ -374,6 +391,8 @@ struct Play {
     ori_after: Option<Ori>,
     /// A `{"for_s": [a, b]}` step: it ends at the first loop end at or after this time.
     for_until: Option<u64>,
+    /// A context's `hold` (away_long): this middle step loops until the context ends.
+    held: bool,
 }
 
 impl Play {
@@ -391,6 +410,7 @@ impl Play {
             turns: VecDeque::new(),
             ori_after: None,
             for_until: None,
+            held: false,
         }
     }
 }
@@ -464,6 +484,24 @@ pub struct Brain {
     /// The latest local time and month (`when`).
     local: LocalTime,
     month: u8,
+    // reactions and contexts (p4)
+    tuning: Tuning,
+    tracker: Tracker,
+    /// When each trigger last fired (follow: when it ended).
+    react_last: BTreeMap<&'static str, u64>,
+    following: Option<Following>,
+    /// The dirs the follow watch last faced (toward the cursor); cleared once the bear faces
+    /// elsewhere with no watch on. The app keeps these out of its log (`hides_dir`).
+    cursor_faced: Vec<Dir>,
+    drag_measure: Option<DragMeasure>,
+    /// The next approval_wait interleave (standing ask hold), and the last one played.
+    ask_next: Option<u64>,
+    ask_last: Option<String>,
+    playing_music: bool,
+    user_idle_ms: u64,
+    /// When `react_eval` last ran and the deadline it found then: that same deadline is not
+    /// asked for again (a condition that could not fire waits for a change), a new one is.
+    react_checked: Option<(u64, u64)>,
     // timers
     blink_at: u64,
     blink_first: u64,
@@ -485,6 +523,7 @@ pub struct Brain {
 impl Brain {
     pub fn new(pack: Arc<PackMeta>, cfg: BrainConfig, now_ms: u64) -> Brain {
         let temperament = cfg.temperament.unwrap_or(pack.temperament);
+        let tuning = Tuning::from(|n| pack.reaction(n).cloned());
         let mut b = Brain {
             rng: Rng::new(cfg.seed),
             pack,
@@ -520,6 +559,17 @@ impl Brain {
             idle_seat: None,
             local: LocalTime::default(),
             month: 0,
+            tuning,
+            tracker: Tracker::default(),
+            react_last: BTreeMap::new(),
+            following: None,
+            cursor_faced: Vec::new(),
+            drag_measure: None,
+            ask_next: None,
+            ask_last: None,
+            playing_music: false,
+            user_idle_ms: 0,
+            react_checked: None,
             blink_at: u64::MAX,
             blink_first: now_ms,
             closed_until: None,
@@ -549,6 +599,11 @@ impl Brain {
         // (a `work` activity, like the computer, keeps going through it)
         if opens_turn && self.activity.as_ref().is_some_and(|a| a.until.is_some() && !a.work) {
             self.end_activity(t, "turn");
+        }
+        // the agent's choice outranks the automatic layer (lead condition d): its body cue never
+        // waits behind a reaction (a held follow watch would keep it 20 s)
+        if matches!(ev, MascotEvent::Say { .. } | MascotEvent::Emote { .. } | MascotEvent::Activity { .. } | MascotEvent::Reminder { .. }) {
+            self.cut_reactions(t, "agent");
         }
         match ev {
             MascotEvent::Idle => {
@@ -672,6 +727,11 @@ impl Brain {
         self.windows.clone_from(&s.windows);
         self.local = s.local;
         self.month = s.month;
+        self.playing_music = s.now_playing.as_ref().is_some_and(|n| n.playing);
+        self.user_idle_ms = s.user_idle_ms;
+        if let (Some(m), Some(p)) = (self.drag_measure.as_mut(), s.panel) {
+            m.moved(Some([p.x, p.y]));
+        }
         self.follow_edge(t, s.fullscreen);
         self.quiet = s.quiet_hours;
         self.dnd = s.fullscreen || s.screen_share || s.dnd_toggle;
@@ -688,8 +748,12 @@ impl Brain {
         let rng = &mut self.rng;
         if let Some(f) = self.reflex.sample(s, t, off, free, shyness, &mut |p| rng.chance(p)) {
             self.note(t, "reflex", f.rule.to_string());
-            self.push_cue(Cue::Reflex(f.intent));
+            if f.rule != crate::reflex::MORNING || !self.morning(t) {
+                self.push_cue(Cue::Reflex(f.intent));
+            }
         }
+        self.cursor_sample(s.cursor, t);
+        self.react_eval(t);
         let late = self.reflex.late(s, off);
         if late != self.late {
             self.late = late;
@@ -757,8 +821,10 @@ impl Brain {
         self.note(t, "poke", format!("{p:?}"));
         match p {
             Poke::Click => {
-                // the person's click outranks the agent's activity, started or still pending
+                // the person's click outranks the agent's activity, started or still pending, and
+                // cuts a reaction (`#priority`)
                 self.end_activity(t, "click");
+                self.cut_reactions(t, "click");
             }
             Poke::PromptOpen => {
                 // the tray's Ask opens it without a click: the person outranks the activity all the same
@@ -787,17 +853,23 @@ impl Brain {
             Poke::DragStart => {
                 self.dragging = true;
                 self.drag_from = self.panel.map(|p| Placement { x: p.x, y: p.y, follow_pid: None });
+                self.drag_measure = Some(DragMeasure::new(t, self.panel.map(|p| [p.x, p.y])));
                 if self.sit.take().is_some() {
                     self.note(t, "edge", "off (picked up)".into());
                 }
+                self.cut_reactions(t, "drag");
                 if !self.play.drag {
-                    self.start("hold", self.desired(), t);
+                    // a hard cut (`#flow-drag`): dangle, or v1's hold
+                    let b = self.drag_behavior();
+                    self.start(&b, self.desired(), t);
                     self.play.drag = true;
                 }
             }
             Poke::DragEnd => {
                 self.dragging = false;
+                let m = self.drag_measure.take();
                 self.drop_on_edge(t);
+                self.land(m, t);
             }
         }
         self.dirty = true;
@@ -807,8 +879,18 @@ impl Brain {
     /// it is.
     pub fn set_edges(&mut self, feet: Option<[i32; 2]>) {
         self.edge_feet = feet;
-        if feet.is_none() {
-            self.sit = None;
+        if feet.is_none() && self.sit.take().is_some() {
+            let t = self.t;
+            self.edge_stand(t);
+        }
+    }
+
+    /// Off an edge, not picked up: stand back up (`edge_stand`, the sit's exit, so also in DND and
+    /// quiet hours), when the pack has the edge art.
+    fn edge_stand(&mut self, t: u64) {
+        let edge_art = self.pack.reaction(react::EDGE_LAND).is_some() && self.pack.available(react::EDGE_STAND);
+        if edge_art && !self.dragging && self.vis == Visibility::Shown {
+            self.push_react(react::EDGE_STAND, react::EDGE_STAND, false, t);
         }
     }
 
@@ -827,6 +909,37 @@ impl Brain {
         }
     }
 
+    /// The drag ended (`#flow-drag`): edge_land on an edge, else drag_land and (a long or far
+    /// drag, not in DND or quiet hours, not during a turn or an activity) dizzy. Without their art the drop is v1's.
+    fn land(&mut self, m: Option<DragMeasure>, t: u64) {
+        if self.vis != Visibility::Shown || !self.play.drag {
+            return;
+        }
+        let pack = self.pack.clone();
+        let mut queued = false;
+        if self.sit.is_some() {
+            if let Some(b) = pack.reaction_plays(react::EDGE_LAND) {
+                queued = self.push_react(b, react::EDGE_LAND, false, t);
+            }
+        } else if let Some(b) = pack.reaction_plays(react::DRAG_LAND) {
+            queued = self.push_react(b, react::DRAG_LAND, false, t);
+            let dizzy = pack.reaction(react::DIZZY).zip(m).is_some_and(|(d, m)| m.dizzy(t, d));
+            // dizzy is a reaction, not part of the drag: only when free of a turn, an activity
+            // or listening (design: reaction cues "only when free"), unlike the landing
+            let free = self.turn.is_none() && self.activity.is_none() && !self.listening;
+            if dizzy && free && self.unprompted_allowed() {
+                if let Some(d) = pack.reaction_plays(react::DIZZY) {
+                    self.push_react(d, react::DIZZY, false, t);
+                }
+            }
+        }
+        // the landing cuts the dangle at once (land_squash#0 = dangle#0)
+        if queued && self.cue.iter().all(|c| matches!(c, Cue::React { .. })) {
+            self.play.drag = false;
+            self.end_behavior(t);
+        }
+    }
+
     fn follow_edge(&mut self, t: u64, fullscreen: bool) {
         let (Some(feet), Some(sit)) = (self.edge_feet, self.sit) else { return };
         match crate::reflex::edge_follow(&sit, feet, &self.windows, fullscreen) {
@@ -841,6 +954,7 @@ impl Brain {
                 self.sit = None;
                 self.place = back;
                 self.dirty = true;
+                self.edge_stand(t);
             }
         }
     }
@@ -858,6 +972,9 @@ impl Brain {
             }
         }
         self.advance(now_ms);
+        if self.following.is_none() && !self.cursor_faced.is_empty() && !self.cursor_faced.contains(&self.dir) {
+            self.cursor_faced.clear();
+        }
         let mx = self.moved[0].trunc();
         let my = self.moved[1].trunc();
         self.moved[0] -= mx;
@@ -896,6 +1013,7 @@ impl Brain {
         if let Some(until) = self.activity.as_ref().and_then(|a| a.until) {
             next = next.min(until);
         }
+        next = next.min(self.react_deadline());
         if self.face_here() {
             if self.pack.capabilities.blink {
                 next = next.min(self.closed_until.unwrap_or(self.blink_at));
@@ -951,7 +1069,8 @@ impl Brain {
             // Only steps inside the talking window, whatever the tick cadence.
             let mouth = if self.flapping() && self.mouth_at < self.talking_until { self.mouth_at } else { u64::MAX };
             let act_end = self.activity.as_ref().and_then(|a| a.until).unwrap_or(u64::MAX);
-            let next = frame_end.min(cue_end).min(blink).min(mouth).min(act_end);
+            let react_due = self.react_deadline();
+            let next = frame_end.min(cue_end).min(blink).min(mouth).min(act_end).min(react_due);
             if next > now {
                 break;
             }
@@ -962,6 +1081,9 @@ impl Brain {
             self.dirty = true;
             if due == act_end {
                 self.end_activity(next, "done");
+                self.settle(next);
+            } else if due == react_due {
+                self.react_eval(next);
                 self.settle(next);
             } else if due == cue_end {
                 if let Some(&Cue::Timed { then, .. }) = self.cue.front() {
@@ -1013,11 +1135,12 @@ impl Brain {
             // A one-shot cue (e.g. Say's `thinking` follow-up) that resolves to a
             // held loop plays it once, then end_behavior consumes the cue.
             let once_cue = self.cue.front().and_then(Cue::once) == Some(self.play.intent);
+            let unheld = self.play.held && !self.ctx_holds(react::AWAY_LONG);
             // a long turn goes to the desk at the end of the think loop's iteration
             let to_station = self.play.intent != Intent::Idle && self.station_to_enter().is_some_and(|s| s != self.play.behavior);
             let release = self.desired() != self.play.intent || (self.play.drag && !self.dragging) || once_cue || to_station;
             let step_done = match &mut self.play.left {
-                None => release || self.play.for_until.is_some_and(|u| t >= u),
+                None => release || unheld || self.play.for_until.is_some_and(|u| t >= u),
                 Some(n) => {
                     *n = n.saturating_sub(1);
                     *n == 0
@@ -1275,6 +1398,7 @@ impl Brain {
         self.play.frame = 0;
         self.play.frame_start = t;
         self.play.for_until = None;
+        self.play.held = false;
         if self.in_station() {
             let role = Role::from_step(step).unwrap_or(Role::Loop);
             self.play.intent = Self::role_intent(role);
@@ -1289,6 +1413,16 @@ impl Brain {
             }
             self.play.left = if role.holds() { None } else { Some(1) };
             return;
+        }
+        if self.play.intent == Intent::Idle && step > 0 && self.hold_ctx().is_some_and(|(_, b)| b == self.play.behavior) {
+            let last = self.pack.behavior(&self.play.behavior).map_or(0, |d| d.seq.len() - 1);
+            if step < last {
+                // away_long: the middle loops until input returns, then the way out plays
+                self.play.left = None;
+                self.play.held = true;
+                self.note(t, "hold", react::AWAY_LONG.to_string());
+                return;
+            }
         }
         self.play.left = match loops {
             Loops::Once => Some(1),
@@ -1309,11 +1443,9 @@ impl Brain {
         let was = self.play.intent;
         self.note(t, "end", String::new());
         if self.play.intent != Intent::Idle {
-            if let Some(i) = self.cue.front().and_then(Cue::once) {
-                if i == was {
-                    self.cue.pop_front();
-                    self.activate_cue(t);
-                }
+            if self.cue.front().is_some_and(|c| c.ends_with(was, &self.play.behavior)) {
+                self.cue.pop_front();
+                self.activate_cue(t);
             }
             if self.turn == Some(TurnState::Once(was)) && self.cue.front().is_none_or(|c| c.intent() != was) {
                 self.turn = None;
@@ -1322,7 +1454,8 @@ impl Brain {
         self.sync_activity(t);
         let want = self.desired();
         if self.dragging {
-            self.start("hold", want, t);
+            let b = self.drag_behavior();
+            self.start(&b, want, t);
             self.play.drag = true;
         } else if want == Intent::Idle {
             if self.vis == Visibility::Still {
@@ -1373,6 +1506,12 @@ impl Brain {
                     self.face_toward(&[to], t);
                 }
             }
+        } else if let Some(to) = self.following.and_then(|f| f.dir).filter(|_| intent == Intent::Emote && self.follow_behavior() == Some(behavior)) {
+            // follow: face the cursor (the nearest dir the watch is drawn in)
+            let drawn: Vec<Dir> = first.map_or_else(Vec::new, |c| c.dirs.keys().copied().collect());
+            let targets = if drawn.is_empty() { vec![to] } else { react::nearest(to, &drawn) };
+            self.cursor_faced = targets.clone();
+            self.face_toward(&targets, t);
         } else if intent == Intent::Listen {
             match self.dir.listen_target() {
                 Some(to) => self.face_toward(&[to], t),
@@ -1497,6 +1636,11 @@ impl Brain {
     }
 
     fn set_turn(&mut self, turn: TurnState) {
+        let asking = |t: Option<TurnState>| t == Some(TurnState::Held(Intent::Ask));
+        if asking(Some(turn)) && !asking(self.turn) {
+            let after = self.pack.reaction(react::APPROVAL_WAIT).map(|r| r.after_s.unwrap_or(8.0));
+            self.ask_next = after.map(|a| self.t + (a * 1000.0).round() as u64);
+        }
         self.turn = Some(turn);
         self.drop_cues(false);
     }
@@ -1507,6 +1651,9 @@ impl Brain {
         let front = self.cue.front().cloned();
         self.cue.retain(|c| match c {
             Cue::Reflex(_) => false,
+            // the drag's landing is the person's layer: it plays through a turn, DND and quiet
+            // hours (not hidden or still: no frames play there)
+            Cue::React { trigger, .. } => !once && react::USER_LAYER.contains(trigger),
             Cue::Once(_) | Cue::Gesture(_) => !once,
             Cue::Timed { .. } => true,
         });
@@ -1514,6 +1661,8 @@ impl Brain {
             let t = self.t;
             self.activate_cue(t);
         }
+        let t = self.t;
+        self.follow_upkeep(t);
     }
 
     /// Queues a cue (R2: a cue no longer overwrites another's follow-up). A
@@ -1599,7 +1748,7 @@ impl Brain {
         match want {
             Intent::Do => self.activity.as_ref().map_or_else(|| "rest".to_string(), |a| a.behavior.clone()),
             Intent::Emote => match self.cue.front() {
-                Some(Cue::Gesture(b)) => b.clone(),
+                Some(Cue::Gesture(b) | Cue::React { behavior: b, .. }) => b.clone(),
                 _ => "rest".to_string(),
             },
             _ => self.pack.resolve(want).to_string(),
@@ -1773,12 +1922,325 @@ impl Brain {
         self.activity.as_ref().map(|a| Playing { activity: a.name.clone(), until_ms: a.until, pending: a.until.is_none() })
     }
 
+    // ---- reactions and contexts (p4, `#pack-reactions`, `#pack-contexts`, `#priority`) ----
+
+    /// A reaction may fire: nothing else plays out of turn, no turn, activity, drag or prompt, shown,
+    /// and not in DND or quiet hours (idle counts as free).
+    fn react_free(&self) -> bool {
+        self.cue.is_empty()
+            && self.turn.is_none()
+            && self.activity.is_none()
+            && !self.dragging
+            && !self.listening
+            && self.vis == Visibility::Shown
+            && self.unprompted_allowed()
+    }
+
+    /// Queues reaction `behavior` (traced `react <trigger> → <behavior>`). False when the queue is full.
+    fn push_react(&mut self, behavior: &str, trigger: &'static str, hold: bool, t: u64) -> bool {
+        if !self.push_cue(Cue::React { behavior: behavior.to_string(), trigger, hold }) {
+            return false;
+        }
+        self.note(t, "react", format!("{trigger} → {behavior}"));
+        true
+    }
+
+    /// A click or a drag cuts every reaction (`#priority`: the person outranks them).
+    fn cut_reactions(&mut self, t: u64, why: &str) {
+        let front = self.cue.front().cloned();
+        let had = self.cue.iter().any(|c| matches!(c, Cue::React { .. }));
+        self.cue.retain(|c| !matches!(c, Cue::React { .. }));
+        if had {
+            self.note(t, "react", format!("cut ({why})"));
+        }
+        if self.cue.front().cloned() != front {
+            self.activate_cue(t);
+        }
+        self.follow_upkeep(t);
+    }
+
+    /// What a drag shows: the `drag_hold` reaction's behavior (dangle), else v1's `hold`.
+    fn drag_behavior(&self) -> String {
+        self.pack.reaction_plays(react::DRAG_HOLD).unwrap_or("hold").to_string()
+    }
+
+    fn follow_behavior(&self) -> Option<&str> {
+        self.pack.reaction_plays(react::FOLLOW)
+    }
+
+    /// The `morning` reflex plays the `morning` reaction's chain in order (a name that is an
+    /// intent, e.g. `greet`, plays that intent, so the log still says Greet; its behavior comes
+    /// from `intents`). False = none of it can play: the reflex's own Greet then.
+    fn morning(&mut self, t: u64) -> bool {
+        let Some(r) = self.pack.reaction(react::MORNING).cloned() else { return false };
+        let mut any = false;
+        for name in r.names() {
+            if let Some(i) = Intent::parse(name) {
+                any |= self.push_cue(Cue::Reflex(i));
+            } else if self.pack.available(name) {
+                any |= self.push_react(name, react::MORNING, false, t);
+            }
+        }
+        any
+    }
+
+    /// One cursor input (the app sends changes only; replays a `cursor` patch).
+    fn cursor_sample(&mut self, c: Option<Cursor>, t: u64) {
+        if c == self.tracker.last() {
+            return;
+        }
+        let seen = self.tracker.push(c, t, &self.tuning, self.dragging);
+        self.follow_upkeep(t);
+        // a flinch outranks the watch (pet already ended it: the cursor is over the bear)
+        if seen.flinch && self.following.is_some() && self.cooled(react::FLINCH, t) && self.pack.reaction_plays(react::FLINCH).is_some() {
+            // only when the flinch can then play: nothing but the watch's own cue queued
+            let only_watch = self.cue.iter().all(|q| matches!(q, Cue::React { trigger, .. } if *trigger == react::FOLLOW));
+            if only_watch {
+                self.end_follow(t, "flinch");
+            }
+        }
+        self.follow_turn(t);
+        if !self.react_free() {
+            return; // petting during a turn does nothing
+        }
+        let pack = self.pack.clone();
+        // order when several hold: pet > flinch > follow
+        for (fired, trigger) in [(seen.pet, react::PET), (seen.flinch, react::FLINCH)] {
+            if fired && self.cooled(trigger, t) {
+                if let Some(b) = pack.reaction_plays(trigger) {
+                    self.react_last.insert(trigger, t);
+                    self.push_react(b, trigger, false, t);
+                    return;
+                }
+            }
+        }
+    }
+
+    /// The trigger's cooldown is over.
+    fn cooled(&self, trigger: &str, t: u64) -> bool {
+        let cd = self.pack.reaction(trigger).and_then(|r| r.cooldown_s).unwrap_or(0.0);
+        self.react_last.get(trigger).is_none_or(|l| (t.saturating_sub(*l) as f64) >= cd * 1000.0)
+    }
+
+    /// When follow can start (`None` = not now): near, still long enough, not over, free, cooled.
+    fn follow_ready_at(&self) -> Option<u64> {
+        if self.following.is_some() || !self.react_free() {
+            return None;
+        }
+        self.follow_behavior()?;
+        let at = self.tracker.follow_from(&self.tuning)?;
+        let cd = self.pack.reaction(react::FOLLOW).and_then(|r| r.cooldown_s).unwrap_or(0.0);
+        let cooled = self.react_last.get(react::FOLLOW).map_or(0, |l| l + (cd * 1000.0).round() as u64);
+        Some(at.max(cooled))
+    }
+
+    /// Ends the follow watch when its time is up or the cursor left, went over the bear or away
+    /// (or its cue was cut); its cooldown starts at the end, so a parked cursor cannot loop it.
+    fn follow_upkeep(&mut self, t: u64) {
+        let Some(f) = self.following else { return };
+        let c = self.tracker.last();
+        let has_cue = self.cue.iter().any(|q| matches!(q, Cue::React { trigger, .. } if *trigger == react::FOLLOW));
+        let why = match c {
+            _ if !has_cue => "cut",
+            None => "gone",
+            Some(c) if c.over => "over",
+            Some(c) if c.dist() > self.tuning.follow_near => "away",
+            _ if t >= f.until => "time",
+            _ if !self.unprompted_allowed() => "off",
+            _ => return,
+        };
+        self.end_follow(t, why);
+    }
+
+    /// Stops the follow watch (its cooldown starts now) and drops its cue.
+    fn end_follow(&mut self, t: u64, why: &str) {
+        self.following = None;
+        self.react_last.insert(react::FOLLOW, t);
+        let front = self.cue.front().cloned();
+        self.cue.retain(|q| !matches!(q, Cue::React { trigger, .. } if *trigger == react::FOLLOW));
+        if self.cue.front().cloned() != front {
+            self.activate_cue(t);
+        }
+        self.note(t, "react", format!("follow end ({why})"));
+        self.dirty = true;
+    }
+
+    /// Follow re-turns toward the cursor when its dir changed (at most once a second; a turn
+    /// held back by that is retried at `follow_turn_due`). The dir is kept only once faced.
+    fn follow_turn(&mut self, t: u64) {
+        let (Some(mut f), Some(d)) = (self.following, self.tracker.last().and_then(|c| c.dir())) else { return };
+        if f.dir == Some(d) || t.saturating_sub(f.turned_at) < react::RETURN_MS {
+            return;
+        }
+        let Some(b) = self.follow_behavior().map(str::to_string) else { return };
+        let drawn = self.pack.first_dirs(&b);
+        let facing = drawn.is_empty() || react::nearest(d, &drawn).contains(&self.dir);
+        let can_turn = self.play.behavior == b && self.play.intent == Intent::Emote && self.play.turns.is_empty();
+        if !facing && !can_turn {
+            // mid-turn or not yet playing: try again in a second (a new deadline)
+            f.turned_at = t;
+            self.following = Some(f);
+            return;
+        }
+        f.dir = Some(d);
+        f.turned_at = t;
+        self.following = Some(f);
+        if !facing {
+            // never the dir: the log must not carry where the cursor is
+            self.note(t, "react", "follow turn".to_string());
+            self.start(&b, Intent::Emote, t);
+        }
+    }
+
+    /// When a re-turn held back by `RETURN_MS` is due (the cursor's dir is not the one faced).
+    fn follow_turn_due(&self) -> Option<u64> {
+        let f = self.following?;
+        let d = self.tracker.last().and_then(|c| c.dir())?;
+        (f.dir != Some(d)).then_some(f.turned_at + react::RETURN_MS)
+    }
+
+    /// A shown `dir` that would say where the cursor is (the follow watch is on, or the bear
+    /// still faces where it watched): the app keeps it out of its log.
+    pub fn hides_dir(&self, d: Dir) -> bool {
+        self.following.is_some() || self.cursor_faced.contains(&d)
+    }
+
+    /// Time-driven reactions: follow's start, follow's end and the approval-wait interleave.
+    fn react_eval(&mut self, t: u64) {
+        self.react_checked = Some((t, self.react_due()));
+        self.follow_upkeep(t);
+        self.follow_turn(t);
+        self.approval_tick(t);
+        if self.follow_ready_at().is_some_and(|at| at <= t) {
+            let Some(b) = self.follow_behavior().map(str::to_string) else { return };
+            let max_s = self.pack.reaction(react::FOLLOW).and_then(|r| r.max_s).unwrap_or(20.0);
+            let dir = self.tracker.last().and_then(|c| c.dir());
+            self.following = Some(Following { until: t + (max_s * 1000.0).round() as u64, dir, turned_at: t });
+            self.push_react(&b, react::FOLLOW, true, t);
+        }
+    }
+
+    /// The next time `react_eval` has something to do (`u64::MAX` = none).
+    fn react_deadline(&self) -> u64 {
+        let next = self.react_due();
+        // never the same deadline twice once it is past (a follow whose time came while the bear
+        // was busy is a new deadline once it is free, so it still starts)
+        match self.react_checked {
+            Some((c, seen)) if next <= c && next == seen => u64::MAX,
+            _ => next,
+        }
+    }
+
+    /// The raw reaction deadline (`u64::MAX` = none).
+    fn react_due(&self) -> u64 {
+        if self.vis != Visibility::Shown {
+            return u64::MAX;
+        }
+        let mut next = u64::MAX;
+        if let Some(at) = self.follow_ready_at() {
+            next = next.min(at);
+        }
+        if let Some(f) = self.following {
+            next = next.min(f.until);
+        }
+        if let Some(at) = self.follow_turn_due() {
+            next = next.min(at);
+        }
+        if let Some(at) = self.ask_next.filter(|_| self.turn == Some(TurnState::Held(Intent::Ask))) {
+            next = next.min(at);
+        }
+        next
+    }
+
+    /// approval_wait (`#pack-reactions`): in a standing ask hold, after `after_s` and then every
+    /// `every_s`, one of the chain (no repeat). A seated ask (desk_ask) is left alone.
+    fn approval_tick(&mut self, t: u64) {
+        let Some(r) = self.pack.reaction(react::APPROVAL_WAIT).cloned() else { return };
+        if self.turn != Some(TurnState::Held(Intent::Ask)) {
+            self.ask_next = None;
+            return;
+        }
+        let Some(at) = self.ask_next.filter(|at| *at <= t) else { return };
+        let [a, b] = r.every_s.unwrap_or([6.0, 12.0]);
+        let d = a + self.rng.unit() * (b - a);
+        self.ask_next = Some(at.max(t) + (d * 1000.0).round() as u64);
+        let standing = self.play.intent == Intent::Ask && !self.in_station() && self.play.turns.is_empty();
+        if !standing || !self.cue.is_empty() || self.dragging || self.listening || self.vis != Visibility::Shown || !self.unprompted_allowed() {
+            return;
+        }
+        let alts: Vec<&str> = r.chain.iter().map(String::as_str).filter(|n| self.pack.available(n)).collect();
+        let fresh: Vec<&str> = alts.iter().copied().filter(|n| alts.len() < 2 || Some(*n) != self.ask_last.as_deref()).collect();
+        if fresh.is_empty() {
+            return;
+        }
+        let pick = fresh[self.rng.below(fresh.len() as u64) as usize].to_string();
+        self.ask_last = Some(pick.clone());
+        self.push_react(&pick, react::APPROVAL_WAIT, false, t);
+    }
+
+    /// A context holds now (`#pack-contexts`); none does in DND or quiet hours, or undeclared.
+    fn ctx_holds(&self, name: &str) -> bool {
+        let Some(c) = self.pack.contexts.get(name) else { return false };
+        if !self.unprompted_allowed() {
+            return false;
+        }
+        let base = match name {
+            react::MUSIC => self.playing_music,
+            react::EDGE => self.sit.is_some(),
+            react::EVENING => c.hours.is_some(),
+            react::AWAY => self.user_idle_ms as f64 >= c.after_min.unwrap_or(5.0) * 60_000.0,
+            react::AWAY_LONG => self.user_idle_ms as f64 >= c.after_min.unwrap_or(15.0) * 60_000.0,
+            _ => false,
+        };
+        let hours = c.hours.is_none_or(|[from, to]| {
+            let h = (self.local.minutes / 60) as u8;
+            if from <= to {
+                from <= h && h < to
+            } else {
+                h >= from || h < to
+            }
+        });
+        base && hours
+    }
+
+    /// For the pool: the `only` contexts holding (each with an entry that can play), the kinds
+    /// excluded, and whether nothing may move the bear (on an edge).
+    fn ctx_filter(&self) -> (Vec<&str>, Vec<PoolKind>, bool) {
+        let mut only = Vec::new();
+        let mut excluded = Vec::new();
+        for (name, c) in &self.pack.contexts {
+            if !self.ctx_holds(name) {
+                continue;
+            }
+            excluded.extend(c.exclude_kinds.iter().copied());
+            let own = |e: &PoolEntry| e.when.as_ref().and_then(|w| w.context.as_deref()) == Some(name.as_ref()) && self.pack.available(e.name());
+            if c.only && self.pack.idle_pool.iter().any(own) {
+                only.push(name.as_ref());
+            }
+        }
+        (only, excluded, self.ctx_holds(react::EDGE))
+    }
+
+    /// A context with a `hold` that holds now and can play it: (context, behavior).
+    fn hold_ctx(&self) -> Option<(&str, &str)> {
+        self.pack.contexts.iter().find_map(|(n, c)| {
+            let h = c.hold.as_deref()?;
+            (self.ctx_holds(n) && self.pack.available(h)).then_some((n.as_ref(), h))
+        })
+    }
+
     // ---- idle scheduler ----
 
     /// The next idle pick (§1.3, `#flow-pick`): its name (a behavior, or a station visit) and,
     /// for a station entry, its `hold_s`.
     fn pick(&mut self, t: u64) -> (String, Option<[f64; 2]>) {
         let pack = self.pack.clone();
+        if let Some((ctx, b)) = self.hold_ctx() {
+            // away_long: its hold behavior, held (`enter_step`) until input returns
+            let b = b.to_string();
+            self.note(t, "pick", format!("{b} hold {ctx}"));
+            return (b, None);
+        }
         let mut relaxed: Option<&'static str> = None;
         let mut weights = self.pool_weights(t, Rules::ALL);
         let mut total: f64 = weights.iter().map(|(_, w)| w).sum();
@@ -1828,9 +2290,9 @@ impl Brain {
         self.pool_weights(t, Rules::ALL).into_iter().map(|(i, w)| (self.pack.idle_pool[i].name().to_string(), w)).collect()
     }
 
-    /// Whether a pool entry's `when` holds now (a `context` waits for p4: never).
+    /// Whether a pool entry's `when` holds now.
     fn when_ok(&self, w: &When) -> bool {
-        if w.context.is_some() {
+        if w.context.as_deref().is_some_and(|c| !self.ctx_holds(c)) {
             return false;
         }
         if let Some([from, to]) = w.hours {
@@ -1853,11 +2315,21 @@ impl Brain {
         let variety = pack.variety.as_ref();
         let last_group = self.picks.front().map(|p| p.group.as_str());
         let moves_in_row = self.picks.iter().take_while(|p| p.kind == PoolKind::Move).count();
+        let (only, excluded, still) = self.ctx_filter();
         pack.idle_pool
             .iter()
             .enumerate()
             .filter(|(_, e)| !self.quiet || quiet.pool.iter().any(|q| q == e.name()))
             .map(|(i, e)| {
+                // contexts (`#pack-contexts`): an `only` context keeps its own entries, `exclude_kinds`
+                // drops kinds, and sitting on an edge nothing that moves the bear
+                let ctx = e.when.as_ref().and_then(|w| w.context.as_deref());
+                if (!only.is_empty() && !ctx.is_some_and(|c| only.contains(&c)))
+                    || excluded.contains(&e.kind)
+                    || (still && (e.kind == PoolKind::Move || pack.moves(e.name())))
+                {
+                    return (i, 0.0);
+                }
                 let name = e.name();
                 let cooling = rules.cooldown
                     && e.cooldown_s > 0.0
@@ -2057,3 +2529,7 @@ mod desk_tests;
 #[cfg(test)]
 #[path = "brain_idle_tests.rs"]
 mod idle_tests;
+
+#[cfg(test)]
+#[path = "brain_react_tests.rs"]
+mod react_tests;

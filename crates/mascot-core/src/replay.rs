@@ -69,6 +69,10 @@ pub struct SensesPatch {
     /// 1–12 (pack v2 `when.months`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub month: Option<u8>,
+    /// Replays only (`#senses-cursor`): `{"dx":-40,"dy":16,"over":false}` or `null`. Never
+    /// serialized, so a patch that is logged or kept in the app's sense ring cannot carry it.
+    #[serde(default, deserialize_with = "double", skip_serializing)]
+    pub cursor: Option<Option<crate::reaction::Cursor>>,
 }
 
 /// `null` = clear (`Some(None)`); an absent key stays `None` via `default`.
@@ -81,7 +85,7 @@ impl SensesPatch {
         macro_rules! set {
             ($($f:ident),*) => { $( if let Some(v) = &self.$f { s.$f = v.clone(); } )* };
         }
-        set!(frontmost, user_idle_ms, local, fullscreen, screen_share, dnd_toggle, quiet_hours, windows, panel, now_playing, month);
+        set!(frontmost, user_idle_ms, local, fullscreen, screen_share, dnd_toggle, quiet_hours, windows, panel, now_playing, month, cursor);
     }
 }
 
@@ -141,8 +145,15 @@ pub fn start_minutes(s: &str) -> Result<u16, String> {
 /// Runs the timeline (its own `seed`) and returns one line per change of any
 /// field but the frame. `tl` must have passed `parse`.
 pub fn run(pack: Arc<PackMeta>, tl: &Timeline) -> Vec<LogLine> {
+    run_with(pack, tl, |_| {})
+}
+
+/// `run`, with `setup` applied to the new brain first (app settings a timeline cannot carry,
+/// e.g. `set_edges` for an edge replay).
+pub fn run_with(pack: Arc<PackMeta>, tl: &Timeline, setup: impl FnOnce(&mut Brain)) -> Vec<LogLine> {
     let cfg = BrainConfig { seed: tl.seed, temperament: None, dnd_action: DndAction::Hide };
     let mut brain = Brain::new(pack, cfg, 0);
+    setup(&mut brain);
     let mut senses = Senses { local: LocalTime { minutes: start_minutes(&tl.start_local).unwrap_or(0), weekday: tl.weekday }, ..Senses::default() };
     brain.senses(&senses, 0);
     let mut out: Vec<LogLine> = Vec::new();

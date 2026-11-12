@@ -492,45 +492,28 @@ fn closing_the_prompt_during_listen_in_lets_it_finish_before_listen_out() {
 // ---- the loader on bad desk wiring ----
 
 /// desk_pack rewritten into a temp dir (absolute art paths), edited by `f` (pack.json) and `g` (face.json).
-struct DeskTemp(PathBuf);
-
-impl Drop for DeskTemp {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn desk_temp(tag: &str, f: impl FnOnce(&mut serde_json::Value), g: impl FnOnce(&mut serde_json::Value)) -> (DeskTemp, Result<PackMeta, pack::PackError>) {
+fn desk_temp(tag: &str, f: impl FnOnce(&mut serde_json::Value), g: impl FnOnce(&mut serde_json::Value)) -> (crate::test_pack::TempPack, Result<PackMeta, pack::PackError>) {
     use serde_json::{json, Value};
     let src = repo().join("crates/mascot-core/tests/fixtures/desk_pack").canonicalize().unwrap();
-    let root = std::env::temp_dir().join(format!("mascot-desk-{}-{tag}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
-    std::fs::create_dir_all(&root).unwrap();
-    let t = DeskTemp(root.clone());
-    let mut p: Value = serde_json::from_str(&std::fs::read_to_string(src.join("pack.json")).unwrap()).unwrap();
-    p["art_root"] = json!(src);
-    let pals: Vec<Value> = p["palettes"].as_array().unwrap().iter().map(|v| json!(src.join(v.as_str().unwrap()))).collect();
-    p["palettes"] = json!(pals);
-    let mut face: Value = serde_json::from_str(&std::fs::read_to_string(src.join("face/face.json")).unwrap()).unwrap();
-    for slot in face["layers"].as_object_mut().unwrap().values_mut() {
-        for state in slot.as_object_mut().unwrap().values_mut() {
-            for layer in state.as_object_mut().unwrap().values_mut() {
-                let abs = src.join("face").join(layer["file"].as_str().unwrap());
-                layer["file"] = json!(abs);
+    crate::test_pack::copy("crates/mascot-core/tests/fixtures/desk_pack", &format!("desk-{tag}"), |p, root| {
+        let mut face: Value = serde_json::from_str(&std::fs::read_to_string(src.join("face/face.json")).unwrap()).unwrap();
+        for slot in face["layers"].as_object_mut().unwrap().values_mut() {
+            for state in slot.as_object_mut().unwrap().values_mut() {
+                for layer in state.as_object_mut().unwrap().values_mut() {
+                    let abs = src.join("face").join(layer["file"].as_str().unwrap());
+                    layer["file"] = json!(abs);
+                }
             }
         }
-    }
-    g(&mut face);
-    std::fs::write(root.join("face.json"), face.to_string()).unwrap();
-    for s in p["sources"].as_array_mut().unwrap() {
-        if s["kind"] == "face" {
-            s["path"] = json!(root.join("face.json"));
+        g(&mut face);
+        std::fs::write(root.join("face.json"), face.to_string()).unwrap();
+        for s in p["sources"].as_array_mut().unwrap() {
+            if s["kind"] == "face" {
+                s["path"] = json!(root.join("face.json"));
+            }
         }
-    }
-    f(&mut p);
-    std::fs::write(root.join("pack.json"), p.to_string()).unwrap();
-    let r = pack::load(&root);
-    (t, r)
+        f(p);
+    })
 }
 
 fn load_err(tag: &str, f: impl FnOnce(&mut serde_json::Value), g: impl FnOnce(&mut serde_json::Value)) -> String {
@@ -599,7 +582,7 @@ fn a_computer_activity_naming_an_unknown_station_fails_the_app_and_the_studio_re
 fn face_parts_merge_and_refuse_a_clip_placed_twice() {
     use serde_json::{json, Value};
     fn part_root(tag: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("mascot-desk-{}-{tag}", std::process::id()))
+        crate::test_pack::dir_for(&format!("desk-{tag}"))
     }
     fn write_part(tag: &str, file: &str, clip: &Value) -> PathBuf {
         let path = part_root(tag).join(file);
@@ -667,7 +650,7 @@ fn a_clip_stage_face_part_keeps_its_patch_dirs() {
     let face: Value = serde_json::from_str(&std::fs::read_to_string(src).unwrap()).unwrap();
     let listen = face["clips"]["listen"].clone();
     let pd = face["patch_dirs"]["listen"].clone();
-    let root = |tag: &str| std::env::temp_dir().join(format!("mascot-desk-{}-{tag}", std::process::id()));
+    let root = |tag: &str| crate::test_pack::dir_for(&format!("desk-{tag}"));
     let part = |tag: &str, body: Value| {
         let path = root(tag).join("face_l2.json");
         std::fs::write(&path, body.to_string()).unwrap();

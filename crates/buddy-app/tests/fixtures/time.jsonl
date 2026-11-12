@@ -1,0 +1,6 @@
+// Design #ex-react (react-brain p4): time. 07:30 back from a night away (the morning: morning_stretch → greet),
+// 21:00 (evening_yawn in the picks), 23:30 quiet hours (the quiet pool: nap, rest; nightcap waits for its art).
+{"at_ms": 0, "senses": {"local": {"minutes": 450, "weekday": 2}, "month": 11, "user_idle_ms": 28800000}}
+{"at_ms": 2000, "senses": {"user_idle_ms": 0}}
+{"at_ms": 60000, "senses": {"local": {"minutes": 1260, "weekday": 2}}}
+{"at_ms": 1260000, "senses": {"local": {"minutes": 1410, "weekday": 2}, "quiet_hours": true}}

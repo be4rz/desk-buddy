@@ -255,9 +255,13 @@ fn real_bear_has_a_face_and_the_six_art_round_clips() {
     for (i, b) in expect {
         assert_eq!(p.resolve(i), b, "{i:?}");
     }
-    // The real face makes the bear blink while it holds a covered clip.
-    let starts = blink_starts(p, 9, 60_000);
-    assert!(!starts.is_empty(), "the real bear blinks");
+    // The real face makes the bear blink while it holds a covered clip (think: a drag now
+    // dangles, a baked clip with no face layers).
+    let mut b = brain_with(p, 9);
+    b.event(&MascotEvent::Thinking, 0);
+    let shows = run_until(&mut b, 0, 60_000);
+    let blinks = shows.windows(2).filter(|w| w[0].1.eyes == EyeState::Open && w[1].1.eyes == EyeState::Closed).count();
+    assert!(blinks > 0, "the real bear blinks");
 }
 
 #[test]
@@ -540,7 +544,10 @@ fn held_intents_end_on_settled_and_idle() {
     // Ask ends on Settled.
     let mut b = brain_with(p.clone(), 1);
     assert_eq!(show_after(&mut b, &MascotEvent::AwaitingPermission { call_id: "c".into(), title: "t".into() }, 1000).intent, Intent::Ask);
-    assert_eq!(b.tick(20_000).intent, Intent::Ask, "held while waiting");
+    // held while waiting: the ask, with approval_wait fidgets inside it, and back to the ask
+    let shows = run_until(&mut b, 1000, 20_000);
+    assert!(shows.iter().all(|(_, s)| s.intent == Intent::Ask || ["foot_tap", "check_watch"].contains(&s.behavior.as_str())), "held while waiting");
+    assert!(shows.iter().filter(|(t, _)| *t >= 12_000).any(|(_, s)| s.intent == Intent::Ask), "back to the ask between fidgets");
     b.event(&MascotEvent::Settled, 20_000);
     assert_eq!(b.tick(24_000).intent, Intent::Idle);
     // Talk is held through stalls (lead decision) and ends on Idle.
@@ -835,7 +842,10 @@ fn warmup_keeps_nap_out_of_the_first_minutes() {
 #[test]
 fn quiet_pool_and_warmup_come_from_pack_data() {
     let bear = bear();
-    assert_eq!(bear.quiet_hours, crate::pack::QuietPool::default());
+    // the bear adds nightcap (hidden until its p5 art lands: waiting(), never a pick)
+    let want = crate::pack::QuietPool { pool: vec!["nap".into(), "rest".into(), "nightcap".into()], ..Default::default() };
+    assert_eq!(bear.quiet_hours, want);
+    assert!(!bear.available("nightcap"));
     assert_eq!(bear.warmup, crate::pack::Warmup::default());
     // an older pack without the keys loads with today's values
     let t = TempPack::new("noquiet");
@@ -1391,6 +1401,17 @@ fn stop_list_and_the_duration_cap() {
     assert_eq!(listed("activities"), want(p.body.activities.iter().map(|(n, _)| n).collect()));
     assert_eq!(listed("emotes"), want(p.body.emotes.iter().map(|(n, _)| n).collect()));
     assert_eq!(v["emotes"][0], json!({ "name": "wave", "about": "a happy little wave", "group": "gesture" }));
+    // and independently of `waiting()`: a copy without the fidget and posture art lists neither
+    let (_tmp, r) = crate::test_pack::copy("mascots/bear", "list-without-fp", |v, _| {
+        v["sources"].as_array_mut().unwrap().retain(|s| !["anim_f/", "anim_p/"].iter().any(|d| s["path"].as_str().unwrap().starts_with(d)));
+    });
+    let mut bw = brain_with(Arc::new(r.unwrap_or_else(|e| panic!("{e}"))), 16);
+    let vw = serde_json::to_value(bw.body(&BodyReq::List, 0)).unwrap();
+    let names = |v: &Value, k: &str| -> std::collections::BTreeSet<String> { v[k].as_array().unwrap().iter().map(|a| a["name"].as_str().unwrap().to_string()).collect() };
+    for (k, gone) in [("emotes", "weight_shift"), ("emotes", "ear_twitch"), ("activities", "sit_floor")] {
+        assert!(names(&v, k).contains(gone) && !names(&vw, k).contains(gone), "{gone}: listed with its art only");
+    }
+    assert!(names(&vw, "emotes").contains("wave") && names(&vw, "activities").contains("read"));
     assert_eq!((v["maxForS"].clone(), v["playing"].clone()), (json!(1800), Value::Null));
     // the text: two headed blocks, one line per listed entry, columns padded to the longest group and
     // name (the exact list grows as art lands, so the shape is checked, not a golden)
@@ -1594,6 +1615,7 @@ others start after your reply. They last 2m unless you give --for, at most 30m.
 `buddy mascot stop` ends one.
 - read: sit down and read a book
 - nap: get into bed and sleep
+- dance: dance
 - lean: lean on a toy block and rest
 - sit_floor: sit on the floor
 - sit_sway: sit on the floor and sway
@@ -1627,9 +1649,10 @@ Gestures (`buddy mascot emote <name>`; a short gesture during your reply):
 
 Fidgets: weight_shift, ear_twitch, look_up, look_down, tummy_rub, wave_small, peek, butt_wiggle, rock_heels, head_tilt, scratch, yawn, shake_off, sneeze, nod_off, squat
 Moves: tiptoe, skip, shuffle, back_waddle, hop, roll, trip, chase, slide
+Reactions: giggle, head_bob, foot_tap, flinch, check_watch, dizzy, morning_stretch, evening_yawn
 
 When to use them:
-- If the user asks you to read, nap, lean, sit_floor, sit_sway, lie_belly, lie_back, floor_nap, computer or do another listed activity, run the command
+- If the user asks you to read, nap, dance, lean, sit_floor, sit_sway, lie_belly, lie_back, floor_nap, computer or do another listed activity, run the command
   and say so briefly.
 - Use at most one emote per reply, only when it matches the mood. Most short
   replies need none.
@@ -2039,7 +2062,7 @@ fn priority_a_do_from_the_sent_turn_queues_and_starts_after_idle() {
 
 #[test]
 fn turning_packs_turn_for_look_around_and_without_turning_nothing_turns() {
-    // (the day.seed7 golden proves a pack without turn clips replays byte-identically)
+    // (a pack without turn clips: the second half below, nothing turns)
     let p = listen_pack();
     let mut b = brain_with(p.clone(), 9);
     let shows = run_until(&mut b, 0, 120_000);

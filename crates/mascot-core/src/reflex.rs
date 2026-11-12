@@ -104,7 +104,8 @@ impl Reflexes {
             if morning {
                 self.morning_day = Some(self.day);
             }
-            return Some(Fired { rule: if back { BACK_FROM_IDLE } else { MORNING }, intent: Intent::Greet });
+            // the day's first return in the morning is the morning (p4: it plays the `morning` reaction)
+            return Some(Fired { rule: if morning { MORNING } else { BACK_FROM_IDLE }, intent: Intent::Greet });
         }
         let worked = self.streak_start.is_some_and(|st| now.saturating_sub(st) >= LONG_WORK_MS);
         if worked && self.last_stretch.is_none_or(|l| now.saturating_sub(l) >= LONG_WORK_MS) {

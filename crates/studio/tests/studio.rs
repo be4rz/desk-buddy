@@ -377,6 +377,7 @@ fn lint_lists_entries_waiting_for_art_as_warnings() {
     v["sources"].as_array_mut().unwrap().retain(|s| !s["path"].as_str().unwrap().starts_with("anim_f/"));
     let dir = tmp("waits-for-art");
     std::fs::write(dir.join("pack.json"), v.to_string()).unwrap();
+    // the real bear waits only for nightcap's p5 art (react-brain p4: hidden, never a pick)
     for (pack, waits_some) in [(real.clone(), false), (dir.clone(), true)] {
         let out = bin().args(["lint", "--pack"]).arg(&pack).arg("--json").output().unwrap();
         assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stdout));
@@ -387,7 +388,9 @@ fn lint_lists_entries_waiting_for_art_as_warnings() {
         let want: Vec<(String, String)> = p.waiting().into_iter().map(|w| (w.name, w.clip)).collect();
         let got: Vec<(String, String)> = waits.iter().map(|i| (i["name"].as_str().unwrap().to_string(), i["clip"].as_str().unwrap().to_string())).collect();
         assert_eq!(got, want, "{}", pack.display());
-        assert_eq!(!got.is_empty(), waits_some, "{}: {got:?}", pack.display());
+        let others = got.iter().filter(|(n, _)| n != "nightcap").count();
+        assert_eq!(others > 0, waits_some, "{}: {got:?}", pack.display());
+        assert!(got.iter().any(|(n, _)| n == "nightcap"), "nightcap waits for its art: {got:?}");
         // a waiting entry is one whose art is missing, never one that has it; lean (set_lean, p1) never waits
         for (name, clip) in &got {
             assert!(!p.clips.contains_key(clip), "{name} waits for {clip}, which is loaded");

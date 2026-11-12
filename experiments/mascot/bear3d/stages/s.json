@@ -1,0 +1,7 @@
+{
+ "id": "s",
+ "kind": "clips",
+ "module": "clips_s",
+ "verify": "verify_s.py",
+ "note": "Stage s (react-b, p4 reactions): dangle (16, loop, 8 dirs, held up by the scruff 10 px off the floor, hard cut in), land_squash (10, 8 dirs, frame 0 = dangle#0, ends idle#0), dizzy (30, baked circling toy stars), morning_stretch (30), evening_yawn (28), tap_glass (20, S SE SW); Stage A's 84x123 frame, anchor [42,107]; no face part (every clip baked / none). Output out/bear3d/anim_s/."
+}

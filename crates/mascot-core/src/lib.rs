@@ -6,9 +6,12 @@ pub mod attention;
 pub mod body;
 pub mod brain;
 pub mod pack;
+pub mod reaction;
 pub mod reflex;
 pub mod replay;
 pub mod rng;
+#[cfg(test)]
+mod test_pack;
 
 pub use attention::Budget;
 pub use brain::{
@@ -16,5 +19,6 @@ pub use brain::{
     Senses, Show, TraceLine, Visibility, WinRect,
 };
 pub use pack::{load, load_report, ActivityMeta, BodyMeta, EmoteAct, EmoteMeta, ClipMeta, Dir, FaceMeta, Handoff, Ori, PackError, PackMeta, QuietPool, Role, SetFace, SetMeta, StationMeta, StripRef, Warmup};
+pub use reaction::Cursor;
 pub use reflex::Reflexes;
 pub use rng::Rng;

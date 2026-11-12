@@ -1,0 +1,18 @@
+// Design #ex-react (react-brain p4): cursor (dx/dy points from the bear's anchor, y up). Replay only: the app never logs it.
+// Still near (follow: turn + cursor_watch), gone (the watch ends), a fast approach (flinch), petting (pet → giggle),
+// still near again after follow's 60 s cooldown (faces west), gone. Log: cursor_watch, flinch, giggle, cursor_watch, each ending.
+{"at_ms": 0, "senses": {"local": {"minutes": 840, "weekday": 2}, "month": 11}}
+{"at_ms": 3000, "senses": {"cursor": {"dx": 80, "dy": 40, "over": false}}}
+{"at_ms": 10000, "senses": {"cursor": null}}
+{"at_ms": 20000, "senses": {"cursor": {"dx": 176, "dy": 0, "over": false}}}
+{"at_ms": 20100, "senses": {"cursor": {"dx": 16, "dy": 0, "over": false}}}
+{"at_ms": 20200, "senses": {"cursor": null}}
+{"at_ms": 30000, "senses": {"cursor": {"dx": 0, "dy": 24, "over": true}}}
+{"at_ms": 30150, "senses": {"cursor": {"dx": 16, "dy": 24, "over": true}}}
+{"at_ms": 30300, "senses": {"cursor": {"dx": -8, "dy": 24, "over": true}}}
+{"at_ms": 30450, "senses": {"cursor": {"dx": 16, "dy": 24, "over": true}}}
+{"at_ms": 30600, "senses": {"cursor": {"dx": -8, "dy": 24, "over": true}}}
+{"at_ms": 30750, "senses": {"cursor": {"dx": 16, "dy": 24, "over": true}}}
+{"at_ms": 31000, "senses": {"cursor": null}}
+{"at_ms": 75000, "senses": {"cursor": {"dx": -80, "dy": 0, "over": false}}}
+{"at_ms": 85000, "senses": {"cursor": null}}

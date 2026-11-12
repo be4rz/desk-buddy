@@ -1,0 +1,5 @@
+// Design #ex-react (react-brain p4): music. Replay Items, at_ms after launch; 14:00 on a Wednesday in November.
+// now_playing playing at 5 s, stopped at 4 min. Log: picks from head_bob/foot_tap/dance while it plays; none start after.
+{"at_ms": 0, "senses": {"local": {"minutes": 840, "weekday": 2}, "month": 11}}
+{"at_ms": 5000, "senses": {"now_playing": {"source": "spotify", "title": "A song", "playing": true}}}
+{"at_ms": 240000, "senses": {"now_playing": {"source": "spotify", "title": "A song", "playing": false}}}

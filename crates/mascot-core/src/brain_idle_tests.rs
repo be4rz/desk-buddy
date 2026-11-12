@@ -264,29 +264,13 @@ fn a_when_entry_is_picked_only_inside_its_window() {
     assert!(count(15 * 60) > 0);
 }
 
-/// The bear without the art of some sources (`anim_f/`, …): a temp `pack.json` beside the real one
+/// The bear without the art of some sources (`anim_f/`, …): a temp copy of its `pack.json`
 /// pointing at the real art, those sources left out. Removed on drop.
-struct BearWithout(PathBuf);
-
-impl Drop for BearWithout {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn bear_without(dirs: &[&str]) -> (BearWithout, Arc<PackMeta>) {
-    let real = repo().join("mascots/bear");
-    let mut v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(real.join("pack.json")).unwrap()).unwrap();
-    let abs = |s: &serde_json::Value| serde_json::json!(real.join(s.as_str().unwrap()));
-    v["art_root"] = abs(&v["art_root"]);
-    v["palettes"] = serde_json::Value::Array(v["palettes"].as_array().unwrap().iter().map(abs).collect());
-    v["sources"].as_array_mut().unwrap().retain(|s| !dirs.iter().any(|d| s["path"].as_str().unwrap().starts_with(&format!("{d}/"))));
-    let dir = std::env::temp_dir().join(format!("mascot-core-bear-without-{}-{}", std::process::id(), dirs.join("-")));
-    std::fs::create_dir_all(&dir).unwrap();
-    let guard = BearWithout(dir.clone()); // removes the dir even when the load below panics
-    std::fs::write(dir.join("pack.json"), v.to_string()).unwrap();
-    let p = Arc::new(pack::load(&dir).unwrap_or_else(|e| panic!("{e}")));
-    (guard, p)
+fn bear_without(dirs: &[&str]) -> (crate::test_pack::TempPack, Arc<PackMeta>) {
+    let (guard, r) = crate::test_pack::copy("mascots/bear", &format!("without-{}", dirs.join("-")), |v, _| {
+        v["sources"].as_array_mut().unwrap().retain(|s| !dirs.iter().any(|d| s["path"].as_str().unwrap().starts_with(&format!("{d}/"))));
+    });
+    (guard, Arc::new(r.unwrap_or_else(|e| panic!("{e}"))))
 }
 
 /// `#hidden-log`: wired entries whose art is missing load, wait, and never play. The bear has all

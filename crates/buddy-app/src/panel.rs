@@ -36,6 +36,7 @@ use objc2_io_surface::{
 use objc2_quartz_core::{kCAFilterNearest, CALayer, CATransaction};
 
 use crate::driver::{post, Inbox};
+use crate::senses::cursor::{self as cursor_sense, Feed};
 use crate::settings::Position;
 
 /// kCGFloatingWindowLevel = 3; "just above floating".
@@ -132,6 +133,13 @@ struct State {
     /// WATCH_HZ input watch while shown: independent of the animation's wakes
     watch_timer: Option<Retained<NSTimer>>,
     polls: u64,
+    /// the bear's floor anchor in the canvas (sprite px): the cursor sense's origin
+    anchor: Option<[i32; 2]>,
+    /// the cursor sense (`senses::cursor`): relative samples, ≤ 10 Hz, to the brain only
+    cursor: Feed,
+    /// last `Inbox::DragMoved` (ms since `born`)
+    drag_posted: Option<u64>,
+    born: Instant,
 }
 
 pub struct Panel {
@@ -239,6 +247,10 @@ impl Panel {
                 poll_timer: None,
                 watch_timer: None,
                 polls: 0,
+                anchor: None,
+                cursor: Feed::default(),
+                drag_posted: None,
+                born: Instant::now(),
             }),
             observers: RefCell::new(vec![]),
             verbose: std::env::var_os("BUDDY_VERBOSE").is_some(),
@@ -328,6 +340,11 @@ impl Panel {
         let Some(ph) = self.primary_h() else { return };
         let f = self.panel.frame();
         self.panel.setFrameOrigin(CGPoint::new(x as f64, (ph - y as f64 - f.size.height).round()));
+    }
+
+    /// The canvas anchor the cursor sense measures from (driver start; the pack's anchor).
+    pub fn set_anchor(&self, anchor: [i32; 2]) {
+        self.st.borrow_mut().anchor = Some(anchor);
     }
 
     /// The bear's floor anchor (canvas pixel `anchor`) inside the panel, in points.
@@ -464,6 +481,24 @@ impl Panel {
             let sy = ((f.origin.y + f.size.height - m.y) / pt).floor() as usize;
             sx < st.w && sy < st.h && st.hit[sy * st.w + sx]
         };
+        // the cursor sense: relative to the feet, coarse, changes only (never the position itself)
+        let now_ms = st.born.elapsed().as_millis() as u64;
+        let sample = st.anchor.filter(|_| crate::senses::cursor_on()).and_then(|a| {
+            let feet = (f.origin.x + a[0] as f64 * pt, f.origin.y + f.size.height - a[1] as f64 * pt);
+            cursor_sense::relative((m.x, m.y), feet, hit)
+        });
+        let cursor_out = st.cursor.push(sample, now_ms);
+        // the drag measure: where the panel is, ≤ 10 Hz while a drag is on
+        let drag_out = DRAGGING.get() && st.drag_posted.is_none_or(|t| now_ms >= t + cursor_sense::MIN_GAP_MS);
+        if drag_out {
+            st.drag_posted = Some(now_ms);
+        }
+        if let Some(c) = cursor_out {
+            post(Inbox::Cursor(c));
+        }
+        if drag_out {
+            post(Inbox::DragMoved);
+        }
         // keep accepting while a drag that started on the bear is in progress
         let dragging = !st.ignoring && NSEvent::pressedMouseButtons() != 0;
         let want_ignore = !hit && !dragging;
@@ -483,8 +518,13 @@ impl Panel {
         }
         // cursor wandered off: stop the fast poll, the input watch restarts it
         if idle_far && !self.cursor_near() {
-            if let Some(t) = self.st.borrow_mut().poll_timer.take() {
+            let mut st = self.st.borrow_mut();
+            if let Some(t) = st.poll_timer.take() {
                 t.invalidate();
+            }
+            let now_ms = st.born.elapsed().as_millis() as u64;
+            if let Some(c) = st.cursor.leave(now_ms) {
+                post(Inbox::Cursor(c));
             }
         }
     }
@@ -508,6 +548,10 @@ impl Panel {
         let mut st = self.st.borrow_mut();
         if let Some(t) = st.poll_timer.take() {
             t.invalidate();
+        }
+        let now_ms = st.born.elapsed().as_millis() as u64;
+        if let Some(c) = st.cursor.leave(now_ms) {
+            post(Inbox::Cursor(c));
         }
         if !st.ignoring {
             st.ignoring = true;

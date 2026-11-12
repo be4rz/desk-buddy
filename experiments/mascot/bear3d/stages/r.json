@@ -1,0 +1,7 @@
+{
+ "id": "r",
+ "kind": "clips",
+ "module": "clips_r",
+ "verify": "verify_r.py",
+ "note": "Stage r (react-a, p4 aliveness): seven reaction clips in Stage A's 84x123 frame, anchor [42,107], S SE E W SW, in place, idle#0 at both ends of every clip (loops included: each pass starts and ends on idle#0). Loops head_bob 16 (baked), foot_tap 12 (layers), dance 32 (baked), cursor_watch 20 (layers); one-shots flinch 12, giggle 20, check_watch 22 (baked; a toy wristwatch kit object on paw_L). Face part face_r.json for the layers clips. Output out/bear3d/anim_r/."
+}

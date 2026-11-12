@@ -4,7 +4,8 @@
 //! - the pack carries the bear's `variety` block;
 //! - a long seeded run keeps the variety rules with an energetic temperament and in quiet hours;
 //! - (A5: AC13) each of the 11 intents plays its own clip, the new gestures are listed emotes, and
-//!   without their art the intents fall back down their chains.
+//!   without their art the intents fall back down their chains;
+//! - (p4: AC14) the reactions and contexts play stage r/s/w art, and only nightcap waits (p5).
 //!
 //! `buddy studio audit` (AC11, AC17) measures time shares and targets; this file pins what the
 //! pack itself must hold, so a pack edit that drops an A4 entry or breaks the rules fails here.
@@ -12,7 +13,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use mascot_core::{body, pack, replay, Brain, BrainConfig, DndAction, Intent, LocalTime, PackMeta, Senses};
+use mascot_core::{body, pack, replay, Brain, BrainConfig, DndAction, Intent, LocalTime, NowPlaying, PackMeta, Senses};
 use mascot_protocol::pack::{PoolKind, Temperament};
 
 fn bear() -> Arc<PackMeta> {
@@ -84,10 +85,15 @@ type Pick = (u64, String, String, PoolKind);
 
 /// Runs the brain on a quiet day for `minutes` and returns its picks and its `pick relaxed …` lines.
 fn run(seed: u64, minutes: u64, temperament: Option<Temperament>, quiet_hours: bool) -> (Vec<Pick>, Vec<String>) {
+    run_senses(seed, minutes, temperament, Senses { quiet_hours, ..Senses::default() })
+}
+
+/// `run` with these senses held all along (10:00, November).
+fn run_senses(seed: u64, minutes: u64, temperament: Option<Temperament>, senses: Senses) -> (Vec<Pick>, Vec<String>) {
     let p = bear();
     let dur = minutes * 60_000;
     let mut brain = Brain::new(p.clone(), BrainConfig { seed, temperament, dnd_action: DndAction::Hide }, 0);
-    brain.senses(&Senses { local: LocalTime { minutes: 10 * 60, weekday: 0 }, month: 11, quiet_hours, ..Senses::default() }, 0);
+    brain.senses(&Senses { local: LocalTime { minutes: 10 * 60, weekday: 0 }, month: 11, ..senses }, 0);
     let mut trace = vec![];
     let mut t = 0;
     brain.tick(0);
@@ -286,7 +292,8 @@ fn the_emotes_fixture_plays_each_gesture_with_its_own_behavior() {
     assert_eq!(names.iter().cloned().collect::<std::collections::BTreeSet<_>>(), gestures, "the fixture has each gesture emote once");
     assert_eq!(names.len(), gestures.len());
     let end = items.last().unwrap().at_ms + 8000;
-    let tl = replay::Timeline { timeline_version: replay::TIMELINE_VERSION, seed: 7, duration_ms: end, start_local: "10:00".into(), weekday: 2, items };
+    // seed 3: no idle desk spell overlaps an emote (an emote at the desk is refused as busy)
+    let tl = replay::Timeline { timeline_version: replay::TIMELINE_VERSION, seed: 3, duration_ms: end, start_local: "10:00".into(), weekday: 2, items };
     let log = replay::run(p, &tl);
     let items = &tl.items;
     for (k, name) in names.iter().enumerate() {
@@ -299,5 +306,74 @@ fn the_emotes_fixture_plays_each_gesture_with_its_own_behavior() {
             .collect();
         assert!(played.contains(&name.as_str()), "emote {name} at {from} ms played {played:?}");
         assert!(played.iter().all(|b| b == name), "emote {name} at {from} ms also played {played:?}");
+    }
+}
+
+/// p4 (react-brain, AC14): the stage r/s/w art is wired. Every reaction plays a rendered behavior
+/// (morning's `greet` is an intent), every context has its own rendered pool entries, and the only
+/// entry waiting for art is nightcap (p5), never a pick in quiet hours.
+#[test]
+fn the_p4_reactions_and_contexts_play_on_the_real_art() {
+    let p = bear();
+    let want = ["approval_wait", "dizzy", "drag_hold", "drag_land", "edge_land", "flinch", "follow", "morning", "pet"];
+    assert_eq!(p.reactions.keys().map(String::as_str).collect::<Vec<_>>(), want);
+    for (name, r) in &p.reactions {
+        for b in r.names() {
+            assert!(p.available(b) || (name == "morning" && Intent::parse(b).is_some()), "reaction {name}: {b} has no art");
+        }
+    }
+    for (name, c) in &p.contexts {
+        let own: Vec<&str> = p.idle_pool.iter().filter(|e| e.when.as_ref().and_then(|w| w.context.as_deref()) == Some(name)).map(|e| e.name()).collect();
+        assert!(!own.is_empty() || c.hold.is_some(), "context {name} has no entries");
+        for b in own.iter().copied().chain(c.hold.as_deref()) {
+            assert!(p.available(b), "context {name}: {b} has no art");
+        }
+    }
+    let waiting: Vec<(&str, String)> = p.waiting().into_iter().map(|w| (w.kind, w.name)).collect();
+    assert_eq!(waiting, [("idle", "nightcap".to_string())], "only nightcap waits (p5 art)");
+    let (picks, _) = run(3, 30, None, true);
+    assert!(!picks.is_empty() && picks.iter().all(|k| k.1 != "nightcap"), "nightcap is never a pick before its art");
+}
+
+/// p4: the drag fixture on the real bear: it dangles while held, lands with a squash, and the
+/// long drag (not the 0.2 s one) makes it dizzy.
+#[test]
+fn the_drag_fixture_dangles_and_lands_on_the_real_bear() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../buddy-app/tests/fixtures/drag.jsonl");
+    let items: Vec<replay::Item> = std::fs::read_to_string(path)
+        .unwrap()
+        .lines()
+        .filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with("//"))
+        .map(|l| serde_json::from_str(l).unwrap_or_else(|e| panic!("{l}: {e}")))
+        .collect();
+    let tl = replay::Timeline { timeline_version: replay::TIMELINE_VERSION, seed: 4, duration_ms: 20_000, start_local: "10:00".into(), weekday: 2, items };
+    let mut seq: Vec<(u64, String)> = Vec::new();
+    for l in replay::run(bear(), &tl) {
+        if seq.last().map(|x| &x.1) != Some(&l.behavior) {
+            seq.push((l.t_ms, l.behavior));
+        }
+    }
+    let names = |a: u64, b: u64| -> Vec<&str> { seq.iter().filter(|(t, _)| (a..b).contains(t)).map(|(_, x)| x.as_str()).collect() };
+    let first = names(0, 15_000);
+    let i = first.iter().position(|b| *b == "dangle").unwrap_or_else(|| panic!("{first:?}"));
+    assert_eq!(&first[i..i + 3], ["dangle", "land_squash", "dizzy"], "{first:?}");
+    let second = names(15_000, 20_000);
+    let j = second.iter().position(|b| *b == "dangle").unwrap_or_else(|| panic!("{second:?}"));
+    assert_eq!(second.get(j + 1), Some(&"land_squash"), "{second:?}");
+    assert!(!second.contains(&"dizzy"), "{second:?}");
+}
+
+/// Lead condition (e): reactions cannot dominate idle. Thirty minutes of music on the bear keep
+/// the variety rules, and the music entries stay a minority of the picks.
+#[test]
+fn thirty_minutes_of_music_keep_the_variety_rule_and_react_entries_stay_a_minority() {
+    let music = Senses { now_playing: Some(NowPlaying { source: "music".into(), title: "x".into(), playing: true }), ..Senses::default() };
+    for seed in [1, 2, 3] {
+        let (picks, relaxed) = run_senses(seed, 30, None, music.clone());
+        assert_eq!(violations(&picks), Vec::<String>::new(), "seed {seed}");
+        assert!(relaxed.is_empty(), "seed {seed}: {relaxed:?}");
+        let react = picks.iter().filter(|p| p.3 == PoolKind::React).count();
+        let share = react as f64 / picks.len() as f64;
+        assert!(react > 0 && share <= 0.35, "seed {seed}: react {react} of {} picks", picks.len());
     }
 }

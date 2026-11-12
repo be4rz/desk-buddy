@@ -1,0 +1,6 @@
+// Design #ex-react (react-brain p4): away. The person idle 6 min (tap_glass/wave picks), 16 min (floor_nap, held),
+// then back (curl_up, then the greeting).
+{"at_ms": 0, "senses": {"local": {"minutes": 840, "weekday": 2}, "month": 11}}
+{"at_ms": 5000, "senses": {"user_idle_ms": 360000}}
+{"at_ms": 300000, "senses": {"user_idle_ms": 960000}}
+{"at_ms": 900000, "senses": {"user_idle_ms": 0}}

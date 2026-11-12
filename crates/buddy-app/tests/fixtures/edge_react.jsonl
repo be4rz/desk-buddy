@@ -1,0 +1,8 @@
+// Design #ex-react (react-brain p4): edge. Edges on (the bear's feet at 140,150 in the panel); a window, a drop on its top edge,
+// then the window closes at 5 min. Log: edge_sit, then only edge_dangle/edge_peer/edge_doze, nothing moves; edge_stand on leaving.
+// (The app reads the real windows on a drop; replay it with mascot-core's react_replays test.)
+{"at_ms": 0, "senses": {"local": {"minutes": 840, "weekday": 2}, "month": 11, "windows": [{"x": 100, "y": 300, "w": 800, "h": 500, "owner_pid": 42, "layer": 0}], "panel": {"x": 900, "y": 900, "w": 284, "h": 198, "owner_pid": 1, "layer": 3}}}
+{"at_ms": 3000, "poke": "drag_start"}
+{"at_ms": 3100, "senses": {"panel": {"x": 110, "y": 140, "w": 284, "h": 198, "owner_pid": 1, "layer": 3}}}
+{"at_ms": 3200, "poke": "drag_end"}
+{"at_ms": 300000, "senses": {"windows": [], "panel": {"x": 110, "y": 150, "w": 284, "h": 198, "owner_pid": 1, "layer": 3}}}

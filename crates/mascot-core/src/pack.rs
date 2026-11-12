@@ -6,8 +6,9 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use mascot_protocol::pack::{
-    ActivityKind, BehaviorDef, BodyEntry, BodyFile, Capabilities, FaceFile, FacePartFile, Loops, Memory, PackFile, PoolEntry, PropsFile, SourceKind,
-    StageAFile, StageBFile, StationFile, StepDef, Temperament, Timers, TurningFile, Variety, WorkFile, PACK_VERSION, PACK_VERSION_MIN,
+    ActivityKind, BehaviorDef, BodyEntry, BodyFile, Capabilities, ContextDef, FaceFile, FacePartFile, Loops, Memory, PackFile, PoolEntry, PropsFile, SourceKind,
+    ReactionDef, StageAFile, StageBFile, StationFile, StepDef, Temperament, Timers, TurningFile, Variety, WorkFile, CONTEXTS,
+    PACK_VERSION, PACK_VERSION_MIN, REACTIONS,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -134,6 +135,10 @@ pub struct PackMeta {
     pub missing_sources: Vec<String>,
     /// Body activities and emotes left out because their art is missing (`#hidden-log`).
     pub body_waiting: Vec<Waiting>,
+    /// v2 `"contexts"` (`#pack-contexts`, p4): by fixed name. Empty = no context ever holds.
+    pub contexts: BTreeMap<String, ContextDef>,
+    /// v2 `"reactions"` (`#pack-reactions`, p4): by fixed trigger name. Empty = v1 behaviour.
+    pub reactions: BTreeMap<String, ReactionDef>,
 }
 
 /// An entry wired in the pack whose art is not there yet (`#hidden-log`): skipped, not an error.
@@ -359,6 +364,10 @@ struct Extras {
     work: Option<WorkFile>,
     #[serde(default)]
     variety: Option<Variety>,
+    #[serde(default)]
+    contexts: BTreeMap<String, ContextDef>,
+    #[serde(default)]
+    reactions: BTreeMap<String, ReactionDef>,
 }
 
 /// Where a pack uses a key `#pack-v2` adds (a lint error under `pack_version: 1`).
@@ -611,23 +620,48 @@ impl PackMeta {
             .map(|s| s.clip.as_str())
     }
 
+    /// The reaction `name` declares (`None` = not in the pack).
+    pub fn reaction(&self, name: &str) -> Option<&ReactionDef> {
+        self.reactions.get(name)
+    }
+
+    /// The behavior a `plays` reaction plays now (`None`: not declared, or its art is missing).
+    pub fn reaction_plays(&self, name: &str) -> Option<&str> {
+        self.reaction(name)?.plays.as_deref().filter(|b| self.available(b))
+    }
+
+    /// Any clip of the behavior moves the bear (root motion in any dir).
+    pub fn moves(&self, behavior: &str) -> bool {
+        self.behavior(behavior).is_some_and(|b| {
+            b.seq.iter().filter_map(|s| self.clips.get(&s.clip)).any(|c| c.dirs.values().any(|d| d.root_px.iter().any(|p| p[0] != 0.0 || p[1] != 0.0)))
+        })
+    }
+
     /// The dirs a behavior's first clip is drawn in (empty for set behaviors and unknown clips).
     pub fn first_dirs(&self, behavior: &str) -> Vec<Dir> {
         let Some(b) = self.behavior(behavior).filter(|b| b.set.is_none()) else { return Vec::new() };
         b.seq.first().and_then(|s| self.clips.get(&s.clip)).map_or_else(Vec::new, |c| c.dirs.keys().copied().collect())
     }
 
-    /// Every wired entry whose art is missing (`#hidden-log`): idle pool entries, then emotes and
-    /// activities (in pack order). They are skipped, never an error.
+    /// Every wired entry whose art is missing (`#hidden-log`): idle pool entries (and quiet-hours
+    /// pool names), then emotes and activities (in pack order), then reactions none of whose
+    /// behaviors can play. They are skipped, never an error.
     pub fn waiting(&self) -> Vec<Waiting> {
         let mut out: Vec<Waiting> = Vec::new();
-        for e in &self.idle_pool {
-            let name = e.name();
+        let names = self.idle_pool.iter().map(|e| e.name()).chain(self.quiet_hours.pool.iter().map(String::as_str));
+        for name in names {
             if !self.available(name) && !out.iter().any(|w| w.name == name) {
                 out.push(self.waiting_entry("idle", name, name));
             }
         }
         out.extend(self.body_waiting.iter().cloned());
+        for (name, r) in &self.reactions {
+            // morning's chain may end in an intent: that one always plays
+            let plays = |b: &str| self.available(b) || (name == crate::reaction::MORNING && Intent::parse(b).is_some());
+            if let Some(first) = r.names().next().filter(|_| !r.names().any(plays)) {
+                out.push(self.waiting_entry("reaction", name, first));
+            }
+        }
         out
     }
 
@@ -643,12 +677,16 @@ impl PackMeta {
             names.push("…");
         }
         Some(format!(
-            "pack: {} entries wait for art: {} (idle {}, emotes {}, activities {})",
+            "pack: {} entries wait for art: {} (idle {}, emotes {}, activities {}{})",
             w.len(),
             names.join(", "),
             n("idle"),
             n("emote"),
-            n("activity")
+            n("activity"),
+            match n("reaction") {
+                0 => String::new(),
+                k => format!(", reactions {k}"),
+            }
         ))
     }
 
@@ -809,6 +847,8 @@ impl Loader {
             v2_keys: v2_keys(&raw),
             missing_sources,
             body_waiting: Vec::new(),
+            contexts: extras.contexts,
+            reactions: extras.reactions,
         };
         meta.turning = self.check_turning(extras.turning, &meta.clips)?;
         self.check_stations(extras.stations, extras.work, &mut meta)?;
@@ -1288,6 +1328,65 @@ impl Loader {
         }
         if !(meta.warmup.duration_s >= 0.0) {
             return Err(self.invalid(rel, "warmup: duration_s must be >= 0"));
+        }
+        self.check_reactions(file, meta)
+    }
+
+    /// `contexts` and `reactions` (`#pack-contexts`, `#pack-reactions`): fixed names, defined
+    /// behaviors (art may still be missing: such a reaction does nothing, lint warns).
+    fn check_reactions(&self, file: &PackFile, meta: &PackMeta) -> Result<(), PackError> {
+        let rel = Path::new("pack.json");
+        let defined = |b: &str| meta.behaviors.contains_key(b);
+        for (name, c) in &meta.contexts {
+            if !CONTEXTS.contains(&name.as_str()) {
+                return Err(self.invalid(rel, format!("contexts: unknown context {name} (one of {})", CONTEXTS.join(", "))));
+            }
+            if c.hours.is_some_and(|[a, b]| a > 23 || b > 24) {
+                return Err(self.invalid(rel, format!("contexts: {name}: hours are 0-24")));
+            }
+            if c.after_min.is_some_and(|m| !(m.is_finite() && m >= 0.0)) {
+                return Err(self.invalid(rel, format!("contexts: {name}: after_min must be >= 0")));
+            }
+            if let Some(h) = c.hold.as_deref() {
+                if name != crate::reaction::AWAY_LONG {
+                    return Err(self.invalid(rel, format!("contexts: {name}: hold is for away_long only")));
+                }
+                let steps = meta.behaviors.get(h).map_or(0, |b| b.seq.len());
+                if steps < 3 {
+                    return Err(self.invalid(rel, format!("contexts: {name}: hold {h} must name a behavior with a way in, a middle and a way out")));
+                }
+            }
+        }
+        for e in &file.idle_pool {
+            if let Some(c) = e.when.as_ref().and_then(|w| w.context.as_deref()) {
+                if !CONTEXTS.contains(&c) {
+                    return Err(self.invalid(rel, format!("idle_pool: {}: unknown when.context {c}", e.name())));
+                }
+            }
+        }
+        for (name, r) in &meta.reactions {
+            if !REACTIONS.contains(&name.as_str()) {
+                return Err(self.invalid(rel, format!("reactions: unknown reaction {name} (one of {})", REACTIONS.join(", "))));
+            }
+            if r.plays.is_some() == !r.chain.is_empty() {
+                return Err(self.invalid(rel, format!("reactions: {name} needs exactly one of plays and chain")));
+            }
+            // morning's chain may end in an intent (its Greet), every other name is a behavior
+            let ok = |b: &str| defined(b) || (name == crate::reaction::MORNING && Intent::parse(b).is_some());
+            if let Some(b) = r.names().find(|b| !ok(b)) {
+                return Err(self.invalid(rel, format!("reactions: {name} names undefined behavior {b}")));
+            }
+            let nums = [r.cooldown_s, r.min_ms, r.min_pt, r.near_pt, r.speed, r.within_ms, r.still_ms, r.max_s, r.after_s];
+            if nums.iter().flatten().any(|v| !(v.is_finite() && *v >= 0.0)) {
+                return Err(self.invalid(rel, format!("reactions: {name}: numbers must be >= 0")));
+            }
+            // a parked cursor must not loop the watch: a pause after each one (lead condition e)
+            if name == crate::reaction::FOLLOW && !r.cooldown_s.is_some_and(|c| c > 0.0) {
+                return Err(self.invalid(rel, format!("reactions: {name} needs cooldown_s > 0")));
+            }
+            if r.every_s.is_some_and(|[a, b]| !(a.is_finite() && b.is_finite() && 0.0 < a && a <= b)) {
+                return Err(self.invalid(rel, format!("reactions: {name}: every_s [a, b] needs 0 < a <= b")));
+            }
         }
         Ok(())
     }

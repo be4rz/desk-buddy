@@ -12,6 +12,7 @@
 //! every sense change to stderr.
 
 pub mod clock;
+pub mod cursor;
 pub mod frontmost;
 pub mod fullscreen;
 pub mod idle;
@@ -122,6 +123,9 @@ fn diff(prev: Option<&Sample>, now: &Sample) -> SensesPatch {
     if prev.is_none_or(|o| o.local != now.local) {
         p.local = Some(now.local);
     }
+    if prev.is_none_or(|o| o.month != now.month) {
+        p.month = Some(now.month);
+    }
     if prev.is_none_or(|o| o.fullscreen != now.fullscreen) {
         p.fullscreen = Some(now.fullscreen);
     }
@@ -135,6 +139,8 @@ fn diff(prev: Option<&Sample>, now: &Sample) -> SensesPatch {
 struct Sample {
     idle_ms: u64,
     local: LocalTime,
+    /// 1–12 (pack `when.months`)
+    month: u8,
     fullscreen: bool,
     share: bool,
 }
@@ -150,18 +156,40 @@ fn sample() -> Sample {
     let wins = read_windows();
     let screens = if wins.is_some() { fullscreen::displays() } else { Vec::new() };
     let (fullscreen, share) = judge(wins.as_deref(), FRONT_PID.load(Ordering::Relaxed), &screens);
-    Sample { idle_ms: idle::idle_ms(), local: clock::now(), fullscreen, share }
+    Sample { idle_ms: idle::idle_ms(), local: clock::now(), month: month_now(), fullscreen, share }
 }
 
-/// Starts the sensors (main thread): the frontmost observer, then the poll thread.
+/// The local month now, 1–12 (`localtime_r`); 0 = unknown (no `when.months` entry plays).
+fn month_now() -> u8 {
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    let t = unsafe { libc::time(std::ptr::null_mut()) };
+    if unsafe { libc::localtime_r(&t, &mut tm) }.is_null() {
+        return 0;
+    }
+    (tm.tm_mon + 1).clamp(1, 12) as u8
+}
+
+/// The sensors run (`start`): the panel feeds the cursor sense only then, so `BUDDY_SENSES=0` and a
+/// `BUDDY_EVENTS` replay see no real cursor.
+static SENSORS_ON: AtomicBool = AtomicBool::new(false);
+
+pub fn cursor_on() -> bool {
+    SENSORS_ON.load(Ordering::Relaxed)
+}
+
+/// Starts the sensors (main thread): the first sample at once (so the brain never sees the
+/// default 00:00 or month 0), the frontmost observer, then the poll thread.
 pub fn start() {
+    SENSORS_ON.store(true, Ordering::Relaxed);
     windows::start();
+    let first = sample();
+    crate::driver::with_app(|a| a.handle(Inbox::Senses(diff(None, &first))));
     let (nudge, rx) = channel::<()>();
     observe_frontmost(nudge);
     std::thread::Builder::new()
         .name("buddy-senses".into())
         .spawn(move || {
-            let mut prev: Option<Sample> = None;
+            let mut prev: Option<Sample> = Some(first);
             loop {
                 let s = sample();
                 let p = diff(prev.as_ref(), &s);
@@ -215,13 +243,24 @@ mod tests {
     use super::*;
 
     fn s(idle_ms: u64, minutes: u16) -> Sample {
-        Sample { idle_ms, local: LocalTime { minutes, weekday: 0 }, fullscreen: false, share: false }
+        Sample { idle_ms, local: LocalTime { minutes, weekday: 0 }, month: 11, fullscreen: false, share: false }
     }
 
     #[test]
     fn first_sample_reports_everything() {
         let p = diff(None, &s(0, 600));
         assert_eq!((p.user_idle_ms, p.local.map(|l| l.minutes), p.fullscreen, p.screen_share), (Some(0), Some(600), Some(false), Some(false)));
+        assert_eq!(p.month, Some(11), "the month from the first sample (pack when.months)");
+    }
+
+    #[test]
+    fn the_month_is_posted_when_it_changes() {
+        assert_eq!(diff(Some(&s(0, 600)), &s(0, 601)).month, None);
+        let mut dec = s(0, 0);
+        dec.month = 12;
+        assert_eq!(diff(Some(&s(0, 1439)), &dec).month, Some(12));
+        assert!((1..=12).contains(&month_now()));
+        assert!((1..=12).contains(&sample().month));
     }
 
     #[test]

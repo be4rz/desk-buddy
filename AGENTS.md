@@ -33,7 +33,10 @@ and talks through speech bubbles, powered by an LLM.
   `BUDDY_DUMP=<dir>` (+ `BUDDY_DUMP_EVERY`, canvas PNGs), `BUDDY_EVENTS=<file.jsonl>` (replays
   MascotEvents, e.g. `crates/buddy-app/tests/fixtures/events.jsonl`), `BUDDY_SCREEN`,
   `BUDDY_VERBOSE=1`, `BUDDY_SENSES=0|1` (sensors; off under `BUDDY_EVENTS` unless `=1`),
-  `BUDDY_SENSES_LOG=1` (sense changes to stderr). Talk (p3): the speech bubble (`src/bubble/`,
+  `BUDDY_SENSES_LOG=1` (sense changes to stderr; never the cursor). Reactions (A6 p4): the pack's `contexts` + `reactions`
+  (`mascots/bear/README.md` § reactions); the cursor sense (`src/senses/cursor.rs`) is the panel's existing near-poll only
+  (no new permission), feet-relative, 8 pt, ≤ 10 Hz, to the brain alone (never logged, prompted or stored); replays
+  `crates/buddy-app/tests/fixtures/{music,edge_react,drag,cursor,time,away,approval_wait}.jsonl`. Talk (p3): the speech bubble (`src/bubble/`,
   page `web/bubble/index.html`, `?mock=<state>` in a plain browser) and `harness.rs` (host API at
   `BUDDY_HOME/host.json`, policy, agent "main"); dev credential `BUDDY_FAKE_MODEL=<url>` (debug builds only).
   Accounts (p4): tray **Accounts…** (and the agent line "Connect an AI account…" when signed out) opens `src/signin/` (page `web/signin/index.html`, `?mock=<state>`);

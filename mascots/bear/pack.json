@@ -118,7 +118,26 @@
     "laugh": {"seq": [{"clip": "laugh"}]},
     "pout": {"seq": [{"clip": "pout"}]},
     "proud": {"seq": [{"clip": "proud"}]},
-    "head_scratch": {"seq": [{"clip": "head_scratch"}]}
+    "head_scratch": {"seq": [{"clip": "head_scratch"}]},
+    "head_bob": {"seq": [{"clip": "head_bob", "loops": [3, 8]}]},
+    "foot_tap": {"seq": [{"clip": "foot_tap", "loops": [2, 5]}]},
+    "dance": {"seq": [{"clip": "dance", "loops": {"for_s": [10, 30]}}]},
+    "cursor_watch": {"seq": [{"clip": "cursor_watch", "loops": "hold"}]},
+    "flinch": {"seq": [{"clip": "flinch"}]},
+    "giggle": {"seq": [{"clip": "giggle"}]},
+    "check_watch": {"seq": [{"clip": "check_watch"}]},
+    "dangle": {"seq": [{"clip": "dangle", "loops": "hold"}]},
+    "land_squash": {"seq": [{"clip": "land_squash"}]},
+    "dizzy": {"seq": [{"clip": "dizzy"}]},
+    "morning_stretch": {"seq": [{"clip": "morning_stretch"}]},
+    "evening_yawn": {"seq": [{"clip": "evening_yawn"}]},
+    "tap_glass": {"seq": [{"clip": "tap_glass"}]},
+    "edge_sit": {"seq": [{"clip": "edge_sit"}]},
+    "edge_dangle": {"seq": [{"clip": "edge_dangle", "loops": {"for_s": [10, 40]}}]},
+    "edge_peer": {"seq": [{"clip": "edge_peer"}]},
+    "edge_doze": {"seq": [{"clip": "edge_doze", "loops": {"for_s": [20, 90]}}]},
+    "edge_stand": {"seq": [{"clip": "edge_stand"}]},
+    "nightcap": {"seq": [{"clip": "cap_get_in_bed"}, {"clip": "cap_sleep", "loops": {"for_s": [120, 600]}}, {"clip": "cap_wake_up"}]}
   },
   "intents": {
     "idle": ["rest"],
@@ -183,7 +202,16 @@
     {"behavior": "roll", "weight": 0.4, "kind": "move", "cooldown_s": 180},
     {"behavior": "trip", "weight": 0.3, "kind": "move", "cooldown_s": 600},
     {"behavior": "chase", "weight": 0.4, "kind": "move", "cooldown_s": 300, "traits": {"energy": 1}},
-    {"behavior": "slide", "weight": 0.4, "kind": "move", "cooldown_s": 300, "traits": {"energy": 1}}
+    {"behavior": "slide", "weight": 0.4, "kind": "move", "cooldown_s": 300, "traits": {"energy": 1}},
+    {"behavior": "head_bob", "weight": 2, "kind": "react", "when": {"context": "music"}, "cooldown_s": 20},
+    {"behavior": "foot_tap", "weight": 1, "kind": "react", "when": {"context": "music"}, "cooldown_s": 20},
+    {"behavior": "dance", "weight": 1, "kind": "react", "when": {"context": "music"}, "cooldown_s": 120},
+    {"behavior": "edge_dangle", "weight": 2, "kind": "react", "when": {"context": "edge"}},
+    {"behavior": "edge_peer", "weight": 1, "kind": "react", "when": {"context": "edge"}, "cooldown_s": 20},
+    {"behavior": "edge_doze", "weight": 0.8, "kind": "react", "when": {"context": "edge"}, "traits": {"sleepiness": 1.0}, "cooldown_s": 60},
+    {"behavior": "evening_yawn", "weight": 1.5, "kind": "react", "when": {"context": "evening"}, "cooldown_s": 180},
+    {"behavior": "tap_glass", "weight": 1.5, "kind": "react", "when": {"context": "away"}, "cooldown_s": 90},
+    {"behavior": "wave", "weight": 1, "kind": "react", "when": {"context": "away"}, "cooldown_s": 90, "group": "away_wave"}
   ],
   "memory": {"recent": 3, "penalty": 0.25},
   "variety": {
@@ -193,7 +221,25 @@
     "targets": {"minutes": 10, "stand_max": 0.25, "stand_move_max": 0.45,
                 "distinct_min": 20, "share_max": 0.15, "long_len_s": [20, 300]}
   },
-  "quiet_hours": {"pool": ["nap", "rest"], "boost": {"nap": 4}},
+  "quiet_hours": {"pool": ["nap", "rest", "nightcap"], "boost": {"nap": 4}},
+  "contexts": {
+    "music": {},
+    "edge": {"only": true},
+    "evening": {"hours": [20, 23]},
+    "away": {"after_min": 5},
+    "away_long": {"after_min": 15, "only": true, "hold": "floor_nap"}
+  },
+  "reactions": {
+    "drag_hold": {"plays": "dangle"},
+    "drag_land": {"plays": "land_squash"},
+    "dizzy": {"plays": "dizzy", "min_ms": 1500, "min_pt": 600},
+    "flinch": {"plays": "flinch", "cooldown_s": 20, "near_pt": 60, "speed": 1500},
+    "pet": {"plays": "giggle", "cooldown_s": 10, "reversals": 3, "within_ms": 2000},
+    "follow": {"plays": "cursor_watch", "cooldown_s": 60, "near_pt": 120, "still_ms": 1500, "speed": 200, "max_s": 20},
+    "morning": {"chain": ["morning_stretch", "greet"]},
+    "approval_wait": {"chain": ["foot_tap", "check_watch"], "after_s": 8, "every_s": [6, 12]},
+    "edge_land": {"plays": "edge_sit"}
+  },
   "warmup": {"duration_s": 180, "exclude": ["nap"]},
   "body": {
     "default_for_s": 120, "max_for_s": 1800,
@@ -206,7 +252,8 @@
       "sit_sway": {"plays": "sit_sway", "group": "posture", "about": "sit on the floor and sway"},
       "lie_belly": {"plays": "lie_belly", "group": "posture", "about": "lie on its tummy and kick its feet"},
       "lie_back": {"plays": "lie_back", "group": "posture", "about": "lie on its back"},
-      "floor_nap": {"plays": "floor_nap", "group": "posture", "about": "curl up for a nap on the floor"}
+      "floor_nap": {"plays": "floor_nap", "group": "posture", "about": "curl up for a nap on the floor"},
+      "dance": {"plays": "dance", "group": "play", "about": "dance"}
     },
     "emotes": {
       "wave": {"intent": "wave", "about": "a happy little wave", "group": "gesture"},
@@ -254,7 +301,15 @@
       "roll": {"plays": "roll", "group": "move"},
       "trip": {"plays": "trip", "group": "move"},
       "chase": {"plays": "chase", "group": "move"},
-      "slide": {"plays": "slide", "group": "move"}
+      "slide": {"plays": "slide", "group": "move"},
+      "giggle": {"plays": "giggle", "group": "reaction", "about": "a ticklish giggle"},
+      "head_bob": {"plays": "head_bob", "group": "reaction", "about": "bob its head to a beat"},
+      "foot_tap": {"plays": "foot_tap", "group": "reaction", "about": "tap a foot, waiting"},
+      "flinch": {"plays": "flinch", "group": "reaction", "about": "a startled flinch"},
+      "check_watch": {"plays": "check_watch", "group": "reaction", "about": "check its toy wristwatch"},
+      "dizzy": {"plays": "dizzy", "group": "reaction", "about": "wobble, dizzy"},
+      "morning_stretch": {"plays": "morning_stretch", "group": "reaction", "about": "a big morning stretch"},
+      "evening_yawn": {"plays": "evening_yawn", "group": "reaction", "about": "a sleepy evening yawn"}
     }
   }
 }

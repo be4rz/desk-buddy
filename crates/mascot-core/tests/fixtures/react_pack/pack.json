@@ -1,0 +1,1721 @@
+{
+ "pack_version": 2,
+ "id": "react_pack",
+ "name": "React fixture (the bear + p4 reactions)",
+ "art_root": "../../../../../experiments/mascot/out/bear3d",
+ "palettes": [
+  "../../../../../experiments/bear-proto/palette-bear.json",
+  "../../../../../experiments/scene-proto/palette.json",
+  "../../../../../experiments/mascot/bear3d/palette-ext.json"
+ ],
+ "sources": [
+  {
+   "kind": "stage_a",
+   "path": "anim/anim.json"
+  },
+  {
+   "kind": "stage_b",
+   "path": "anim_b/anim_b.json",
+   "props": "props/props.json"
+  },
+  {
+   "kind": "stage_a",
+   "path": "anim_c/anim_c.json",
+   "optional": true
+  },
+  {
+   "kind": "stage_a",
+   "path": "anim_l/anim_l.json",
+   "optional": true
+  },
+  {
+   "kind": "stage_b",
+   "path": "anim_d/anim_d.json",
+   "props": "props_d/props_d.json",
+   "optional": true
+  },
+  {
+   "kind": "face",
+   "path": "face/face.json",
+   "optional": true
+  },
+  {
+   "kind": "stage_a",
+   "path": "anim_f/anim_f.json",
+   "optional": true
+  },
+  {
+   "kind": "face_part",
+   "path": "anim_f/face_f.json",
+   "optional": true
+  },
+  {
+   "kind": "stage_a",
+   "path": "anim_g/anim_g.json",
+   "optional": true
+  },
+  {
+   "kind": "face_part",
+   "path": "anim_g/face_g.json",
+   "optional": true
+  },
+  {
+   "kind": "stage_a",
+   "path": "anim_p/anim_p.json",
+   "optional": true
+  },
+  {
+   "kind": "face_part",
+   "path": "anim_p/face_p.json",
+   "optional": true
+  },
+  {
+   "kind": "stage_a",
+   "path": "anim_m/anim_m.json",
+   "optional": true
+  },
+  {
+   "kind": "face_part",
+   "path": "anim_m/face_m.json",
+   "optional": true
+  },
+  {
+   "kind": "stage_a",
+   "path": "anim_t/anim_t.json",
+   "optional": true
+  },
+  {
+   "kind": "face_part",
+   "path": "anim_t/face_t.json",
+   "optional": true
+  },
+  {
+   "kind": "stage_a",
+   "path": "anim_e/anim_e.json",
+   "optional": true
+  },
+  {
+   "kind": "face_part",
+   "path": "anim_e/face_e.json",
+   "optional": true
+  },
+  {
+   "kind": "stage_a",
+   "path": "anim_x/anim_x.json",
+   "optional": true
+  },
+  {
+   "kind": "face_part",
+   "path": "anim_x/face_x.json",
+   "optional": true
+  },
+  {
+   "kind": "stage_a",
+   "path": "anim_r/anim_r.json",
+   "optional": true
+  },
+  {
+   "kind": "face_part",
+   "path": "anim_r/face_r.json",
+   "optional": true
+  },
+  {
+   "kind": "stage_a",
+   "path": "anim_s/anim_s.json",
+   "optional": true
+  },
+  {
+   "kind": "face_part",
+   "path": "anim_s/face_s.json",
+   "optional": true
+  },
+  {
+   "kind": "stage_a",
+   "path": "anim_w/anim_w.json",
+   "optional": true
+  },
+  {
+   "kind": "face_part",
+   "path": "anim_w/face_w.json",
+   "optional": true
+  },
+  {
+   "kind": "stage_a",
+   "path": "anim_z/anim_z.json",
+   "optional": true
+  },
+  {
+   "kind": "face_part",
+   "path": "anim_z/face_z.json",
+   "optional": true
+  },
+  {
+   "kind": "stage_b",
+   "path": "set_lean/anim_lean.json",
+   "props": "set_lean/props_lean.json",
+   "optional": true
+  },
+  {
+   "kind": "face_part",
+   "path": "set_lean/face_lean.json",
+   "optional": true
+  },
+  {
+   "kind": "stage_b",
+   "path": "set_sit_a/anim_sit_a.json",
+   "props": "set_sit_a/props_sit_a.json",
+   "optional": true
+  },
+  {
+   "kind": "face_part",
+   "path": "set_sit_a/face_sit_a.json",
+   "optional": true
+  },
+  {
+   "kind": "stage_b",
+   "path": "set_sit_b/anim_sit_b.json",
+   "props": "set_sit_b/props_sit_b.json",
+   "optional": true
+  },
+  {
+   "kind": "face_part",
+   "path": "set_sit_b/face_sit_b.json",
+   "optional": true
+  },
+  {
+   "kind": "stage_b",
+   "path": "set_play/anim_play.json",
+   "props": "set_play/props_play.json",
+   "optional": true
+  },
+  {
+   "kind": "face_part",
+   "path": "set_play/face_play.json",
+   "optional": true
+  },
+  {
+   "kind": "stage_b",
+   "path": "set_out/anim_out.json",
+   "props": "set_out/props_out.json",
+   "optional": true
+  },
+  {
+   "kind": "face_part",
+   "path": "set_out/face_out.json",
+   "optional": true
+  }
+ ],
+ "capabilities": {
+  "blink": true,
+  "lip_sync": true,
+  "look_at": "body"
+ },
+ "temperament": {
+  "energy": 0.5,
+  "curiosity": 0.6,
+  "shyness": 0.3,
+  "chattiness": 0.4,
+  "sleepiness": 0.5
+ },
+ "timers": {
+  "blink": {
+   "mean_ms": 4200,
+   "jitter": 0.4,
+   "closed_frames": 2,
+   "double_p": 0.15
+  },
+  "mouth": {
+   "frame_ms": 167,
+   "stall_ms": 400
+  }
+ },
+ "turning": {
+  "ccw": "turn_ccw",
+  "cw": "turn_cw"
+ },
+ "stations": {
+  "desk": {
+   "set": "desk",
+   "enter": "desk_sit",
+   "loop": "desk_type",
+   "to_user": "desk_swivel_in",
+   "talk": "desk_talk",
+   "ask": "desk_ask",
+   "listen": "desk_talk",
+   "to_screen": "desk_swivel_out",
+   "exit": "desk_stand"
+  }
+ },
+ "work": {
+  "station": "desk",
+  "after_ms": 4000,
+  "after_tools": 2
+ },
+ "behaviors": {
+  "rest": {
+   "seq": [
+    {
+     "clip": "idle",
+     "loops": [
+      1,
+      2
+     ]
+    }
+   ]
+  },
+  "look_around": {
+   "seq": [
+    {
+     "clip": "idle",
+     "loops": [
+      1,
+      1
+     ]
+    }
+   ],
+   "turn": "random"
+  },
+  "wander": {
+   "seq": [
+    {
+     "clip": "walk_start"
+    },
+    {
+     "clip": "walk",
+     "loops": [
+      2,
+      4
+     ]
+    },
+    {
+     "clip": "walk_stop"
+    }
+   ],
+   "turn": "random"
+  },
+  "dash": {
+   "seq": [
+    {
+     "clip": "run_start"
+    },
+    {
+     "clip": "run",
+     "loops": [
+      2,
+      5
+     ]
+    },
+    {
+     "clip": "run_stop"
+    }
+   ],
+   "turn": "random"
+  },
+  "nap": {
+   "set": "bed",
+   "seq": [
+    {
+     "clip": "get_in_bed"
+    },
+    {
+     "clip": "sleep",
+     "loops": {
+      "for_s": [
+       60,
+       240
+      ]
+     }
+    },
+    {
+     "clip": "wake_up"
+    }
+   ]
+  },
+  "read": {
+   "set": "read",
+   "seq": [
+    {
+     "clip": "sit_down"
+    },
+    {
+     "clip": "read",
+     "loops": {
+      "for_s": [
+       40,
+       180
+      ]
+     }
+    },
+    {
+     "clip": "stand_up"
+    }
+   ]
+  },
+  "think": {
+   "seq": [
+    {
+     "clip": "think",
+     "loops": "hold"
+    }
+   ]
+  },
+  "talk": {
+   "seq": [
+    {
+     "clip": "talk",
+     "loops": "hold"
+    }
+   ]
+  },
+  "ask": {
+   "seq": [
+    {
+     "clip": "ask",
+     "loops": "hold"
+    }
+   ]
+  },
+  "oops": {
+   "seq": [
+    {
+     "clip": "oops"
+    }
+   ]
+  },
+  "happy": {
+   "seq": [
+    {
+     "clip": "happy"
+    }
+   ]
+  },
+  "celebrate": {
+   "seq": [
+    {
+     "clip": "celebrate"
+    }
+   ]
+  },
+  "hold": {
+   "seq": [
+    {
+     "clip": "idle",
+     "loops": "hold"
+    }
+   ]
+  },
+  "listen": {
+   "seq": [
+    {
+     "clip": "listen_in"
+    },
+    {
+     "clip": "listen",
+     "loops": "hold"
+    },
+    {
+     "clip": "listen_out"
+    }
+   ],
+   "exit": true
+  },
+  "lean": {
+   "set": "lean",
+   "seq": [
+    {
+     "clip": "lean_in"
+    },
+    {
+     "clip": "lean",
+     "loops": {
+      "for_s": [
+       30,
+       120
+      ]
+     }
+    },
+    {
+     "clip": "lean_out"
+    }
+   ]
+  },
+  "weight_shift": {
+   "seq": [
+    {
+     "clip": "fid_weight_shift"
+    }
+   ]
+  },
+  "ear_twitch": {
+   "seq": [
+    {
+     "clip": "fid_ear_twitch"
+    }
+   ]
+  },
+  "look_up": {
+   "seq": [
+    {
+     "clip": "fid_look_up"
+    }
+   ]
+  },
+  "look_down": {
+   "seq": [
+    {
+     "clip": "fid_look_down"
+    }
+   ]
+  },
+  "tummy_rub": {
+   "seq": [
+    {
+     "clip": "fid_tummy_rub"
+    }
+   ]
+  },
+  "wave_small": {
+   "seq": [
+    {
+     "clip": "fid_wave_small"
+    }
+   ]
+  },
+  "peek": {
+   "seq": [
+    {
+     "clip": "fid_peek"
+    }
+   ]
+  },
+  "butt_wiggle": {
+   "seq": [
+    {
+     "clip": "fid_butt_wiggle"
+    }
+   ]
+  },
+  "rock_heels": {
+   "seq": [
+    {
+     "clip": "fid_rock_heels"
+    }
+   ]
+  },
+  "head_tilt": {
+   "seq": [
+    {
+     "clip": "fid_head_tilt"
+    }
+   ]
+  },
+  "scratch": {
+   "seq": [
+    {
+     "clip": "fid_scratch"
+    }
+   ]
+  },
+  "stretch": {
+   "seq": [
+    {
+     "clip": "stretch"
+    }
+   ]
+  },
+  "yawn": {
+   "seq": [
+    {
+     "clip": "fid_yawn"
+    }
+   ]
+  },
+  "shake_off": {
+   "seq": [
+    {
+     "clip": "fid_shake_off"
+    }
+   ]
+  },
+  "sneeze": {
+   "seq": [
+    {
+     "clip": "fid_sneeze"
+    }
+   ]
+  },
+  "nod_off": {
+   "seq": [
+    {
+     "clip": "fid_nod_off"
+    }
+   ]
+  },
+  "sit_floor": {
+   "seq": [
+    {
+     "clip": "sit_floor_down"
+    },
+    {
+     "clip": "sit_floor",
+     "loops": {
+      "for_s": [
+       15,
+       60
+      ]
+     }
+    },
+    {
+     "clip": "sit_floor_up"
+    }
+   ],
+   "exit": true
+  },
+  "sit_sway": {
+   "seq": [
+    {
+     "clip": "sit_floor_down"
+    },
+    {
+     "clip": "sit_sway",
+     "loops": {
+      "for_s": [
+       15,
+       45
+      ]
+     }
+    },
+    {
+     "clip": "sit_floor_up"
+    }
+   ],
+   "exit": true
+  },
+  "lie_belly": {
+   "seq": [
+    {
+     "clip": "belly_down"
+    },
+    {
+     "clip": "belly_kick",
+     "loops": {
+      "for_s": [
+       15,
+       60
+      ]
+     }
+    },
+    {
+     "clip": "belly_up"
+    }
+   ],
+   "exit": true
+  },
+  "lie_back": {
+   "seq": [
+    {
+     "clip": "back_down"
+    },
+    {
+     "clip": "back_lie",
+     "loops": {
+      "for_s": [
+       20,
+       90
+      ]
+     }
+    },
+    {
+     "clip": "back_up"
+    }
+   ],
+   "exit": true
+  },
+  "floor_nap": {
+   "seq": [
+    {
+     "clip": "curl_down"
+    },
+    {
+     "clip": "curl_nap",
+     "loops": {
+      "for_s": [
+       30,
+       120
+      ]
+     }
+    },
+    {
+     "clip": "curl_up"
+    }
+   ],
+   "exit": true
+  },
+  "squat": {
+   "seq": [
+    {
+     "clip": "squat_down"
+    },
+    {
+     "clip": "squat_inspect",
+     "loops": [
+      1,
+      3
+     ]
+    },
+    {
+     "clip": "squat_up"
+    }
+   ],
+   "exit": true
+  },
+  "tiptoe": {
+   "seq": [
+    {
+     "clip": "tiptoe_start"
+    },
+    {
+     "clip": "tiptoe",
+     "loops": [
+      2,
+      4
+     ]
+    },
+    {
+     "clip": "tiptoe_stop"
+    }
+   ],
+   "turn": "random"
+  },
+  "skip": {
+   "seq": [
+    {
+     "clip": "skip_start"
+    },
+    {
+     "clip": "skip",
+     "loops": [
+      2,
+      4
+     ]
+    },
+    {
+     "clip": "skip_stop"
+    }
+   ],
+   "turn": "random"
+  },
+  "shuffle": {
+   "seq": [
+    {
+     "clip": "shuffle_start"
+    },
+    {
+     "clip": "shuffle",
+     "loops": [
+      2,
+      4
+     ]
+    },
+    {
+     "clip": "shuffle_stop"
+    }
+   ],
+   "turn": "random"
+  },
+  "back_waddle": {
+   "seq": [
+    {
+     "clip": "back_start"
+    },
+    {
+     "clip": "back_waddle",
+     "loops": [
+      2,
+      4
+     ]
+    },
+    {
+     "clip": "back_stop"
+    }
+   ],
+   "turn": "random"
+  },
+  "hop": {
+   "seq": [
+    {
+     "clip": "hop",
+     "loops": [
+      2,
+      4
+     ]
+    }
+   ],
+   "turn": "random"
+  },
+  "spin": {
+   "seq": [
+    {
+     "clip": "spin"
+    }
+   ],
+   "turn": "random"
+  },
+  "roll": {
+   "seq": [
+    {
+     "clip": "roll"
+    }
+   ],
+   "turn": "random"
+  },
+  "trip": {
+   "seq": [
+    {
+     "clip": "trip"
+    }
+   ],
+   "turn": "random"
+  },
+  "chase": {
+   "seq": [
+    {
+     "clip": "run_start"
+    },
+    {
+     "clip": "run",
+     "loops": [
+      2,
+      4
+     ]
+    },
+    {
+     "clip": "pounce"
+    }
+   ],
+   "turn": "random"
+  },
+  "slide": {
+   "seq": [
+    {
+     "clip": "run_start"
+    },
+    {
+     "clip": "run",
+     "loops": [
+      2,
+      3
+     ]
+    },
+    {
+     "clip": "slide_stop"
+    }
+   ],
+   "turn": "random"
+  },
+  "head_bob": {
+   "seq": [
+    {
+     "clip": "head_bob",
+     "loops": [
+      3,
+      8
+     ]
+    }
+   ]
+  },
+  "foot_tap": {
+   "seq": [
+    {
+     "clip": "foot_tap",
+     "loops": [
+      2,
+      5
+     ]
+    }
+   ]
+  },
+  "dance": {
+   "seq": [
+    {
+     "clip": "dance",
+     "loops": {
+      "for_s": [
+       10,
+       30
+      ]
+     }
+    }
+   ]
+  },
+  "cursor_watch": {
+   "seq": [
+    {
+     "clip": "cursor_watch",
+     "loops": "hold"
+    }
+   ]
+  },
+  "flinch": {
+   "seq": [
+    {
+     "clip": "flinch"
+    }
+   ]
+  },
+  "giggle": {
+   "seq": [
+    {
+     "clip": "giggle"
+    }
+   ]
+  },
+  "check_watch": {
+   "seq": [
+    {
+     "clip": "check_watch"
+    }
+   ]
+  },
+  "dangle": {
+   "seq": [
+    {
+     "clip": "dangle",
+     "loops": "hold"
+    }
+   ]
+  },
+  "land_squash": {
+   "seq": [
+    {
+     "clip": "land_squash"
+    }
+   ]
+  },
+  "dizzy": {
+   "seq": [
+    {
+     "clip": "dizzy"
+    }
+   ]
+  },
+  "morning_stretch": {
+   "seq": [
+    {
+     "clip": "morning_stretch"
+    }
+   ]
+  },
+  "evening_yawn": {
+   "seq": [
+    {
+     "clip": "evening_yawn"
+    }
+   ]
+  },
+  "tap_glass": {
+   "seq": [
+    {
+     "clip": "tap_glass"
+    }
+   ]
+  },
+  "edge_sit": {
+   "seq": [
+    {
+     "clip": "edge_sit"
+    }
+   ]
+  },
+  "edge_dangle": {
+   "seq": [
+    {
+     "clip": "edge_dangle",
+     "loops": {
+      "for_s": [
+       10,
+       40
+      ]
+     }
+    }
+   ]
+  },
+  "edge_peer": {
+   "seq": [
+    {
+     "clip": "edge_peer"
+    }
+   ]
+  },
+  "edge_doze": {
+   "seq": [
+    {
+     "clip": "edge_doze",
+     "loops": {
+      "for_s": [
+       20,
+       90
+      ]
+     }
+    }
+   ]
+  },
+  "edge_stand": {
+   "seq": [
+    {
+     "clip": "edge_stand"
+    }
+   ]
+  }
+ },
+ "intents": {
+  "idle": [
+   "rest"
+  ],
+  "think": [
+   "think",
+   "hold"
+  ],
+  "work": [
+   "think",
+   "hold"
+  ],
+  "talk": [
+   "talk",
+   "hold"
+  ],
+  "ask": [
+   "ask",
+   "think",
+   "hold"
+  ],
+  "oops": [
+   "oops",
+   "rest"
+  ],
+  "happy": [
+   "happy",
+   "rest"
+  ],
+  "celebrate": [
+   "celebrate",
+   "happy",
+   "rest"
+  ],
+  "sad": [
+   "oops",
+   "rest"
+  ],
+  "surprised": [
+   "oops",
+   "happy",
+   "rest"
+  ],
+  "sleepy": [
+   "nap",
+   "rest"
+  ],
+  "wave": [
+   "happy",
+   "rest"
+  ],
+  "nod": [
+   "happy",
+   "rest"
+  ],
+  "shake": [
+   "oops",
+   "rest"
+  ],
+  "jump": [
+   "celebrate",
+   "happy",
+   "rest"
+  ],
+  "spin": [
+   "dash",
+   "rest"
+  ],
+  "greet": [
+   "happy",
+   "look_around",
+   "rest"
+  ],
+  "stretch": [
+   "happy",
+   "look_around",
+   "rest"
+  ],
+  "remind": [
+   "ask",
+   "look_around",
+   "rest"
+  ],
+  "dodge": [
+   "wander",
+   "rest"
+  ],
+  "listen": [
+   "listen",
+   "rest"
+  ]
+ },
+ "idle_pool": [
+  {
+   "behavior": "rest",
+   "weight": 2,
+   "cooldown_s": 0,
+   "kind": "stand"
+  },
+  {
+   "behavior": "look_around",
+   "weight": 3,
+   "cooldown_s": 8,
+   "traits": {
+    "curiosity": 1.0
+   },
+   "kind": "stand"
+  },
+  {
+   "behavior": "wander",
+   "weight": 3,
+   "cooldown_s": 20,
+   "traits": {
+    "energy": 1.0
+   },
+   "kind": "move"
+  },
+  {
+   "behavior": "dash",
+   "weight": 1,
+   "cooldown_s": 90,
+   "traits": {
+    "energy": 1.5
+   },
+   "kind": "move"
+  },
+  {
+   "behavior": "read",
+   "weight": 0.7,
+   "cooldown_s": 420,
+   "traits": {
+    "curiosity": 0.5,
+    "energy": -0.5
+   },
+   "kind": "long",
+   "group": "long"
+  },
+  {
+   "behavior": "nap",
+   "weight": 0.6,
+   "cooldown_s": 900,
+   "traits": {
+    "sleepiness": 1.5,
+    "energy": -1.0
+   },
+   "kind": "long",
+   "group": "long"
+  },
+  {
+   "station": "desk",
+   "hold_s": [
+    45,
+    150
+   ],
+   "weight": 0.9,
+   "kind": "long",
+   "group": "long",
+   "cooldown_s": 600
+  },
+  {
+   "behavior": "lean",
+   "weight": 0.8,
+   "kind": "long",
+   "group": "long",
+   "cooldown_s": 600
+  },
+  {
+   "behavior": "weight_shift",
+   "weight": 1.2,
+   "kind": "fidget"
+  },
+  {
+   "behavior": "ear_twitch",
+   "weight": 1.0,
+   "kind": "fidget"
+  },
+  {
+   "behavior": "look_up",
+   "weight": 0.9,
+   "kind": "fidget",
+   "group": "look"
+  },
+  {
+   "behavior": "look_down",
+   "weight": 0.9,
+   "kind": "fidget",
+   "group": "look"
+  },
+  {
+   "behavior": "tummy_rub",
+   "weight": 0.8,
+   "kind": "fidget"
+  },
+  {
+   "behavior": "wave_small",
+   "weight": 0.8,
+   "kind": "fidget"
+  },
+  {
+   "behavior": "peek",
+   "weight": 0.6,
+   "kind": "fidget"
+  },
+  {
+   "behavior": "butt_wiggle",
+   "weight": 0.5,
+   "kind": "fidget"
+  },
+  {
+   "behavior": "rock_heels",
+   "weight": 1.0,
+   "kind": "fidget"
+  },
+  {
+   "behavior": "head_tilt",
+   "weight": 1.0,
+   "kind": "fidget"
+  },
+  {
+   "behavior": "scratch",
+   "weight": 0.7,
+   "kind": "fidget"
+  },
+  {
+   "behavior": "stretch",
+   "weight": 0.6,
+   "kind": "fidget",
+   "cooldown_s": 120
+  },
+  {
+   "behavior": "yawn",
+   "weight": 0.6,
+   "kind": "fidget",
+   "traits": {
+    "sleepiness": 1
+   }
+  },
+  {
+   "behavior": "shake_off",
+   "weight": 0.6,
+   "kind": "fidget"
+  },
+  {
+   "behavior": "sneeze",
+   "weight": 0.4,
+   "kind": "fidget",
+   "cooldown_s": 300
+  },
+  {
+   "behavior": "nod_off",
+   "weight": 0.5,
+   "kind": "fidget",
+   "traits": {
+    "sleepiness": 1.5
+   }
+  },
+  {
+   "behavior": "sit_floor",
+   "weight": 0.9,
+   "kind": "posture",
+   "group": "sit",
+   "cooldown_s": 240
+  },
+  {
+   "behavior": "sit_sway",
+   "weight": 0.6,
+   "kind": "posture",
+   "group": "sit"
+  },
+  {
+   "behavior": "lie_belly",
+   "weight": 0.6,
+   "kind": "posture",
+   "group": "lie",
+   "cooldown_s": 300
+  },
+  {
+   "behavior": "lie_back",
+   "weight": 0.5,
+   "kind": "posture",
+   "group": "lie",
+   "cooldown_s": 300
+  },
+  {
+   "behavior": "floor_nap",
+   "weight": 0.4,
+   "kind": "posture",
+   "group": "lie",
+   "cooldown_s": 900,
+   "traits": {
+    "sleepiness": 2
+   }
+  },
+  {
+   "behavior": "squat",
+   "weight": 0.7,
+   "kind": "posture"
+  },
+  {
+   "behavior": "tiptoe",
+   "weight": 0.8,
+   "kind": "move",
+   "cooldown_s": 90
+  },
+  {
+   "behavior": "skip",
+   "weight": 0.8,
+   "kind": "move",
+   "cooldown_s": 90,
+   "traits": {
+    "energy": 1
+   }
+  },
+  {
+   "behavior": "shuffle",
+   "weight": 0.5,
+   "kind": "move",
+   "cooldown_s": 120,
+   "traits": {
+    "sleepiness": 1.5
+   }
+  },
+  {
+   "behavior": "back_waddle",
+   "weight": 0.4,
+   "kind": "move",
+   "cooldown_s": 180
+  },
+  {
+   "behavior": "hop",
+   "weight": 0.7,
+   "kind": "move",
+   "cooldown_s": 60
+  },
+  {
+   "behavior": "spin",
+   "weight": 0.5,
+   "kind": "move",
+   "cooldown_s": 120
+  },
+  {
+   "behavior": "roll",
+   "weight": 0.4,
+   "kind": "move",
+   "cooldown_s": 180
+  },
+  {
+   "behavior": "trip",
+   "weight": 0.3,
+   "kind": "move",
+   "cooldown_s": 600
+  },
+  {
+   "behavior": "chase",
+   "weight": 0.4,
+   "kind": "move",
+   "cooldown_s": 300,
+   "traits": {
+    "energy": 1
+   }
+  },
+  {
+   "behavior": "slide",
+   "weight": 0.4,
+   "kind": "move",
+   "cooldown_s": 300,
+   "traits": {
+    "energy": 1
+   }
+  },
+  {
+   "behavior": "head_bob",
+   "weight": 2,
+   "kind": "react",
+   "when": {
+    "context": "music"
+   },
+   "cooldown_s": 20
+  },
+  {
+   "behavior": "foot_tap",
+   "weight": 1,
+   "kind": "react",
+   "when": {
+    "context": "music"
+   },
+   "cooldown_s": 20
+  },
+  {
+   "behavior": "dance",
+   "weight": 1,
+   "kind": "react",
+   "when": {
+    "context": "music"
+   },
+   "cooldown_s": 120
+  },
+  {
+   "behavior": "edge_dangle",
+   "weight": 2,
+   "kind": "react",
+   "when": {
+    "context": "edge"
+   }
+  },
+  {
+   "behavior": "edge_peer",
+   "weight": 1,
+   "kind": "react",
+   "when": {
+    "context": "edge"
+   },
+   "cooldown_s": 20
+  },
+  {
+   "behavior": "edge_doze",
+   "weight": 0.8,
+   "kind": "react",
+   "when": {
+    "context": "edge"
+   },
+   "traits": {
+    "sleepiness": 1.0
+   },
+   "cooldown_s": 60
+  },
+  {
+   "behavior": "evening_yawn",
+   "weight": 1.5,
+   "kind": "react",
+   "when": {
+    "context": "evening"
+   },
+   "cooldown_s": 180
+  },
+  {
+   "behavior": "tap_glass",
+   "weight": 1.5,
+   "kind": "react",
+   "when": {
+    "context": "away"
+   },
+   "cooldown_s": 90
+  },
+  {
+   "behavior": "wave_small",
+   "weight": 1,
+   "kind": "react",
+   "when": {
+    "context": "away"
+   },
+   "cooldown_s": 90,
+   "group": "away_wave"
+  }
+ ],
+ "contexts": {
+  "music": {},
+  "edge": {
+   "only": true
+  },
+  "evening": {
+   "hours": [
+    20,
+    23
+   ]
+  },
+  "away": {
+   "after_min": 5
+  },
+  "away_long": {
+   "after_min": 15,
+   "only": true,
+   "hold": "floor_nap"
+  }
+ },
+ "reactions": {
+  "drag_hold": {
+   "plays": "dangle"
+  },
+  "drag_land": {
+   "plays": "land_squash"
+  },
+  "dizzy": {
+   "plays": "dizzy",
+   "min_ms": 1500,
+   "min_pt": 600
+  },
+  "flinch": {
+   "plays": "flinch",
+   "cooldown_s": 20,
+   "near_pt": 60,
+   "speed": 1500
+  },
+  "pet": {
+   "plays": "giggle",
+   "cooldown_s": 10,
+   "reversals": 3,
+   "within_ms": 2000
+  },
+  "follow": {
+   "plays": "cursor_watch",
+   "cooldown_s": 60,
+   "near_pt": 120,
+   "still_ms": 1500,
+   "speed": 200,
+   "max_s": 20
+  },
+  "morning": {
+   "chain": [
+    "morning_stretch",
+    "greet"
+   ]
+  },
+  "approval_wait": {
+   "chain": [
+    "foot_tap",
+    "check_watch"
+   ],
+   "after_s": 8,
+   "every_s": [
+    6,
+    12
+   ]
+  },
+  "edge_land": {
+   "plays": "edge_sit"
+  }
+ },
+ "memory": {
+  "recent": 3,
+  "penalty": 0.25
+ },
+ "variety": {
+  "no_repeat": true,
+  "window": 20,
+  "max_in_window": 2,
+  "max_moves_in_row": 2,
+  "targets": {
+   "minutes": 10,
+   "stand_max": 0.25,
+   "stand_move_max": 0.45,
+   "distinct_min": 20,
+   "share_max": 0.15,
+   "long_len_s": [
+    20,
+    300
+   ]
+  }
+ },
+ "quiet_hours": {
+  "pool": [
+   "nap",
+   "rest"
+  ],
+  "boost": {
+   "nap": 4
+  }
+ },
+ "warmup": {
+  "duration_s": 180,
+  "exclude": [
+   "nap"
+  ]
+ },
+ "body": {
+  "default_for_s": 120,
+  "max_for_s": 1800,
+  "activities": {
+   "read": {
+    "plays": [
+     "read"
+    ],
+    "kind": "pastime",
+    "about": "sit down and read a book",
+    "group": "pastime"
+   },
+   "nap": {
+    "plays": [
+     "nap"
+    ],
+    "kind": "pastime",
+    "about": "get into bed and sleep",
+    "group": "pastime"
+   },
+   "computer": {
+    "station": "desk",
+    "kind": "work",
+    "about": "sit at the desk and use the computer",
+    "group": "work"
+   },
+   "lean": {
+    "plays": "lean",
+    "kind": "pastime",
+    "group": "posture",
+    "about": "lean on a toy block and rest"
+   },
+   "sit_floor": {
+    "plays": "sit_floor",
+    "group": "posture",
+    "about": "sit on the floor"
+   },
+   "sit_sway": {
+    "plays": "sit_sway",
+    "group": "posture",
+    "about": "sit on the floor and sway"
+   },
+   "lie_belly": {
+    "plays": "lie_belly",
+    "group": "posture",
+    "about": "lie on its tummy and kick its feet"
+   },
+   "lie_back": {
+    "plays": "lie_back",
+    "group": "posture",
+    "about": "lie on its back"
+   },
+   "floor_nap": {
+    "plays": "floor_nap",
+    "group": "posture",
+    "about": "curl up for a nap on the floor"
+   }
+  },
+  "emotes": {
+   "wave": {
+    "intent": "wave",
+    "about": "a happy little wave",
+    "group": "gesture"
+   },
+   "nod": {
+    "intent": "nod",
+    "about": "a small yes",
+    "group": "gesture"
+   },
+   "shake": {
+    "intent": "shake",
+    "about": "a sad little no",
+    "group": "gesture"
+   },
+   "jump": {
+    "intent": "jump",
+    "about": "a bounce of joy",
+    "group": "gesture"
+   },
+   "spin": {
+    "intent": "spin",
+    "about": "a twirl",
+    "group": "gesture"
+   },
+   "weight_shift": {
+    "plays": "weight_shift",
+    "group": "fidget"
+   },
+   "ear_twitch": {
+    "plays": "ear_twitch",
+    "group": "fidget"
+   },
+   "look_up": {
+    "plays": "look_up",
+    "group": "fidget"
+   },
+   "look_down": {
+    "plays": "look_down",
+    "group": "fidget"
+   },
+   "tummy_rub": {
+    "plays": "tummy_rub",
+    "group": "fidget"
+   },
+   "wave_small": {
+    "plays": "wave_small",
+    "group": "fidget"
+   },
+   "peek": {
+    "plays": "peek",
+    "group": "fidget"
+   },
+   "butt_wiggle": {
+    "plays": "butt_wiggle",
+    "group": "fidget"
+   },
+   "rock_heels": {
+    "plays": "rock_heels",
+    "group": "fidget"
+   },
+   "head_tilt": {
+    "plays": "head_tilt",
+    "group": "fidget"
+   },
+   "scratch": {
+    "plays": "scratch",
+    "group": "fidget"
+   },
+   "yawn": {
+    "plays": "yawn",
+    "group": "fidget"
+   },
+   "shake_off": {
+    "plays": "shake_off",
+    "group": "fidget"
+   },
+   "sneeze": {
+    "plays": "sneeze",
+    "group": "fidget"
+   },
+   "nod_off": {
+    "plays": "nod_off",
+    "group": "fidget"
+   },
+   "squat": {
+    "plays": "squat",
+    "group": "fidget"
+   },
+   "tiptoe": {
+    "plays": "tiptoe",
+    "group": "move"
+   },
+   "skip": {
+    "plays": "skip",
+    "group": "move"
+   },
+   "shuffle": {
+    "plays": "shuffle",
+    "group": "move"
+   },
+   "back_waddle": {
+    "plays": "back_waddle",
+    "group": "move"
+   },
+   "hop": {
+    "plays": "hop",
+    "group": "move"
+   },
+   "roll": {
+    "plays": "roll",
+    "group": "move"
+   },
+   "trip": {
+    "plays": "trip",
+    "group": "move"
+   },
+   "chase": {
+    "plays": "chase",
+    "group": "move"
+   },
+   "slide": {
+    "plays": "slide",
+    "group": "move"
+   }
+  }
+ }
+}

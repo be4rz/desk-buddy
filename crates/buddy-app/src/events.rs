@@ -249,7 +249,11 @@ mod tests {
                     assert!(log[k..j].iter().all(|l| l.intent == Intent::Idle), "seed {seed}: {b} is idle");
                     if b == "desk" {
                         let c: Vec<&str> = clips(&log[k..j]).into_iter().filter(|c| !c.starts_with("turn_")).collect();
-                        assert_eq!((c.first(), c.last()), (Some(&"desk_sit"), Some(&"desk_stand")), "seed {seed}: {c:?}");
+                        assert_eq!(c.first(), Some(&"desk_sit"), "seed {seed}: {c:?}");
+                        // a spell the hour cuts off is still seated
+                        if end < 3_600_000 {
+                            assert_eq!(c.last(), Some(&"desk_stand"), "seed {seed}: {c:?}");
+                        }
                     }
                     seen.insert(b);
                 }

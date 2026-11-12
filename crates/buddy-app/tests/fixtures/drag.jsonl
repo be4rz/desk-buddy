@@ -1,0 +1,28 @@
+// Design #ex-react (react-brain p4): drag. A 2.1 s drag over 820 pt (panel samples every 105 ms), then a 0.2 s one.
+// Log: dangle, land_squash, dizzy; then dangle, land_squash and no dizzy.
+{"at_ms": 0, "senses": {"local": {"minutes": 840, "weekday": 2}, "month": 11, "panel": {"x": 400, "y": 400, "w": 284, "h": 198, "owner_pid": 1, "layer": 3}}}
+{"at_ms": 3000, "poke": "drag_start"}
+{"at_ms": 3105, "senses": {"panel": {"x": 441, "y": 400, "w": 284, "h": 198, "owner_pid": 1, "layer": 3}}}
+{"at_ms": 3210, "senses": {"panel": {"x": 482, "y": 400, "w": 284, "h": 198, "owner_pid": 1, "layer": 3}}}
+{"at_ms": 3315, "senses": {"panel": {"x": 523, "y": 400, "w": 284, "h": 198, "owner_pid": 1, "layer": 3}}}
+{"at_ms": 3420, "senses": {"panel": {"x": 564, "y": 400, "w": 284, "h": 198, "owner_pid": 1, "layer": 3}}}
+{"at_ms": 3525, "senses": {"panel": {"x": 605, "y": 400, "w": 284, "h": 198, "owner_pid": 1, "layer": 3}}}
+{"at_ms": 3630, "senses": {"panel": {"x": 646, "y": 400, "w": 284, "h": 198, "owner_pid": 1, "layer": 3}}}
+{"at_ms": 3735, "senses": {"panel": {"x": 687, "y": 400, "w": 284, "h": 198, "owner_pid": 1, "layer": 3}}}
+{"at_ms": 3840, "senses": {"panel": {"x": 728, "y": 400, "w": 284, "h": 198, "owner_pid": 1, "layer": 3}}}
+{"at_ms": 3945, "senses": {"panel": {"x": 769, "y": 400, "w": 284, "h": 198, "owner_pid": 1, "layer": 3}}}
+{"at_ms": 4050, "senses": {"panel": {"x": 810, "y": 400, "w": 284, "h": 198, "owner_pid": 1, "layer": 3}}}
+{"at_ms": 4155, "senses": {"panel": {"x": 851, "y": 400, "w": 284, "h": 198, "owner_pid": 1, "layer": 3}}}
+{"at_ms": 4260, "senses": {"panel": {"x": 892, "y": 400, "w": 284, "h": 198, "owner_pid": 1, "layer": 3}}}
+{"at_ms": 4365, "senses": {"panel": {"x": 933, "y": 400, "w": 284, "h": 198, "owner_pid": 1, "layer": 3}}}
+{"at_ms": 4470, "senses": {"panel": {"x": 974, "y": 400, "w": 284, "h": 198, "owner_pid": 1, "layer": 3}}}
+{"at_ms": 4575, "senses": {"panel": {"x": 1015, "y": 400, "w": 284, "h": 198, "owner_pid": 1, "layer": 3}}}
+{"at_ms": 4680, "senses": {"panel": {"x": 1056, "y": 400, "w": 284, "h": 198, "owner_pid": 1, "layer": 3}}}
+{"at_ms": 4785, "senses": {"panel": {"x": 1097, "y": 400, "w": 284, "h": 198, "owner_pid": 1, "layer": 3}}}
+{"at_ms": 4890, "senses": {"panel": {"x": 1138, "y": 400, "w": 284, "h": 198, "owner_pid": 1, "layer": 3}}}
+{"at_ms": 4995, "senses": {"panel": {"x": 1179, "y": 400, "w": 284, "h": 198, "owner_pid": 1, "layer": 3}}}
+{"at_ms": 5100, "senses": {"panel": {"x": 1220, "y": 400, "w": 284, "h": 198, "owner_pid": 1, "layer": 3}}}
+{"at_ms": 5100, "poke": "drag_end"}
+{"at_ms": 15000, "poke": "drag_start"}
+{"at_ms": 15100, "senses": {"panel": {"x": 1260, "y": 400, "w": 284, "h": 198, "owner_pid": 1, "layer": 3}}}
+{"at_ms": 15200, "poke": "drag_end"}

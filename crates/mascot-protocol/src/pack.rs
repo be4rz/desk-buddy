@@ -441,6 +441,76 @@ pub struct When {
     pub context: Option<String>,
 }
 
+/// Context names `#pack-contexts` fixes in code.
+pub const CONTEXTS: [&str; 5] = ["music", "edge", "evening", "away", "away_long"];
+/// Reaction trigger names `#pack-reactions` fixes in code.
+pub const REACTIONS: [&str; 9] =
+    ["drag_hold", "drag_land", "dizzy", "flinch", "pet", "follow", "morning", "approval_wait", "edge_land"];
+
+/// One `pack.json` `"contexts"` entry (`#pack-contexts`, p4). The name is a key of `CONTEXTS`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ContextDef {
+    /// While it holds, only its own `when.context` entries are eligible.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub only: bool,
+    /// `[from, to)` local hours (evening).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hours: Option<[u8; 2]>,
+    /// Minutes of user idle before it holds (away, away_long).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_min: Option<f64>,
+    /// A behavior whose middle step loops until input returns, then its exit steps play (away_long).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hold: Option<String>,
+    /// Pool kinds removed while it holds.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude_kinds: Vec<PoolKind>,
+}
+
+/// One `pack.json` `"reactions"` entry (`#pack-reactions`, p4). The name is a key of `REACTIONS`; the
+/// fields a trigger reads are fixed in code (README § reactions); a field its trigger does not read
+/// is accepted and has no effect.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ReactionDef {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plays: Option<String>,
+    /// Alternatives with no repeat (approval_wait) or played in order (morning).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chain: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cooldown_s: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_pt: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub near_pt: Option<f64>,
+    /// pt/s: flinch at or above, follow below.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reversals: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub within_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub still_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_s: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_s: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub every_s: Option<[f64; 2]>,
+}
+
+impl ReactionDef {
+    /// Behaviors it names, `plays` first.
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.plays.iter().map(String::as_str).chain(self.chain.iter().map(String::as_str))
+    }
+}
+
 /// `pack.json` `"variety"` (`#pack-variety`): the hard idle rules, applied to each entry's group.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]

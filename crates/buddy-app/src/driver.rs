@@ -38,6 +38,11 @@ const SUPERSEDE_WAIT: Duration = Duration::from_secs(5);
 pub enum Inbox {
     Event(MascotEvent),
     Senses(SensesPatch),
+    /// The cursor relative to the bear (`senses::cursor`, ≤ 10 Hz): to the brain only, never
+    /// logged or kept in the sense ring.
+    Cursor(Option<mascot_core::Cursor>),
+    /// The panel moved during a drag (≤ 10 Hz): the drag measure reads `raw.panel`.
+    DragMoved,
     Poke(Poke),
     Settings(Settings),
     Call(Box<dyn FnOnce(&mut App) + Send>),
@@ -214,6 +219,7 @@ pub fn start(init: Init, handle: tauri::AppHandle) {
         (d, every)
     });
     let canvas = init.art.canvas();
+    init.panel.set_anchor(init.art.anchor());
     let app = App {
         brain: init.brain,
         raw: Senses::default(),
@@ -311,7 +317,15 @@ impl App {
                     self.brain.event(&MascotEvent::Settled, now);
                 }
             }
-            Inbox::Senses(patch) => {
+            Inbox::Senses(mut patch) => {
+                // a replay's cursor goes the cursor's own way (never the log or the ring)
+                if let Some(c) = take_cursor(&mut patch) {
+                    self.cursor(c, now);
+                    if patch == SensesPatch::default() {
+                        self.wake();
+                        return;
+                    }
+                }
                 // a patch merges over the raw senses; the brain always sees them whole, gated
                 if self.senses_log {
                     eprintln!("[buddy] senses {}", serde_json::to_string(&patch).unwrap_or_default());
@@ -321,6 +335,11 @@ impl App {
                 self.ring.push(now, patch);
                 self.regate(now);
                 self.sense_turn(now);
+            }
+            Inbox::Cursor(c) => self.cursor(c, now),
+            Inbox::DragMoved => {
+                self.raw.panel = self.panel.rect_tl();
+                self.regate(now);
             }
             Inbox::Poke(p) => {
                 if p == Poke::DragEnd {
@@ -354,6 +373,12 @@ impl App {
             Inbox::Call(f) => f(self),
         }
         self.wake();
+    }
+
+    /// One cursor sample: into the raw senses and the brain, nothing else.
+    fn cursor(&mut self, c: Option<mascot_core::Cursor>, now: u64) {
+        self.raw.cursor = c;
+        self.regate(now);
     }
 
     fn save_position(&mut self) {
@@ -628,7 +653,12 @@ impl App {
         }
         let intent = show.intent.as_str();
         let ori = show.ori.map(|o| format!(" {o:?}")).unwrap_or_default();
-        eprintln!("[buddy] intent {intent} → {} ({} {:?}{ori})", show.behavior, show.clip, show.dir);
+        if self.brain.hides_dir(show.dir) {
+            // the bear faces (or still faces) the cursor: its dir would say where the cursor is
+            eprintln!("[buddy] intent {intent} → {} ({})", show.behavior, show.clip);
+        } else {
+            eprintln!("[buddy] intent {intent} → {} ({} {:?}{ori})", show.behavior, show.clip, show.dir);
+        }
         self.last_log = Some((show.intent, show.behavior.clone()));
     }
 
@@ -944,6 +974,12 @@ fn send_prompt(text: String) {
     });
 }
 
+/// Takes a patch's cursor out (`Some(sample)` when it had one), so what is logged or kept in
+/// the sense ring never holds it.
+fn take_cursor(p: &mut SensesPatch) -> Option<Option<mascot_core::Cursor>> {
+    p.cursor.take()
+}
+
 pub fn dnd_action(a: DndAct) -> DndAction {
     match a {
         DndAct::Hide => DndAction::Hide,
@@ -1010,6 +1046,31 @@ mod tests {
         let mut b = Bubble::new();
         b.open_prompt();
         assert_eq!(listen_poke(false, prompt_shown(&b)), Some(Poke::PromptOpen));
+    }
+
+    #[test]
+    fn a_cursor_never_reaches_the_log_the_ring_or_serialized_senses() {
+        // a replay line carrying a cursor and a real sense
+        let mut p: SensesPatch = serde_json::from_str(r#"{"cursor": {"dx": -40, "dy": 16, "over": true}, "user_idle_ms": 5}"#).unwrap();
+        let c = take_cursor(&mut p);
+        assert_eq!(c, Some(Some(mascot_core::Cursor { dx: -40, dy: 16, over: true })), "it goes the cursor's own way");
+        assert_eq!(p.cursor, None);
+        // what `BUDDY_SENSES_LOG` prints and the ring keeps
+        let logged = serde_json::to_string(&p).unwrap();
+        assert!(!logged.contains("cursor") && !logged.contains("-40"), "{logged}");
+        let mut ring = Ring::new();
+        ring.push(0, p.clone());
+        assert!(ring.iter().all(|e| e.patch.cursor.is_none()));
+        // a cursor-only patch leaves nothing to log or keep; `None` (gone) is taken too
+        let mut gone: SensesPatch = serde_json::from_str(r#"{"cursor": null}"#).unwrap();
+        assert_eq!(take_cursor(&mut gone), Some(None));
+        assert_eq!(gone, SensesPatch::default());
+        // the gated senses the brain sees hold it, but never serialize it (prompts, studio)
+        let mut raw = Senses::default();
+        raw.cursor = Some(mascot_core::Cursor { dx: 8, dy: 8, over: false });
+        let g = senses::gate(&raw, &Settings::default(), false, true);
+        assert!(g.cursor.is_some());
+        assert!(!serde_json::to_string(&g).unwrap().contains("cursor"));
     }
 
     #[test]
