@@ -3,7 +3,9 @@
 
 use serde::Serialize;
 
-use crate::pack::PackMeta;
+use mascot_protocol::pack::ActivityKind;
+
+use crate::pack::{ActivityMeta, EmoteMeta, PackMeta, ACTIVITY_GROUPS, EMOTE_GROUPS};
 
 /// The shortest `--for` (the host checks it too).
 pub const MIN_FOR_MS: u64 = 10_000;
@@ -87,12 +89,16 @@ pub struct ActivityInfo {
     pub about: String,
     pub kind: &'static str,
     pub default_for_s: u64,
+    /// `pastime | play | posture | work` (`#pack-body-groups`).
+    pub group: String,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct EmoteInfo {
     pub name: String,
     pub about: String,
+    /// `gesture | fidget | move | reaction | surprise`.
+    pub group: String,
 }
 
 /// What runs now. `until_ms` is on the brain's clock (the app shifts it to epoch ms);
@@ -230,8 +236,31 @@ pub fn stopped_msg(name: &str) -> String {
 
 pub const NOTHING_MSG: &str = "Not doing anything.";
 
-/// `buddy mascot list`'s text: the pack's activities and emotes.
-/// `now` is the brain clock, for the time left on what plays.
+/// The activities that can play now, in group order then pack order (entries waiting for art
+/// are left out, `#hidden-log`).
+pub fn shown_activities(pack: &PackMeta) -> Vec<(&str, &ActivityMeta)> {
+    let waiting = waiting_names(pack, "activity");
+    let mut v: Vec<(&str, &ActivityMeta)> =
+        pack.body.activities.iter().filter(|(n, _)| !waiting.contains(&n.as_str())).map(|(n, a)| (n.as_str(), a)).collect();
+    v.sort_by_key(|(_, a)| ACTIVITY_GROUPS.iter().position(|g| *g == a.group).unwrap_or(usize::MAX));
+    v
+}
+
+/// The emotes that can play now, in group order then pack order.
+pub fn shown_emotes(pack: &PackMeta) -> Vec<(&str, &EmoteMeta)> {
+    let waiting = waiting_names(pack, "emote");
+    let mut v: Vec<(&str, &EmoteMeta)> =
+        pack.body.emotes.iter().filter(|(n, _)| !waiting.contains(&n.as_str())).map(|(n, e)| (n.as_str(), e)).collect();
+    v.sort_by_key(|(_, e)| EMOTE_GROUPS.iter().position(|g| *g == e.group).unwrap_or(usize::MAX));
+    v
+}
+
+fn waiting_names<'a>(pack: &'a PackMeta, kind: &str) -> Vec<&'a str> {
+    pack.body_waiting.iter().filter(|w| w.kind == kind).map(|w| w.name.as_str()).collect()
+}
+
+/// `buddy mascot list`'s text (`#mascot-list`): activities and emotes by group, columns padded
+/// to the longest group and name of this list. `now` is the brain clock, for the time left.
 pub fn list_text(pack: &PackMeta, playing: Option<&Playing>, now: u64) -> String {
     let b = &pack.body;
     let mut out = String::new();
@@ -242,16 +271,34 @@ pub fn list_text(pack: &PackMeta, playing: Option<&Playing>, now: u64) -> String
         Some(Playing { activity, .. }) => out.push_str(&format!("Now: {activity} (after the reply)\n")),
         None => {}
     }
-    if !b.activities.is_empty() {
-        out.push_str("Activities:\n");
-        for (name, a) in &b.activities {
-            out.push_str(&format!("  {name:<9} {} (default {})\n", a.about, fmt_dur(b.default_for_s * 1000)));
+    let acts = shown_activities(pack);
+    let emos = shown_emotes(pack);
+    let gw = acts.iter().map(|(_, a)| a.group.len()).chain(emos.iter().map(|(_, e)| e.group.len())).max().unwrap_or(0) + 1;
+    let nw = acts.iter().map(|(n, _)| n.len()).chain(emos.iter().map(|(n, _)| n.len())).max().unwrap_or(0) + 2;
+    let aw = acts.iter().map(|(_, a)| a.about.len()).max().unwrap_or(0) + 2;
+    let row = |out: &mut String, group: &str, name: &str, about: &str, tail: &str| {
+        let line = if tail.is_empty() { format!("  {group:<gw$} {name:<nw$}{about}") } else { format!("  {group:<gw$} {name:<nw$}{about:<aw$}{tail}") };
+        out.push_str(line.trim_end());
+        out.push('\n');
+    };
+    if !acts.is_empty() {
+        out.push_str("Activities\n");
+        let mut first_timed = true;
+        for (name, a) in &acts {
+            let tail = if a.kind == ActivityKind::Work {
+                "starts at once".to_string()
+            } else if std::mem::take(&mut first_timed) {
+                format!("({} default, {} max)", fmt_dur(b.default_for_s * 1000), fmt_dur(b.max_for_s * 1000))
+            } else {
+                String::new()
+            };
+            row(&mut out, &a.group, name, &a.about, &tail);
         }
     }
-    if !b.emotes.is_empty() {
-        out.push_str("Emotes:\n");
-        for (name, e) in &b.emotes {
-            out.push_str(&format!("  {name:<9} {}\n", e.about));
+    if !emos.is_empty() {
+        out.push_str("Emotes\n");
+        for (name, e) in &emos {
+            row(&mut out, &e.group, name, &e.about, "");
         }
     }
     if out.is_empty() {
@@ -261,22 +308,24 @@ pub fn list_text(pack: &PackMeta, playing: Option<&Playing>, now: u64) -> String
 }
 
 pub fn activities(pack: &PackMeta) -> Vec<ActivityInfo> {
-    let b = &pack.body;
-    b.activities
-        .iter()
-        .map(|(n, a)| ActivityInfo { name: n.clone(), about: a.about.clone(), kind: a.kind.as_str(), default_for_s: b.default_for_s })
+    let d = pack.body.default_for_s;
+    shown_activities(pack)
+        .into_iter()
+        .map(|(n, a)| ActivityInfo { name: n.to_string(), about: a.about.clone(), kind: a.kind.as_str(), default_for_s: d, group: a.group.clone() })
         .collect()
 }
 
 pub fn emotes(pack: &PackMeta) -> Vec<EmoteInfo> {
-    pack.body.emotes.iter().map(|(n, e)| EmoteInfo { name: n.clone(), about: e.about.clone() }).collect()
+    shown_emotes(pack).into_iter().map(|(n, e)| EmoteInfo { name: n.to_string(), about: e.about.clone(), group: e.group.clone() }).collect()
 }
 
 /// The agent's "Your body" prompt section (design `#prompt-section`); `None` when the pack
-/// has no activities and no emotes.
+/// has no activities and no emotes that can play.
 pub fn prompt_text(pack: &PackMeta) -> Option<String> {
     let b = &pack.body;
-    if b.activities.is_empty() && b.emotes.is_empty() {
+    let acts = shown_activities(pack);
+    let emos = shown_emotes(pack);
+    if acts.is_empty() && emos.is_empty() {
         return None;
     }
     let mut s = String::from(
@@ -285,35 +334,49 @@ pub fn prompt_text(pack: &PackMeta) -> Option<String> {
          physical, do it with these commands instead of describing it in words. Never say\n\
          you did something the command's reply says did not happen.\n",
     );
-    if !b.activities.is_empty() {
+    if !acts.is_empty() {
         s.push_str(&format!(
-            "\nActivities (`buddy mascot do <name> [--for 5m]`; they start after your reply and\n\
-             last {} unless you give --for, at most {}; `buddy mascot stop` ends one):\n",
+            "\nActivities (`buddy mascot do <name> [--for 5m]`). Work activities start at once; the\n\
+             others start after your reply. They last {} unless you give --for, at most {}.\n\
+             `buddy mascot stop` ends one.\n",
             fmt_dur(b.default_for_s * 1000),
             fmt_dur(b.max_for_s * 1000)
         ));
-        for (name, a) in &b.activities {
-            s.push_str(&format!("- {name}: {}\n", a.about));
+        for (name, a) in &acts {
+            let work = if a.kind == ActivityKind::Work { " (work)" } else { "" };
+            s.push_str(&format!("- {name}{work}: {}\n", a.about));
         }
     }
-    if !b.emotes.is_empty() {
-        s.push_str("\nEmotes (`buddy mascot emote <name>`; a short gesture during your reply):\n");
-        for (name, e) in &b.emotes {
+    let gestures: Vec<_> = emos.iter().filter(|(_, e)| e.group == "gesture").collect();
+    if !gestures.is_empty() {
+        s.push_str("\nGestures (`buddy mascot emote <name>`; a short gesture during your reply):\n");
+        for (name, e) in &gestures {
             s.push_str(&format!("- {name}: {}\n", e.about));
         }
     }
+    let mut named = String::new();
+    for (group, label) in [("fidget", "Fidgets"), ("move", "Moves"), ("reaction", "Reactions"), ("surprise", "Surprises")] {
+        let names: Vec<&str> = emos.iter().filter(|(_, e)| e.group == group).map(|(n, _)| *n).collect();
+        if !names.is_empty() {
+            named.push_str(&format!("{label}: {}\n", names.join(", ")));
+        }
+    }
+    if !named.is_empty() {
+        s.push_str(if gestures.is_empty() { "\nEmotes (`buddy mascot emote <name>`):\n" } else { "\n" });
+        s.push_str(&named);
+    }
     s.push_str("\nWhen to use them:\n");
-    if !b.activities.is_empty() {
-        let names: Vec<&str> = b.activities.iter().map(|(n, _)| n.as_str()).collect();
+    if !acts.is_empty() {
+        let names: Vec<&str> = acts.iter().map(|(n, _)| *n).collect();
         s.push_str(&format!(
             "- If the user asks you to {} or do another listed activity, run the command\n  and say so briefly.\n",
             names.join(", ")
         ));
     }
-    if !b.emotes.is_empty() {
+    if !emos.is_empty() {
         s.push_str("- Use at most one emote per reply, only when it matches the mood. Most short\n  replies need none.\n");
     }
-    if b.activities.iter().any(|(_, a)| a.kind == mascot_protocol::pack::ActivityKind::Work) {
+    if acts.iter().any(|(_, a)| a.kind == ActivityKind::Work) {
         s.push_str("- You go to the desk by yourself during long jobs; do not call it for that.\n");
     }
     s.push_str(

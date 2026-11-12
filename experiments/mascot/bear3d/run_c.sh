@@ -22,3 +22,4 @@ rm -rf ../out/bear3d/face   # its positions match the old clips (the pack reject
 rm -rf "$OUT"; python3 make_c.py "$RAW/px" "$OUT" clips_c.json
 python3 preview_c.py
 rm -rf "$RAW"
+echo "face/ was removed: run sh run_face.sh (after make_face.py it runs face_l.py / face_d.py when anim_l / anim_d exist, re-adding listen and set_clips)"

@@ -14,7 +14,8 @@ const USAGE: &str = "usage: buddy studio <cmd> …
   gif    --pack <dir> --clip c --dir D [--zoom K] --out <gif>
   diff   <a.png> <b.png> [--out <png>]
   lint   --pack <dir>
-  audit  --pack <dir> [--minutes 30] [--seed N] [--timeline t.json] --out <dir>
+  audit  --pack <dir> [--minutes 10] [--seeds 1,2,3 | --seed N] [--start YYYY-MM-DDTHH:MM]
+         [--temperament energy=0.5,…] [--chart <png>] [--out <dir>] [--timeline t.json --out <dir>]
   comments --pack <dir> [--open]
   import-aseprite <file.aseprite> --pack <dir> --name <clip-prefix>
 every command takes --json";
@@ -196,38 +197,80 @@ fn run(cmd: &str, rest: &[String]) -> Result<Out, Fail> {
             Ok(if r.errors == 0 { Out::Ok(line, j) } else { Out::Findings(line, j) })
         }
         "audit" => {
-            let a = p(&["pack", "minutes", "seed", "timeline", "out"])?;
-            let out = PathBuf::from(a.req("out").map_err(Fail::Usage)?);
-            let minutes: f64 = a.num("minutes", 30.0).map_err(Fail::Usage)?;
+            let a = p(&["pack", "minutes", "seed", "seeds", "start", "temperament", "chart", "timeline", "out"])?;
+            let minutes: f64 = a.num("minutes", 10.0).map_err(Fail::Usage)?;
             if !(minutes > 0.0 && minutes <= 24.0 * 60.0) {
                 return usage("--minutes is above 0 and at most 1440");
             }
-            let seed: u64 = a.num("seed", 1).map_err(Fail::Usage)?;
-            let dir = PathBuf::from(a.req("pack").map_err(Fail::Usage)?);
-            let pack = std::sync::Arc::new(mascot_core::pack::load_report(&dir).map_err(Error::from)?);
-            let tl = match a.opt("timeline") {
-                None => audit::quiet(minutes, seed),
-                Some(f) => {
-                    let t = std::fs::read_to_string(f).map_err(|e| Fail::Error(format!("{f}: {e}")))?;
-                    let mut tl = mascot_core::replay::parse(&t).map_err(|e| Fail::Error(format!("{f}: {e}")))?;
-                    if a.opt("seed").is_some() {
-                        tl.seed = seed;
-                    }
-                    if a.opt("minutes").is_some() || tl.duration_ms == 0 {
-                        tl.duration_ms = (minutes * 60_000.0) as u64;
-                    }
-                    tl
-                }
+            if a.opt("seed").is_some() && a.opt("seeds").is_some() {
+                return usage("give --seed or --seeds, not both");
+            }
+            let seeds: Vec<u64> = match a.opt("seeds") {
+                Some(list) => list.split(',').map(|x| x.trim().parse().map_err(|_| Fail::Usage(format!("--seeds {list}: numbers like 1,2,3")))).collect::<Result<_, _>>()?,
+                None => vec![a.num("seed", 1).map_err(Fail::Usage)?],
             };
-            let order: Vec<String> = pack.idle_pool.iter().map(|e| e.behavior.clone()).collect();
-            let r = audit::run(pack, &tl)?;
+            if seeds.is_empty() {
+                return usage("--seeds needs at least one seed");
+            }
+            let start = a.opt("start").unwrap_or(audit::DEFAULT_START).to_string();
+            audit::parse_start(&start).map_err(Fail::Usage)?;
+            let label = a.req("pack").map_err(Fail::Usage)?.to_string();
+            let dir = PathBuf::from(&label);
+            let pack = std::sync::Arc::new(mascot_core::pack::load_report(&dir).map_err(Error::from)?);
+            let temperament = match a.opt("temperament") {
+                Some(t) => Some(audit::parse_temperament(&pack.temperament, t).map_err(Fail::Usage)?),
+                None => None,
+            };
+            let order: Vec<String> = pack.idle_pool.iter().map(|e| e.name().to_string()).collect();
+            // v1 (one timeline, `audit.json` + `audit.png` in --out) when a timeline is given
+            if let Some(f) = a.opt("timeline") {
+                let out = PathBuf::from(a.req("out").map_err(|_| Fail::Usage("--timeline writes to --out <dir>".into()))?);
+                let t = std::fs::read_to_string(f).map_err(|e| Fail::Error(format!("{f}: {e}")))?;
+                let mut tl = mascot_core::replay::parse(&t).map_err(|e| Fail::Error(format!("{f}: {e}")))?;
+                if a.opt("seed").is_some() || a.opt("seeds").is_some() {
+                    tl.seed = seeds[0];
+                }
+                if a.opt("minutes").is_some() || tl.duration_ms == 0 {
+                    tl.duration_ms = (minutes * 60_000.0) as u64;
+                }
+                let r = audit::run(pack, &tl)?;
+                let json = serde_json::to_string_pretty(&r).expect("json") + "\n";
+                let (w, h, px) = audit::chart(&r, &order);
+                let (jf, pf) = (out.join("audit.json"), out.join("audit.png"));
+                studio::write_file(&jf, json.as_bytes())?;
+                studio::write_file(&pf, &studio::png_bytes(w, h, &px))?;
+                let j = serde_json::to_value(&r).expect("json");
+                return Ok(Out::Ok(format!("ok {} {}  distinct={}", jf.display(), pf.display(), r.distinct), j));
+            }
+            let r = audit::report(pack, &label, &seeds, minutes, &start, temperament)?;
             let json = serde_json::to_string_pretty(&r).expect("json") + "\n";
-            let (w, h, px) = audit::chart(&r, &order);
-            let (jf, pf) = (out.join("audit.json"), out.join("audit.png"));
-            studio::write_file(&jf, json.as_bytes())?;
-            studio::write_file(&pf, &studio::png_bytes(w, h, &px))?;
+            let png = |run: &audit::Run| {
+                let (w, h, px) = audit::chart_v2(run, &order);
+                studio::png_bytes(w, h, &px)
+            };
+            if let Some(out) = a.opt("out") {
+                let out = PathBuf::from(out);
+                studio::write_file(&out.join("audit.json"), json.as_bytes())?;
+                studio::write_file(&out.join("audit.png"), &png(&r.runs[0]))?;
+            }
+            if let Some(c) = a.opt("chart") {
+                studio::write_file(Path::new(c), &png(&r.runs[0]))?;
+            }
+            let mut line: String = r
+                .runs
+                .iter()
+                .map(|run| {
+                    let bad: String = run.violations.iter().map(|v| format!("  {} at {}s: {}\n", v.rule, v.at_ms / 1000, v.detail)).collect();
+                    let missed: String = run.targets.iter().filter(|(_, t)| !t.pass).map(|(k, t)| format!("  target {k}: {} (limit {})\n", t.value, t.limit)).collect();
+                    format!(
+                        "seed {}: {} picks, {} distinct, stand {:.2}, stand+move {:.2}, {} relaxed{}\n{bad}{missed}",
+                        run.seed, run.picks, run.distinct, run.time.stand, run.time.stand_move, run.relaxed, if run.pass { "" } else { "  FAIL" }
+                    )
+                })
+                .collect();
+            line += if r.pass { "ok audit" } else { "audit: findings" };
             let j = serde_json::to_value(&r).expect("json");
-            Ok(Out::Ok(format!("ok {} {}  distinct={}", jf.display(), pf.display(), r.distinct), j))
+            Ok(if r.pass { Out::Ok(line, j) } else { Out::Findings(line, j) })
         }
         "comments" => {
             let a = p(&["pack"])?;

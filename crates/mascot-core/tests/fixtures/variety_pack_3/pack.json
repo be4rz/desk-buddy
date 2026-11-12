@@ -1,0 +1,347 @@
+{
+ "pack_version": 2,
+ "id": "variety_pack_3",
+ "name": "Variety fixture, too few entries",
+ "art_root": ".",
+ "palettes": [
+  "../../../../../experiments/bear-proto/palette-bear.json",
+  "../../../../../experiments/scene-proto/palette.json",
+  "../../../../../experiments/mascot/bear3d/palette-ext.json"
+ ],
+ "sources": [
+  {
+   "kind": "stage_a",
+   "path": "../../../../../experiments/mascot/out/bear3d/anim/anim.json"
+  },
+  {
+   "kind": "stage_a",
+   "path": "../../../../../experiments/mascot/out/bear3d/anim_l/anim_l.json"
+  },
+  {
+   "kind": "stage_a",
+   "path": "../variety_pack/anim_v/anim_v.json"
+  }
+ ],
+ "capabilities": {
+  "blink": false,
+  "lip_sync": false,
+  "look_at": "body"
+ },
+ "turning": {
+  "ccw": "turn_ccw",
+  "cw": "turn_cw"
+ },
+ "behaviors": {
+  "rest": {
+   "seq": [
+    {
+     "clip": "idle",
+     "loops": [
+      1,
+      3
+     ]
+    }
+   ]
+  },
+  "look_around": {
+   "seq": [
+    {
+     "clip": "idle",
+     "loops": [
+      1,
+      1
+     ]
+    }
+   ],
+   "turn": "random"
+  },
+  "wander": {
+   "seq": [
+    {
+     "clip": "walk_start"
+    },
+    {
+     "clip": "walk",
+     "loops": [
+      2,
+      4
+     ]
+    },
+    {
+     "clip": "walk_stop"
+    }
+   ],
+   "turn": "random"
+  },
+  "dash": {
+   "seq": [
+    {
+     "clip": "run_start"
+    },
+    {
+     "clip": "run",
+     "loops": [
+      2,
+      5
+     ]
+    },
+    {
+     "clip": "run_stop"
+    }
+   ],
+   "turn": "random"
+  },
+  "trot": {
+   "seq": [
+    {
+     "clip": "walk_start"
+    },
+    {
+     "clip": "walk",
+     "loops": [
+      1,
+      2
+     ]
+    },
+    {
+     "clip": "walk_stop"
+    }
+   ],
+   "turn": "random"
+  },
+  "scamper": {
+   "seq": [
+    {
+     "clip": "run_start"
+    },
+    {
+     "clip": "run",
+     "loops": [
+      1,
+      2
+     ]
+    },
+    {
+     "clip": "run_stop"
+    }
+   ],
+   "turn": "random"
+  },
+  "hold": {
+   "seq": [
+    {
+     "clip": "idle",
+     "loops": "hold"
+    }
+   ]
+  },
+  "think": {
+   "seq": [
+    {
+     "clip": "idle",
+     "loops": "hold"
+    }
+   ]
+  },
+  "sit_long": {
+   "seq": [
+    {
+     "clip": "fid_hold",
+     "loops": {
+      "for_s": [
+       20,
+       40
+      ]
+     }
+    }
+   ]
+  },
+  "ear_twitch": {
+   "seq": [
+    {
+     "clip": "fid_front"
+    }
+   ]
+  },
+  "weight_shift": {
+   "seq": [
+    {
+     "clip": "fid_front"
+    }
+   ]
+  },
+  "look_up": {
+   "seq": [
+    {
+     "clip": "fid_front"
+    }
+   ]
+  },
+  "look_down": {
+   "seq": [
+    {
+     "clip": "fid_front"
+    }
+   ]
+  },
+  "tummy_rub": {
+   "seq": [
+    {
+     "clip": "fid_front"
+    }
+   ]
+  },
+  "head_tilt": {
+   "seq": [
+    {
+     "clip": "fid_front"
+    }
+   ]
+  },
+  "rock_heels": {
+   "seq": [
+    {
+     "clip": "fid_front"
+    }
+   ]
+  },
+  "scratch": {
+   "seq": [
+    {
+     "clip": "fid_front"
+    }
+   ]
+  },
+  "peek": {
+   "seq": [
+    {
+     "clip": "fid_back"
+    }
+   ]
+  },
+  "butt_wiggle": {
+   "seq": [
+    {
+     "clip": "fid_back"
+    }
+   ]
+  }
+ },
+ "intents": {
+  "idle": [
+   "rest"
+  ],
+  "think": [
+   "think",
+   "hold"
+  ],
+  "work": [
+   "think",
+   "hold"
+  ],
+  "talk": [
+   "hold"
+  ],
+  "ask": [
+   "hold"
+  ],
+  "oops": [
+   "rest"
+  ],
+  "happy": [
+   "rest"
+  ],
+  "celebrate": [
+   "rest"
+  ],
+  "sad": [
+   "rest"
+  ],
+  "surprised": [
+   "rest"
+  ],
+  "sleepy": [
+   "rest"
+  ],
+  "wave": [
+   "rest"
+  ],
+  "nod": [
+   "rest"
+  ],
+  "shake": [
+   "rest"
+  ],
+  "jump": [
+   "rest"
+  ],
+  "spin": [
+   "rest"
+  ],
+  "greet": [
+   "rest"
+  ],
+  "stretch": [
+   "rest"
+  ],
+  "remind": [
+   "rest"
+  ],
+  "dodge": [
+   "rest"
+  ],
+  "listen": [
+   "rest"
+  ]
+ },
+ "idle_pool": [
+  {
+   "behavior": "rest",
+   "weight": 2,
+   "kind": "stand"
+  },
+  {
+   "behavior": "look_around",
+   "weight": 1.5,
+   "kind": "stand",
+   "cooldown_s": 8
+  },
+  {
+   "behavior": "wander",
+   "weight": 2,
+   "kind": "move",
+   "cooldown_s": 20
+  }
+ ],
+ "memory": {
+  "recent": 3,
+  "penalty": 0.25
+ },
+ "variety": {
+  "no_repeat": true,
+  "window": 20,
+  "max_in_window": 2,
+  "max_moves_in_row": 2
+ },
+ "quiet_hours": {
+  "pool": [
+   "rest"
+  ]
+ },
+ "warmup": {
+  "duration_s": 0
+ },
+ "body": {
+  "activities": {},
+  "emotes": {
+   "ear_twitch": {
+    "plays": "ear_twitch",
+    "group": "fidget"
+   },
+   "peek": {
+    "plays": "peek",
+    "group": "fidget"
+   }
+  }
+ }
+}

@@ -91,15 +91,36 @@ and talks through speech bubbles, powered by an LLM.
   S SE E W SW (head turns 45° toward the camera) + turn_ccw/turn_cw for 8 dirs → `out/bear3d/anim_l/`, then
   `face_l.py` makes `face/face.json` v2 (additive: `clips.listen` + `patch_dirs`), ~2 min). `python3 verify_l.py`
   (`--self-test`, exit 1 = works): hand-offs = idle frame 0, alpha, palette, 1 px ink outline. Sheet: `anim_l/sheet_listen.png`.
-  `run_c.sh` / `run_face.sh` rewrite face.json as v1: run `python3 face_l.py` after them (verify_face.py fails until then).
+  `run_c.sh` removes face/; `run_face.sh` rewrites face.json as v1 and then runs `face_l.py` and `face_d.py` itself.
   Stage D (needs `bear.blend`, `anim/` and face.json v2): `sh run_d.sh` (Stage L rig in a temp dir; desk set = low desk,
   computer + keyboard, swivel chair; clips `clips_d.py` desk_sit/type/swivel_in/talk/ask/swivel_out/stand, ori A types NE,
   ori B = 3D mirror types NW; render_d → pixelize_d → make_d → `out/bear3d/anim_d/anim_d.json` + `props_d/props_d.json`,
   then `face_d.py` adds `set_clips` to face.json (additive; seated talk/ask draw patch S), `verify_d.py` + `verify_face.py`,
   ~3 min). `python3 verify_d.py` (`--self-test`, exit 1 = works): hand-offs = props + idle frame 0, every join, loop seams,
   alpha, palette, 1 px ink outline. Sheet: `anim_d/sheet_desk.png`.
+- Stage kit (`stagekit.py`, docs in its header: #stage-manifest, #anim-stage, #face-part, #verify-stage, #sha-freeze): new
+  stages are a manifest `stages/<id>.json` (`id`, `kind` set|clips, `module`, `verify`) + a pure-Python module, rendered by
+  `sh run_stage.sh <id> [WORKDIR] [--keep] [--resume]` (rig `rig_bear.py --stage k --clips-module <m>` in WORKDIR, Stage L rig +
+  hp ±20°, hr ±15°, mouth closed/open/wide/tongue, ears ±15°, paw sockets, `add_objects(kit)`; sets: render_set →
+  pixelize_set → make_set; clips: render_anim → pixelize_set → make_stage). Output `out/bear3d/set_<id>/` or
+  `anim_<id>/`, swapped in only after `verify_<id>.py --dir <new>` and `verify_face.py --part <new face part>` pass; the
+  failed run keeps WORKDIR for `--resume` and leaves the out dir as it was. Renders take one of 2 machine-wide slots
+  (`$TMPDIR/bear3d_render.slot0|1` + pid; a third run waits, a dead pid's slot is reclaimed). `BEAR3D_STAGES` /
+  `BEAR3D_OUT` / `BEAR3D_LOCK_DIR` point it elsewhere (tests). Clip stages write root motion in two forms,
+  `frames[i].root_px[dir]` and `root_px[dir]` (the same list): they are ONE track, a loader applies it once (the
+  verifier fails if they differ). Face parts `out/bear3d/*/face_<id>.json` are separate files (face.json is never
+  edited by the kit); verify_face.py reads them all, and a clip in face.json and a part, or in two parts, is an error.
+  `python3 stagekit.py --self-test` (exit 1 = works), `sheet|preview <id>`, `freeze`, `check <sha> [--own <dir>…]`.
+  Freeze: `stages/freeze_p1.sha` = sha256 of every file in `anim anim_b anim_c anim_l anim_d props props_d cute face
+  set_lean`; `python3 stagekit.py check stages/freeze_p1.sha` must be clean (a later stage passes `--own <its dir>`).
+  Stage lean (`stages/lean.json`, `set_lean.py`): `sh run_stage.sh lean` (~1.5 min) → `out/bear3d/set_lean/`:
+  `anim_lean.json` (Stage B format), `props_lean.json` (Stage B props format), `face_lean.json` (set_clips `lean`, patch
+  SE / SW, + exact frames), `sheet_lean.png`, `preview_lean.html`. lean_in 10 → lean 30 (loop) → lean_out 10; a side lean
+  (a back lean hides the block behind the round body): ori A faces SE with the left mitten on a toy block's top (NE on
+  screen), ori B = 3D mirror (SW). Canvas 108×116. `python3 verify_lean.py` (`--self-test`, exit 1 = works): the kit's
+  set checks + the block never moves + art never touches the canvas edge.
 - `python3 verify_b.py`: Stage B hand-off frames must be pixel-identical to props + the idle sprite; run it after any re-render.
-- `python3 verify_face.py` (`--self-test`: in-memory mutations (3 with face.json v2, 4 with `set_clips`), each must be caught, exit 1): the face invariant
+- `python3 verify_face.py [--part FILE]` (`--self-test`: in-memory mutations (3 with face.json v2, 4 with `set_clips`, 5 with a face part), each must be caught, exit 1): the face invariant
   "T" (amends design §3.4). Default patches drawn at each frame's position must equal the expected frame (the anim_c
   frame; for idle the Blender reference `face/ref/idle_<dir>.png`, rigid face, no baked blink) exactly on idle's rest
   frames and on Stage C frames with arms and squash at rest (all hand-offs). Elsewhere they may differ by ≤ 16 px per
@@ -109,7 +130,7 @@ and talks through speech bubbles, powered by an LLM.
 - Pixel rules: iso 2:1 ortho camera, 8 directions, 12 fps, ppu 40.07, alpha 0/255 only, 1px ink outline, palette =
   `bear-proto/palette-bear.json` + `scene-proto/palette.json` (+ `bear3d/palette-ext.json` for furniture).
 - Preview: `python3 -m http.server 8771 --directory experiments/mascot/out`, then open
-  `bear3d/anim/preview.html`, `bear3d/anim_b/preview_b.html` or `bear3d/anim_c/preview_c.html` (Stage C + face sheets) or `bear3d/anim_l/preview_l.html` (listen + turns) or `bear3d/anim_d/preview_d.html` (desk set).
+  `bear3d/anim/preview.html`, `bear3d/anim_b/preview_b.html` or `bear3d/anim_c/preview_c.html` (Stage C + face sheets) or `bear3d/anim_l/preview_l.html` (listen + turns) or `bear3d/anim_d/preview_d.html` (desk set) or `bear3d/set_lean/preview_lean.html` (lean).
 
 ## Gotchas
 

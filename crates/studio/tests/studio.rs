@@ -120,7 +120,9 @@ fn lint_on_the_bear_has_no_errors() {
     // and the desk station until anim_d/ is rendered (p3 desk-art)
     let desk_art = s.pack.available("desk");
     assert!(
-        r.issues.iter().all(|i| i.code == "non_integer_root" || (!desk_art && i.code == "station_art_missing" && i.detail.starts_with("station desk:"))),
+        r.issues.iter().all(|i| i.code == "non_integer_root"
+            || i.code == "waits_for_art"
+            || (!desk_art && i.code == "station_art_missing" && i.detail.starts_with("station desk:"))),
         "{:#?}",
         r.issues
     );
@@ -291,7 +293,7 @@ fn audit_is_reproducible_and_lively() {
     assert_eq!(a, b);
     assert!(a.distinct >= 5, "{a:?}");
     assert!(a.minutes >= 30.0);
-    let order: Vec<String> = s.pack.idle_pool.iter().map(|e| e.behavior.clone()).collect();
+    let order: Vec<String> = s.pack.idle_pool.iter().map(|e| e.name().to_string()).collect();
     assert_eq!(audit::chart(&a, &order), audit::chart(&b, &order));
     let c = audit::run(s.pack.clone(), &audit::quiet(30.0, 4)).unwrap();
     assert_ne!(a.sequence, c.sequence, "another seed, another day");
@@ -299,15 +301,29 @@ fn audit_is_reproducible_and_lively() {
     let d = tmp("audit");
     for o in ["x", "y"] {
         let out = bin().args(["audit", "--pack"]).arg(root().join("mascots/bear")).args(["--minutes", "30", "--seed", "3", "--out"]).arg(d.join(o)).output().unwrap();
-        assert!(out.status.success());
-        assert!(String::from_utf8_lossy(&out.stdout).contains("distinct="));
+        // the bear has no variety block yet (idle-tune, p2): a report only, exit 0
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stdout));
+        assert!(String::from_utf8_lossy(&out.stdout).contains("seed 3: "));
     }
     for f in ["audit.json", "audit.png"] {
         assert_eq!(std::fs::read(d.join("x").join(f)).unwrap(), std::fs::read(d.join("y").join(f)).unwrap());
     }
     let j: serde_json::Value = serde_json::from_slice(&std::fs::read(d.join("x/audit.json")).unwrap()).unwrap();
-    for k in ["plays", "distinct", "max_same_in_row", "entropy"] {
+    for k in ["pack", "minutes", "seeds", "pass", "runs"] {
         assert!(j.get(k).is_some(), "{k}");
+    }
+    let run = &j["runs"][0];
+    for k in ["seed", "start", "picks", "distinct", "relaxed", "sequence", "time", "behaviors", "kinds", "long", "violations", "targets", "pass"] {
+        assert!(run.get(k).is_some(), "runs[0].{k}");
+    }
+    assert_eq!((j["seeds"].clone(), run["start"].clone()), (serde_json::json!([3]), serde_json::json!("2026-11-16T10:00")));
+    // hidden entries (no art yet) are never picked and never counted
+    let names: Vec<&str> = run["sequence"].as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
+    assert!(names.iter().all(|n| ["rest", "look_around", "wander", "dash", "read", "nap", "desk", "lean"].contains(n)), "{names:?}");
+    // usage errors exit 2
+    for bad in [&["--seeds", "1,x"][..], &["--start", "monday"], &["--temperament", "grumpy=1"], &["--seed", "1", "--seeds", "2"]] {
+        let o = bin().args(["audit", "--pack"]).arg(root().join("mascots/bear")).args(bad).output().unwrap();
+        assert_eq!(o.status.code(), Some(2), "{bad:?}");
     }
     // --timeline goes through the same checks as mascot-replay
     let day = root().join("crates/mascot-core/tests/fixtures/day.json");
@@ -333,4 +349,81 @@ fn sheet_and_gif() {
     let g2 = studio::gif(&s.pack, &s.art, "idle", "S", 2).unwrap();
     assert_eq!(g1, g2);
     assert_eq!(&g1[..6], b"GIF89a");
+}
+
+// ---- idle-brain (aliveness 2, p1): hidden art, v2 lint codes, audit v2 ----
+
+fn fixture(name: &str) -> PathBuf {
+    root().join("crates/mascot-core/tests/fixtures").join(name)
+}
+
+/// `#hidden-log`: the bear's wired A4 entries wait for art: warnings only, exit 0, with name/clip.
+#[test]
+fn lint_lists_entries_waiting_for_art_as_warnings() {
+    let out = bin().args(["lint", "--pack"]).arg(root().join("mascots/bear")).arg("--json").output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stdout));
+    let j: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let waits: Vec<&serde_json::Value> = j["issues"].as_array().unwrap().iter().filter(|i| i["code"] == "waits_for_art").collect();
+    assert_eq!(waits.len(), 62, "32 idle entries, 25 emotes, 5 activities (lean has art since p1)");
+    assert!(waits.iter().all(|i| i["severity"] == "warn" && i["name"].is_string() && i["clip"].is_string()));
+    let ws = waits.iter().find(|i| i["name"] == "weight_shift").unwrap();
+    assert_eq!(ws["clip"], "fid_weight_shift");
+    // set_lean is rendered: lean no longer waits
+    assert!(waits.iter().all(|i| i["name"] != "lean"));
+    assert_eq!(j["errors"], 0);
+}
+
+#[test]
+fn lint_v2_codes() {
+    let mut p = mascot_core::pack::load(&fixture("variety_pack")).unwrap();
+    let r = lint::lint(&p);
+    assert_eq!(r.errors, 0, "front-only and back-only behaviors turn first: {:#?}", r.issues);
+    // v2 keys under pack_version 1
+    p.pack_version = 1;
+    let r = lint::lint(&p);
+    let v: Vec<&str> = r.issues.iter().filter(|i| i.code == "v2_key_in_v1_pack").map(|i| i.detail.as_str()).collect();
+    assert!(v.iter().any(|d| d.starts_with("variety ")) && v.iter().any(|d| d.starts_with("idle_pool[0].kind ")), "{v:?}");
+    assert!(r.errors >= v.len());
+    p.pack_version = 2;
+    // a canvas above 176x160
+    p.clips.get_mut("fid_front").unwrap().frame_w = 177;
+    let r = lint::lint(&p);
+    assert!(r.issues.iter().any(|i| i.code == "canvas_too_big" && i.file == "fid_front" && i.severity == "error"), "{:#?}", r.issues);
+    p.clips.get_mut("fid_front").unwrap().frame_w = 84;
+    // one behavior drawn in two dir sets
+    p.behaviors.get_mut("peek").unwrap().seq.push(mascot_protocol::pack::StepDef { clip: "fid_front".into(), loops: Default::default() });
+    let r = lint::lint(&p);
+    let m: Vec<&str> = r.issues.iter().filter(|i| i.code == "dir_set_mismatch").map(|i| i.detail.as_str()).collect();
+    assert_eq!(m, ["behavior peek: fid_front has S SE E W SW but fid_back has NE N NW"]);
+}
+
+/// AC17: the happy fixture keeps the variety rule on 3 seeds (exit 0); with 3 entries the rules
+/// cannot hold: relaxed picks and violations, exit 1 (non-happy).
+#[test]
+fn audit_v2_passes_the_variety_pack_and_fails_the_three_entry_one() {
+    let ok = bin().args(["audit", "--pack"]).arg(fixture("variety_pack")).args(["--minutes", "60", "--seeds", "1,2,3", "--json"]).output().unwrap();
+    assert_eq!(ok.status.code(), Some(0), "{}", String::from_utf8_lossy(&ok.stdout));
+    let j: serde_json::Value = serde_json::from_slice(&ok.stdout).unwrap();
+    assert_eq!(j["pass"], true);
+    for run in j["runs"].as_array().unwrap() {
+        assert_eq!((run["relaxed"].clone(), run["violations"].clone()), (serde_json::json!(0), serde_json::json!([])), "{run}");
+        assert!(run["picks"].as_u64().unwrap() > 600, "every pick of the hour, not the 256-line trace tail: {}", run["picks"]);
+        let t = &run["time"];
+        let sum = t["stand"].as_f64().unwrap() + t["walk_run"].as_f64().unwrap() + t["turn"].as_f64().unwrap() + t["other"].as_f64().unwrap();
+        assert!((sum - 1.0).abs() < 0.01, "{t}");
+        assert!(run["kinds"]["fidget"].as_u64().unwrap() > 0 && run["kinds"]["move"].as_u64().unwrap() > 0);
+        let long = run["long"].as_array().unwrap();
+        assert!(long.iter().all(|l| l["name"] == "sit_long" && (20.0..=45.0).contains(&l["len_s"].as_f64().unwrap())), "{long:?}");
+    }
+    let chart = tmp("audit-v2").join("c.png");
+    let bad = bin().args(["audit", "--pack"]).arg(fixture("variety_pack_3")).args(["--minutes", "10", "--seed", "4", "--json", "--chart"]).arg(&chart).output().unwrap();
+    assert_eq!(bad.status.code(), Some(1));
+    let j: serde_json::Value = serde_json::from_slice(&bad.stdout).unwrap();
+    let run = &j["runs"][0];
+    assert_eq!(j["pass"], false);
+    assert!(run["relaxed"].as_u64().unwrap() > 0);
+    let rules: BTreeSet<&str> = run["violations"].as_array().unwrap().iter().map(|v| v["rule"].as_str().unwrap()).collect();
+    assert!(rules.contains("relaxed") && rules.contains("max_in_window"), "{rules:?}");
+    assert!(!rules.contains("repeat"), "no_repeat is never relaxed");
+    assert!(chart.is_file());
 }

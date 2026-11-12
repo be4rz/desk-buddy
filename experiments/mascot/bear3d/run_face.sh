@@ -24,6 +24,10 @@ r open face_rest --hide mouth --show mouth_open
 r wide face_rest --hide mouth --show mouth_wide,tongue
 r ref idle_ref
 rm -rf "$OUT"; python3 make_face.py "$WK/px" "$OUT" clips_c.json
+# make_face.py writes face.json v1: re-add the Stage L (v2: clips.listen + patch_dirs) and Stage D (set_clips) parts
+# before checking (stage-kit face parts, out/bear3d/*/face_*.json, are separate files and stay as they are)
+[ -f ../out/bear3d/anim_l/anim_l.json ] && python3 face_l.py
+[ -f ../out/bear3d/anim_d/anim_d.json ] && python3 face_d.py
 python3 verify_face.py --sheet "$OUT/residual_worst.png"
 python3 preview_c.py
 rm -rf "$WK"

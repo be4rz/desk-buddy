@@ -95,3 +95,28 @@ fn bad_pack_exits_1_and_usage_exits_2() {
     let missing = cli(&["--pack", "mascots/bear", "--timeline", "/nonexistent.json"]);
     assert_eq!(missing.status.code(), Some(1));
 }
+
+/// AC20: the bear pack as of `bdbe7ae` (art paths rebased only), `desk_pack` and `listen_pack`
+/// replay the first aliveness run's timelines with the logs that build wrote, byte for byte.
+#[test]
+fn v1_packs_replay_byte_identical_to_bdbe7ae() {
+    let dir = fixture("ac20");
+    let packs = [("bear_v1", dir.join("bear_v1")), ("desk", fixture("desk_pack")), ("listen", fixture("listen_pack"))];
+    let mut checked = 0;
+    for (name, path) in packs {
+        let p = Arc::new(pack::load(&path).unwrap_or_else(|e| panic!("{name}: {e}")));
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let f = entry.unwrap().path();
+            let file = f.file_name().unwrap().to_string_lossy().to_string();
+            let Some(rest) = file.strip_prefix(&format!("{name}.")).and_then(|r| r.strip_suffix(".jsonl")) else { continue };
+            let (tl_name, seed) = rest.rsplit_once(".seed").unwrap();
+            let tl_path = if tl_name == "day" { fixture("day.json") } else { dir.join(format!("{tl_name}.json")) };
+            let mut tl = replay::parse(&std::fs::read_to_string(&tl_path).unwrap()).unwrap();
+            tl.seed = seed.parse().unwrap();
+            let got = replay::to_jsonl(&replay::run(p.clone(), &tl));
+            assert!(got == std::fs::read_to_string(&f).unwrap(), "{file} differs from the bdbe7ae log");
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 42, "3 packs × 7 timelines × 2 seeds");
+}

@@ -2,6 +2,9 @@
 
     python3 verify_face.py [ART_DIR] [--sheet PNG]   (ART_DIR default ../out/bear3d; --sheet writes the 6 worst
                                                        frames: body | body+default | expected | residual in red)
+    python3 verify_face.py [ART_DIR] --part FILE     also check this face part (stage kit #face-part, e.g. a new
+                                                       stage's face_<id>.json before it is swapped in; it replaces a
+                                                       discovered part of the same stage)
     python3 verify_face.py --self-test               in-memory mutations, each must be caught (exit 1 = the
                                                        checker works, exit 2 = it missed or over-reported):
       1. one opaque pixel of the default eyes patch (S) flipped: reported as exactly that patch pixel on the rest
@@ -11,8 +14,15 @@
       3. (face.json v2) one body pixel under the S eyes patch on a held listen SE frame (rest pose, head turned to
          S): reported as exactly that patch pixel on exactly that frame;
       4. (set_clips) one body pixel under the S eyes patch on an exact desk_talk B frame (seated, body SW, head turned
-         to S): reported as exactly that patch pixel on exactly that frame.
+         to S): reported as exactly that patch pixel on exactly that frame;
+      5. (face parts) one exact frame of a face part's clip shifted 1 px: reported as an exact-frame mismatch on
+         exactly that frame.
 
+Face parts (stage kit, stagekit.py #face-part): every ART_DIR/*/face_<id>.json (+ --part) adds clips: set_clips
+(clip -> ori -> {patch, eyes, mouth}; frames from the part's anim file, a Stage B format set) and clips (clip -> dir ->
+{eyes, mouth}, patch dir from the part's patch_dirs, default the dir; frames from the part's anim file, Stage A format).
+Their exact frames are the part's "exact" lists (clip -> dir/ori -> frame numbers); the other frames are TOLERATED as
+above. A clip in face.json and in a part, or in two parts, is an error.
 Invariant "T" (amends the wording of design §3.4; agreed with the lead for this art round). Draw the default patches
 (eyes open, mouth closed) over the body frame at that frame's positions = "drawn". The expected frame is the anim_c
 body itself for the Stage C clips (think talk ask oops happy celebrate), and for idle the Blender reference
@@ -51,7 +61,8 @@ REPO = os.path.abspath(os.path.join(HERE, '..', '..', '..'))
 argv = sys.argv[1:]
 SELF_TEST = '--self-test' in argv
 SHEET = argv[argv.index('--sheet') + 1] if '--sheet' in argv else None
-pos_args = [a for i, a in enumerate(argv) if not a.startswith('--') and (i == 0 or argv[i - 1] != '--sheet')]
+PART_ARG = os.path.abspath(argv[argv.index('--part') + 1]) if '--part' in argv else None
+pos_args = [a for i, a in enumerate(argv) if not a.startswith('--') and (i == 0 or argv[i - 1] not in ('--sheet', '--part'))]
 ART = os.path.abspath(pos_args[0] if pos_args else os.path.join(HERE, '..', 'out', 'bear3d'))
 DIRS8 = ['S', 'SE', 'E', 'NE', 'N', 'NW', 'W', 'SW']
 FACE_DIRS = ['S', 'SE', 'E', 'W', 'SW']
@@ -130,16 +141,43 @@ if V2:   # Stage L: listen, with the patch dir following the turned head
                for d in FACE_DIRS}
     COVER |= {'listen'}
 
+# face parts (stage kit): clip -> dict(part, file, kind 'set'|'clips', ent {dir/ori: {patch?, eyes, mouth}}, exact)
+import glob
+PARTS, PART_ERR = {}, []
+_pf = {}
+for fp in sorted(glob.glob(os.path.join(ART, '*', 'face_*.json'))):
+    try: _p = json.load(open(fp))
+    except Exception as e: PART_ERR.append(f'face part {fp}: unreadable ({e})'); continue
+    _pf[_p.get('stage', fp)] = (fp, _p)
+if PART_ARG:
+    try: _p = json.load(open(PART_ARG)); _pf[_p.get('stage', PART_ARG)] = (PART_ARG, _p)
+    except Exception as e: PART_ERR.append(f'face part {PART_ARG}: unreadable ({e})')
+for sid, (fp, _p) in sorted(_pf.items()):
+    rel = os.path.relpath(fp, ART) if fp.startswith(ART + os.sep) else fp
+    if _p.get('face_part') != 1: PART_ERR.append(f'face part {rel}: face_part != 1'); continue
+    for kind, key in (('set', 'set_clips'), ('clips', 'clips')):
+        for c, ent in (_p.get(key) or {}).items():
+            if c in F['clips'] or c in SET: PART_ERR.append(f'face part {rel}: clip {c} is also in face.json'); continue
+            if c in PARTS: PART_ERR.append(f'face part {rel}: clip {c} is also in {PARTS[c]["rel"]}'); continue
+            PARTS[c] = dict(rel=rel, dir=os.path.dirname(fp), anim=_p.get('anim'), kind=kind, ent=ent,
+                            patch_dirs=(_p.get('patch_dirs') or {}).get(c, {}), exact=(_p.get('exact') or {}).get(c, {}))
+            for k in ent:   # frame 0 is the pose every exact frame is measured against: it must be checked as exact
+                if 0 not in PARTS[c]['exact'].get(k, []): PART_ERR.append(f'face part {rel}: {c} {k}: frame 0 is not in exact')
+
 
 def patch_dir(c, d):
+    if c in PARTS: return PARTS[c]['ent'][d].get('patch') or PARTS[c]['patch_dirs'].get(d, d)
     if c in SET: return SET[c][d]['patch']
     return F.get('patch_dirs', {}).get(c, {}).get(d, d)
 
 
-def positions(c, d): return SET[c][d] if c in SET else F['clips'][c][d]
+def positions(c, d):
+    if c in PARTS: return PARTS[c]['ent'][d]
+    return SET[c][d] if c in SET else F['clips'][c][d]
 
 
 def exact_frame(c, f, d=None):
+    if c in PARTS: return f in PARTS[c]['exact'].get(d, [])
     if c in SET:
         p, r = D_POSES[c][f], D_POSES[c][0]
         return all(abs(p.get(k, 0) - r.get(k, 0)) < 1e-9 for k in REST_KEYS + ['hb', 'bob', 'hy'])
@@ -218,6 +256,28 @@ def load_all():
                 n = len(SET[c][o].get(s, []))
                 if n != meta['frames_n']: errors.append(f'set_clips {c} {o} {s}: {n} positions for {meta["frames_n"]} frames')
             body[(c, o)] = frames(os.path.join(ART, 'anim_d', meta['files'][o]), AD['sets'][meta['set']][o]['frame_w'])
+    errors += PART_ERR
+    for c, P in sorted(PARTS.items()):
+        ap = os.path.join(P['dir'], P['anim'] or '')
+        if not P['anim'] or not os.path.exists(ap): errors.append(f'face part {P["rel"]}: anim file {P["anim"]} missing'); continue
+        J = json.load(open(ap)); meta = J['anims'].get(c)
+        if meta is None: errors.append(f'face part {P["rel"]}: clip {c} not in {P["anim"]}'); continue
+        want = ORIS if P['kind'] == 'set' else [d for d in meta['files'] if d in FACE_DIRS]
+        if sorted(P['ent']) != sorted(want): errors.append(f'face part {P["rel"]} {c}: {sorted(P["ent"])} != {sorted(want)}')
+        for k in P['ent']:
+            if k not in meta['files']: errors.append(f'face part {P["rel"]} {c}: {k} has no strip'); continue
+            pd = patch_dir(c, k)
+            if pd not in FACE_DIRS: errors.append(f'face part {P["rel"]} {c} {k}: patch {pd} is not a face dir'); continue
+            if P['kind'] == 'set':
+                fpd = meta.get('face_patch_dir'); fpd = fpd.get(k) if isinstance(fpd, dict) else fpd
+                if pd != fpd: errors.append(f'face part {P["rel"]} {c} {k}: patch {pd} != face_patch_dir {fpd}')
+                w = J['sets'][meta['set']][k]['frame_w']
+            else: w = meta['frame_w']
+            for s in SLOTS:
+                n = len(P['ent'][k].get(s, []))
+                if n != meta['frames_n']: errors.append(f'face part {P["rel"]} {c} {k} {s}: {n} positions for {meta["frames_n"]} frames')
+            if any(not 0 <= f < meta['frames_n'] for f in P['exact'].get(k, [])): errors.append(f'face part {P["rel"]} {c} {k}: exact frame out of range')
+            body[(c, k)] = frames(os.path.join(P['dir'], meta['files'][k]), w)
     W = A['idle']['frame_w']
     for d in DIRS8:   # Stage C hand-offs
         rest = frames(os.path.join(ART, 'anim', A['idle']['files'][d]), W)[0]
@@ -281,8 +341,9 @@ def table(resid):
     print('residuals on tolerated frames (bound: <= %d px/frame, inside masks + 1 px, ink/fur/blush, clusters <= %d px)'
           % (MAX_PX, MAX_CLUSTER))
     print('  %-10s %-3s %9s %8s %7s %6s' % ('clip', 'dir', 'tolerated', 'w/ resid', 'max px', 'total'))
-    order = ['idle'] + C_CLIPS + ['listen'] + sorted(SET)
-    for (c, d), v in sorted(resid.items(), key=lambda kv: order.index(kv[0][0]) * 9 + (FACE_DIRS + ORIS).index(kv[0][1])):
+    order = ['idle'] + C_CLIPS + ['listen'] + sorted(SET) + sorted(PARTS)
+    def rank(c): return order.index(c) if c in order else len(order)
+    for (c, d), v in sorted(resid.items(), key=lambda kv: (rank(kv[0][0]), kv[0][0], (FACE_DIRS + ORIS).index(kv[0][1]) if kv[0][1] in FACE_DIRS + ORIS else 99)):
         print('  %-10s %-3s %9d %8d %7d %6d' % (c, d, len(v), sum(1 for n in v if n), max(v, default=0), sum(v)))
 
 
@@ -365,7 +426,21 @@ if SELF_TEST:
         if set(ex) == {want} and ex[want] == [f'{c} {d} f{f}'] and not new_tol: print(f'  ok: reported exactly {want} on {c} {d} f{f}')
         else: ok = False; print('  FAILED: exact-frame report', dict(ex), 'new tolerance', new_tol[:5])
     elif HAS_D: ok = False; print('SELF-TEST 4: anim_d/ exists but face.json has no set_clips.desk_talk')
-    n_cases = 2 + V2 + ('desk_talk' in SET)
+    # case 5 (face parts): one exact frame of a part's clip shifted 1 px
+    if PARTS:
+        c = next((c for c in sorted(PARTS) if any(PARTS[c]['exact'].values())), sorted(PARTS)[0]); P = PARTS[c]
+        cand = [(k, f) for k in sorted(P['ent']) for f in P['exact'].get(k, []) if f > 0] or \
+               [(k, f) for k in sorted(P['ent']) for f in P['exact'].get(k, [])]
+        if not cand: ok = False; print(f'SELF-TEST 5: FAILED: face part clip {c} has no exact frame')
+        else:
+            k, f = cand[0]; mut = dict(body); mut[(c, k)] = list(body[(c, k)]); mut[(c, k)][f] = np.roll(body[(c, k)][f], 1, 1)
+            ex, tl, _, _ = check(patch, mut, ref)
+            lab = f'{c} {k} f{f}'
+            hit = sorted({v for vs in ex.values() for v in vs})
+            print(f'SELF-TEST 5: face part {P["rel"]}: exact frame {lab} shifted 1 px in memory')
+            if hit == [lab]: print(f'  ok: exact-frame mismatch reported on exactly {lab} ({len(ex)} pixels)')
+            else: ok = False; print('  FAILED: exact-frame report on', hit[:5])
+    n_cases = 2 + V2 + ('desk_talk' in SET) + bool(PARTS)
     if ok: print(f'SELF-TEST OK: all {n_cases} mutations caught; exit 1'); sys.exit(1)
     print('SELF-TEST FAILED'); sys.exit(2)
 
@@ -379,5 +454,6 @@ if msgs:
     if len(msgs) > 60: print(f'  ... {len(msgs) - 60} more')
     sys.exit(1)
 ne = sum(exact_frame(c, f, d) for (c, d), v in body.items() for f in range(len(v)))
-print(f'verify_face: PASS ({len(F["clips"])} clips x {len(FACE_DIRS)} dirs + {len(SET)} set clips x {len(ORIS)} oris, {nf} frames: {ne} exact, {nf - ne} within '
+print(f'verify_face: PASS ({len(F["clips"])} clips x {len(FACE_DIRS)} dirs + {len(SET)} set clips x {len(ORIS)} oris'
+          f' + {len(PARTS)} face-part clips ({", ".join(sorted({P["rel"] for P in PARTS.values()})) or "none"}), {nf} frames: {ne} exact, {nf - ne} within '
       f'the bound; hand-offs ok)')

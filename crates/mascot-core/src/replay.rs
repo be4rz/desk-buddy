@@ -66,6 +66,9 @@ pub struct SensesPatch {
     pub panel: Option<Option<WinRect>>,
     #[serde(default, deserialize_with = "double", skip_serializing_if = "Option::is_none")]
     pub now_playing: Option<Option<NowPlaying>>,
+    /// 1–12 (pack v2 `when.months`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub month: Option<u8>,
 }
 
 /// `null` = clear (`Some(None)`); an absent key stays `None` via `default`.
@@ -78,7 +81,7 @@ impl SensesPatch {
         macro_rules! set {
             ($($f:ident),*) => { $( if let Some(v) = &self.$f { s.$f = v.clone(); } )* };
         }
-        set!(frontmost, user_idle_ms, local, fullscreen, screen_share, dnd_toggle, quiet_hours, windows, panel, now_playing);
+        set!(frontmost, user_idle_ms, local, fullscreen, screen_share, dnd_toggle, quiet_hours, windows, panel, now_playing, month);
     }
 }
 

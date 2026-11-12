@@ -1,0 +1,7 @@
+// Design #idle-brain §1.5 turn-first: ten idle minutes on the variety fixture pack (front-only and back-only fidgets).
+// Expected: a fidget whose clip lacks the current dir turns first (turn_ccw / turn_cw steps), then plays in a dir it has;
+// the facing never changes without a turn clip or a walk; a click mid-way listens as before (intent listen; the fixture pack plays rest for it).
+{"at_ms": 0, "senses": {"user_idle_ms": 0, "month": 11}}
+{"at_ms": 300000, "poke": "click"}
+{"at_ms": 300200, "poke": "prompt_open"}
+{"at_ms": 304000, "poke": "prompt_closed"}

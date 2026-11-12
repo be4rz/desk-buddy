@@ -1,6 +1,6 @@
 # Bear pack
 
-The polar bear, our first mascot. `pack.json` (`pack_version: 1`) points at the Blender
+The polar bear, our first mascot. `pack.json` (`pack_version: 2`) points at the Blender
 pipeline output in `experiments/mascot/out/bear3d/` and reads it in place. Nothing is
 copied. `mascot_core::pack::load("mascots/bear")` loads it, and `mascot-replay` shows what
 the brain does with it:
@@ -52,6 +52,63 @@ toy-like.
   the rest of that turn. A click while seated listens from the chair.
 - **Errors** are one line: `pack <dir>: <path>: <what>`, e.g.
   `pack /nonexistent: pack.json: not found`.
+
+## Pack v2 (idle brain, aliveness 2)
+
+`pack_version: 2` adds the keys below; a v1 pack still loads and plays exactly as before (a
+v2 key in a v1 pack is lint error `v2_key_in_v1_pack`). The loader reads versions 1–2.
+
+- **Optional sources for art that isn't rendered yet.** Each A4 row has a Stage A source
+  `anim_<x>/anim_<x>.json` + a `face_part` `anim_<x>/face_<x>.json` (x = f g p m t e x r s w z),
+  and each posture set a `stage_b` `set_<s>/anim_<s>.json` with its `props` file
+  `set_<s>/props_<s>.json` + `set_<s>/face_<s>.json` (s = lean sit_a sit_b play out). All are
+  `"optional": true` and resolve against `art_root` like every other source. A `face_part` adds
+  its clips to the face layers once `face/face.json` loaded; a clip in two parts (or in
+  face.json and a part, as a free or a set clip) is a load error. A part reads in the stage
+  kit's shape (`"face_part": 1`, `clips` dirs without `patch` + a top-level `patch_dirs`,
+  `exact` by dir/ori) or the prototype's (`face_part_version`, `patch` per dir, flat `exact`).
+- **Hidden entries.** A pool, activity or emote entry whose clips are missing is *waiting for
+  art*: weight 0, never picked, not counted as a behavior, left out of `buddy mascot list`
+  (text and `--json`) and the prompt. The app logs one line at start, e.g.
+  `[buddy] pack: 62 entries wait for art: weight_shift, ear_twitch, … (idle 32, emotes 25, activities 5)`,
+  and `buddy studio lint` lists each as a warning. Rendering the art turns an entry on with no
+  pack edit. Today's bear picks and audits exactly as if they weren't there.
+- **`idle_pool` entries** gain `kind` (`stand fidget posture move long rare react other`,
+  default `other`), `group` (the variety key; default the entry's name), `when`
+  (`{"hours": [from, to)` local, wrapping midnight; `"months": [1..12]`; `"context": name}` —
+  a context is never eligible until p4, an unknown month never matches) and, instead of
+  `behavior`, a station visit `{"station": "desk", "hold_s": [a, b]}`: the bear sits, types
+  for a seeded draw of `hold_s` seconds (whole loops), then stands; traced as behavior `desk`,
+  intent idle. A turn that opens while it types takes the seat over (the usual seated turn).
+- **`"loops": {"for_s": [a, b]}`** on a behavior step holds whole loops until a seeded draw in
+  `[a, b]` s has passed (`read` 40–180 s, `nap` 60–240 s). An activity's `--for` deadline wins.
+- **`"variety"`** (optional; the bear has none until idle-tune): `no_repeat` (never the same
+  group twice in a row), `window` + `max_in_window` (≤ N picks of a group in any W picks in a row, this one included),
+  `max_moves_in_row` (0 = off), and `targets` (what the audit checks: `minutes`, `stand_max`,
+  `stand_move_max`, `distinct_min`, `share_max`, `long_len_s`). The rules are hard: when they
+  bar every entry the brain relaxes `max_in_window`, then cooldowns, then plays `rest`
+  (`look_around` after a rest), tracing `pick relaxed <rule>`; `no_repeat` is never relaxed.
+  Every pick traces `pick <name> total <weight>`.
+- **Turn first.** An idle behavior whose first clip lacks the current dir turns to its nearest
+  dir through the turn clips before it plays (sets are skipped; no turn clips = snap).
+- **Body.** `plays` is a string or an array, `about` is optional, and entries take a `group`:
+  activities `pastime | play | posture | work`, emotes `gesture | fidget | move | reaction |
+  surprise` (default pastime / gesture). `mascot list` and the prompt group by it.
+- **Studio.** `buddy studio audit --pack <dir> [--minutes 10] [--seed N | --seeds 1,2,3]
+  [--start 2026-11-16T10:00] [--temperament <json>] [--json] [--chart] [--out <dir>]` prints the
+  v2 report `{pack, minutes, seeds, pass, runs[]}` (per run: picks, distinct, relaxed, sequence,
+  time shares, behaviors, kinds, `long[]` lengths, violations, targets) and exits 0 pass / 1
+  findings / 2 usage; `--timeline` keeps the v1 timeline. Lint adds `waits_for_art` (warn),
+  `v2_key_in_v1_pack`, `canvas_too_big` (> 176×160) and `dir_set_mismatch` (errors); a bad
+  station pool entry is a load error.
+
+Contract notes (lead decisions for p1):
+
+- Posture sets are `stage_b` sources with their `props` field and `art_root`-relative paths,
+  not a separate `props` source kind; art-kit writes the same files either way.
+- Lint keeps its report shape `{pack, files, errors, warnings, issues[]}` and the word
+  `"severity": "warn"`; `waits_for_art` issues add `name`, `clip` and `source`. Warnings never
+  change the exit code. The studio window (`studio.js`) reads it unchanged.
 
 ## The body block (what the agent can do)
 

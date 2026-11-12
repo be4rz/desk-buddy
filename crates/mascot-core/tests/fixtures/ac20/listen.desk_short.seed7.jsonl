@@ -1,0 +1,16 @@
+{"t_ms":0,"intent":"idle","behavior":"rest","clip":"idle","dir":"S","ori":null,"eyes":"open","mouth":"closed","vis":"shown"}
+{"t_ms":83,"intent":"think","behavior":"rest","clip":"idle","dir":"S","ori":null,"eyes":"open","mouth":"closed","vis":"shown"}
+{"t_ms":830,"intent":"work","behavior":"rest","clip":"idle","dir":"S","ori":null,"eyes":"open","mouth":"closed","vis":"shown"}
+{"t_ms":2000,"intent":"work","behavior":"rest","clip":"idle","dir":"S","ori":null,"eyes":"open","mouth":"open","vis":"shown"}
+{"t_ms":2075,"intent":"talk","behavior":"rest","clip":"idle","dir":"S","ori":null,"eyes":"open","mouth":"open","vis":"shown"}
+{"t_ms":2167,"intent":"talk","behavior":"rest","clip":"idle","dir":"S","ori":null,"eyes":"open","mouth":"wide","vis":"shown"}
+{"t_ms":2334,"intent":"talk","behavior":"rest","clip":"idle","dir":"S","ori":null,"eyes":"open","mouth":"open","vis":"shown"}
+{"t_ms":2400,"intent":"talk","behavior":"rest","clip":"idle","dir":"S","ori":null,"eyes":"open","mouth":"closed","vis":"shown"}
+{"t_ms":3071,"intent":"idle","behavior":"rest","clip":"idle","dir":"S","ori":null,"eyes":"open","mouth":"closed","vis":"shown"}
+{"t_ms":3388,"intent":"idle","behavior":"rest","clip":"idle","dir":"S","ori":null,"eyes":"closed","mouth":"closed","vis":"shown"}
+{"t_ms":3554,"intent":"idle","behavior":"rest","clip":"idle","dir":"S","ori":null,"eyes":"open","mouth":"closed","vis":"shown"}
+{"t_ms":5063,"intent":"idle","behavior":"look_around","clip":"turn_cw","dir":"S","ori":null,"eyes":"open","mouth":"closed","vis":"shown"}
+{"t_ms":5312,"intent":"idle","behavior":"look_around","clip":"turn_cw","dir":"SW","ori":null,"eyes":"open","mouth":"closed","vis":"shown"}
+{"t_ms":5561,"intent":"idle","behavior":"look_around","clip":"turn_cw","dir":"W","ori":null,"eyes":"open","mouth":"closed","vis":"shown"}
+{"t_ms":5810,"intent":"idle","behavior":"look_around","clip":"idle","dir":"NW","ori":null,"eyes":"open","mouth":"closed","vis":"shown"}
+{"t_ms":8300,"intent":"idle","behavior":"rest","clip":"idle","dir":"NW","ori":null,"eyes":"open","mouth":"closed","vis":"shown"}

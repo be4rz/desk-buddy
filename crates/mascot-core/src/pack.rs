@@ -6,8 +6,8 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use mascot_protocol::pack::{
-    ActivityKind, BehaviorDef, BodyEntry, BodyFile, Capabilities, FaceFile, Loops, Memory, PackFile, PoolEntry, PropsFile, SourceKind, StageAFile, StageBFile,
-    StationFile, StepDef, Temperament, Timers, TurningFile, WorkFile, PACK_VERSION,
+    ActivityKind, BehaviorDef, BodyEntry, BodyFile, Capabilities, FaceFile, FacePartFile, Loops, Memory, PackFile, PoolEntry, PropsFile, SourceKind,
+    StageAFile, StageBFile, StationFile, StepDef, Temperament, Timers, TurningFile, Variety, WorkFile, PACK_VERSION, PACK_VERSION_MIN,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -123,6 +123,31 @@ pub struct PackMeta {
     pub stations: BTreeMap<String, StationMeta>,
     /// `pack.json` `"work"` (p3): when a long turn goes to a station. `None` = never.
     pub work: Option<WorkFile>,
+    /// 1 or 2 (`#pack-v2`).
+    pub pack_version: u32,
+    /// v2 `"variety"` (`#pack-variety`): the hard idle rules. `None` = today's picking.
+    pub variety: Option<Variety>,
+    /// Where the pack uses a v2-only key (`variety`, `idle_pool[3].kind`, …): with `pack_version: 1`
+    /// these are lint errors (`buddy studio lint`); loading ignores nothing because of them.
+    pub v2_keys: Vec<String>,
+    /// Optional sources not on disk (as written in `pack.json`, relative to `art_root`).
+    pub missing_sources: Vec<String>,
+    /// Body activities and emotes left out because their art is missing (`#hidden-log`).
+    pub body_waiting: Vec<Waiting>,
+}
+
+/// An entry wired in the pack whose art is not there yet (`#hidden-log`): skipped, not an error.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Waiting {
+    /// `idle`, `emote` or `activity`.
+    pub kind: &'static str,
+    pub name: String,
+    /// The first clip it needs that is not loaded (or its set's first clip).
+    pub clip: String,
+    /// The missing optional source that would bring it, when the pack's layout names it
+    /// (`set_<set>/…` for set behaviors, the one missing source when only one is missing).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 /// A station (`#pack-stations`): its role clips, played as one synthesized behavior whose step
@@ -238,6 +263,8 @@ pub struct ActivityMeta {
     pub plays: Vec<String>,
     pub kind: ActivityKind,
     pub about: String,
+    /// `pastime` (default) | `play` | `posture` | `work` (`#pack-body-groups`).
+    pub group: String,
     /// A station activity (`computer`): `plays` is `[station]`, its synthesized behavior.
     pub station: Option<String>,
 }
@@ -245,8 +272,16 @@ pub struct ActivityMeta {
 #[derive(Clone, Debug, PartialEq)]
 pub struct EmoteMeta {
     pub act: EmoteAct,
+    /// May be empty for fidgets, moves, reactions and surprises.
     pub about: String,
+    /// `gesture` (default) | `fidget` | `move` | `reaction` | `surprise` (`#pack-body-groups`).
+    pub group: String,
 }
+
+/// Activity groups in list and prompt order.
+pub const ACTIVITY_GROUPS: [&str; 4] = ["pastime", "play", "posture", "work"];
+/// Emote groups in list and prompt order.
+pub const EMOTE_GROUPS: [&str; 5] = ["gesture", "fidget", "move", "reaction", "surprise"];
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum EmoteAct {
@@ -322,6 +357,45 @@ struct Extras {
     stations: BTreeMap<String, StationFile>,
     #[serde(default)]
     work: Option<WorkFile>,
+    #[serde(default)]
+    variety: Option<Variety>,
+}
+
+/// Where a pack uses a key `#pack-v2` adds (a lint error under `pack_version: 1`).
+fn v2_keys(raw: &serde_json::Value) -> Vec<String> {
+    let mut out = Vec::new();
+    for k in ["variety", "contexts", "reactions"] {
+        if raw.get(k).is_some() {
+            out.push(k.to_string());
+        }
+    }
+    for (i, src) in raw.get("sources").and_then(|v| v.as_array()).into_iter().flatten().enumerate() {
+        if src.get("kind").and_then(|k| k.as_str()) == Some("face_part") {
+            out.push(format!("sources[{i}].kind face_part"));
+        }
+    }
+    for (i, e) in raw.get("idle_pool").and_then(|v| v.as_array()).into_iter().flatten().enumerate() {
+        for k in ["station", "hold_s", "kind", "group", "when"] {
+            if e.get(k).is_some() {
+                out.push(format!("idle_pool[{i}].{k}"));
+            }
+        }
+    }
+    for (name, b) in raw.get("behaviors").and_then(|v| v.as_object()).into_iter().flatten() {
+        for (i, st) in b.get("seq").and_then(|v| v.as_array()).into_iter().flatten().enumerate() {
+            if st.get("loops").is_some_and(|l| l.get("for_s").is_some()) {
+                out.push(format!("behaviors.{name}.seq[{i}].loops for_s"));
+            }
+        }
+    }
+    for list in ["activities", "emotes"] {
+        for (name, e) in raw.get("body").and_then(|b| b.get(list)).and_then(|v| v.as_object()).into_iter().flatten() {
+            if e.get("group").is_some() {
+                out.push(format!("body.{list}.{name}.group"));
+            }
+        }
+    }
+    out
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -510,21 +584,81 @@ impl PackMeta {
         chain.iter().find(|b| self.available(b)).map(String::as_str)
     }
 
-    /// Every clip it names exists (free clips in at least `S`, set clips in
+    /// Every clip it names exists (free clips in at least one direction, set clips in
     /// both orientations, in its set) and its set exists.
     pub fn available(&self, behavior: &str) -> bool {
-        let Some(b) = self.behavior(behavior) else { return false };
+        self.behavior(behavior).is_some_and(|b| !b.seq.is_empty()) && self.missing_clip(behavior).is_none()
+    }
+
+    /// The first clip a behavior needs that cannot play (`None` = it is available or undefined).
+    pub fn missing_clip(&self, behavior: &str) -> Option<&str> {
+        let b = self.behavior(behavior)?;
         if let Some(set) = &b.set {
             if !self.sets.contains_key(set) {
-                return false;
+                return b.seq.first().map(|s| s.clip.as_str());
             }
         }
-        !b.seq.is_empty()
-            && b.seq.iter().all(|step| match (self.clips.get(&step.clip), &b.set) {
-                (Some(c), None) => c.set.is_none() && c.dirs.contains_key(&Dir::S),
-                (Some(c), Some(set)) => c.set.as_deref() == Some(set) && c.oris.contains_key(&Ori::A) && c.oris.contains_key(&Ori::B),
-                (None, _) => false,
+        // v1: every free clip in S. v2 (turn first): any dirs, every later clip in each dir the first has.
+        let first = b.seq.first().and_then(|s| self.clips.get(&s.clip)).filter(|c| c.set.is_none());
+        b.seq
+            .iter()
+            .find(|step| match (self.clips.get(&step.clip), &b.set) {
+                (Some(c), None) if self.pack_version < 2 => !(c.set.is_none() && c.dirs.contains_key(&Dir::S)),
+                (Some(c), None) => !(c.set.is_none() && !c.dirs.is_empty() && first.is_some_and(|f| f.dirs.keys().all(|d| c.dirs.contains_key(d)))),
+                (Some(c), Some(set)) => !(c.set.as_deref() == Some(set) && c.oris.contains_key(&Ori::A) && c.oris.contains_key(&Ori::B)),
+                (None, _) => true,
             })
+            .map(|s| s.clip.as_str())
+    }
+
+    /// The dirs a behavior's first clip is drawn in (empty for set behaviors and unknown clips).
+    pub fn first_dirs(&self, behavior: &str) -> Vec<Dir> {
+        let Some(b) = self.behavior(behavior).filter(|b| b.set.is_none()) else { return Vec::new() };
+        b.seq.first().and_then(|s| self.clips.get(&s.clip)).map_or_else(Vec::new, |c| c.dirs.keys().copied().collect())
+    }
+
+    /// Every wired entry whose art is missing (`#hidden-log`): idle pool entries, then emotes and
+    /// activities (in pack order). They are skipped, never an error.
+    pub fn waiting(&self) -> Vec<Waiting> {
+        let mut out: Vec<Waiting> = Vec::new();
+        for e in &self.idle_pool {
+            let name = e.name();
+            if !self.available(name) && !out.iter().any(|w| w.name == name) {
+                out.push(self.waiting_entry("idle", name, name));
+            }
+        }
+        out.extend(self.body_waiting.iter().cloned());
+        out
+    }
+
+    /// The one-line load log (`#hidden-log`), `None` when nothing waits.
+    pub fn waiting_line(&self) -> Option<String> {
+        let w = self.waiting();
+        if w.is_empty() {
+            return None;
+        }
+        let n = |k: &str| w.iter().filter(|x| x.kind == k).count();
+        let mut names: Vec<&str> = w.iter().take(12).map(|x| x.name.as_str()).collect();
+        if w.len() > 12 {
+            names.push("…");
+        }
+        Some(format!(
+            "pack: {} entries wait for art: {} (idle {}, emotes {}, activities {})",
+            w.len(),
+            names.join(", "),
+            n("idle"),
+            n("emote"),
+            n("activity")
+        ))
+    }
+
+    pub(crate) fn waiting_entry(&self, kind: &'static str, name: &str, behavior: &str) -> Waiting {
+        let clip = self.missing_clip(behavior).unwrap_or(behavior).to_string();
+        let set = self.behavior(behavior).and_then(|b| b.set.clone());
+        let source = set
+            .and_then(|set| self.missing_sources.iter().find(|s| s.starts_with(&format!("set_{set}/"))).cloned())
+            .or_else(|| (self.missing_sources.len() == 1).then(|| self.missing_sources[0].clone()));
+        Waiting { kind, name: name.to_string(), clip, source }
     }
 }
 
@@ -587,8 +721,8 @@ impl Loader {
         let text = self.read(rel)?;
         // Syntax first (line/col), then the version, then the schema.
         let raw: serde_json::Value = self.json(rel, &text)?;
-        match raw.get("pack_version").and_then(|v| v.as_u64()) {
-            Some(v) if v == PACK_VERSION as u64 => {}
+        let version = match raw.get("pack_version").and_then(|v| v.as_u64()) {
+            Some(v) if (PACK_VERSION_MIN as u64..=PACK_VERSION as u64).contains(&v) => v as u32,
             Some(v) => {
                 return Err(PackError::Version {
                     dir: self.dir.clone(),
@@ -598,7 +732,7 @@ impl Loader {
                 })
             }
             None => return Err(self.invalid(rel, "pack_version is missing or not a number")),
-        }
+        };
         let file: PackFile = self.json(rel, &text)?;
         let extras: Extras = self.json(rel, &text)?;
 
@@ -611,11 +745,14 @@ impl Loader {
         let mut clips = BTreeMap::new();
         let mut sets = BTreeMap::new();
         let mut faces = Vec::new();
+        let mut parts = Vec::new();
         let mut skipped_optional = false;
+        let mut missing_sources = Vec::new();
         for src in &file.sources {
             let src_rel = art_rel.join(&src.path);
             if src.optional && !self.abs(&src_rel).exists() {
                 skipped_optional = true;
+                missing_sources.push(src.path.clone());
                 continue;
             }
             let text = self.read(&src_rel)?;
@@ -630,12 +767,17 @@ impl Loader {
                     self.stage_b(&src_rel, &base, self.json(&src_rel, &text)?, &props_rel, props, &mut clips, &mut sets)?
                 }
                 SourceKind::Face => faces.push((src_rel.clone(), base, self.json::<FaceFile>(&src_rel, &text)?)),
+                SourceKind::FacePart => parts.push((src_rel.clone(), self.json::<FacePartFile>(&src_rel, &text)?)),
             }
         }
         let mut face = None;
-        for (rel, base, f) in faces {
+        for (rel, base, mut f) in faces {
             if face.is_some() {
                 return Err(self.invalid(&rel, "only one face source is allowed"));
+            }
+            // parts only place face.json's patches: without a face source they have nothing to draw
+            for (prel, part) in std::mem::take(&mut parts) {
+                self.merge_part(&prel, part, &mut f)?;
             }
             face = Some(self.face(&rel, &base, f, &clips, skipped_optional)?);
         }
@@ -662,6 +804,11 @@ impl Loader {
             turning: None,
             stations: BTreeMap::new(),
             work: None,
+            pack_version: version,
+            variety: extras.variety,
+            v2_keys: v2_keys(&raw),
+            missing_sources,
+            body_waiting: Vec::new(),
         };
         meta.turning = self.check_turning(extras.turning, &meta.clips)?;
         self.check_stations(extras.stations, extras.work, &mut meta)?;
@@ -687,6 +834,7 @@ impl Loader {
                 let b: BodyFile = serde_json::from_str(DEFAULT_BODY).expect("DEFAULT_BODY parses");
                 check_body(b, &mut meta);
                 meta.body_issues.clear();
+                meta.body_waiting.clear(); // the pack never asked for these
             }
         }
         Ok(meta)
@@ -822,6 +970,48 @@ impl Loader {
                 return Err(self.invalid(rel, format!("clip {name} is defined by two sources")));
             }
         }
+        Ok(())
+    }
+
+    /// Merges a `#face-part` into face.json's table: a clip already placed there or by another part is an error.
+    fn merge_part(&self, rel: &Path, part: FacePartFile, f: &mut FaceFile) -> Result<(), PackError> {
+        if part.face_part_version != 1 {
+            return Err(self.invalid(rel, format!("face_part_version {} is not supported (this build reads 1)", part.face_part_version)));
+        }
+        for clip in part.patch_dirs.keys() {
+            if !part.clips.contains_key(clip) {
+                return Err(self.invalid(rel, format!("patch_dirs: {clip} is not in this part's clips")));
+            }
+        }
+        let mut patch_dirs = part.patch_dirs;
+        for (clip, by_dir) in part.clips {
+            if f.clips.contains_key(&clip) || f.set_clips.contains_key(&clip) {
+                return Err(self.invalid(rel, format!("clips: {clip} is placed by face.json or another part")));
+            }
+            let named = patch_dirs.remove(&clip).unwrap_or_default();
+            let mut m = BTreeMap::new();
+            for (d, sf) in by_dir {
+                let patch = match (sf.patch, named.get(&d)) {
+                    (Some(a), Some(b)) if &a != b => return Err(self.invalid(rel, format!("clips: {clip} {d}: patch {a} and patch_dirs {b} differ"))),
+                    (Some(a), _) => a,
+                    (None, Some(b)) => b.clone(),
+                    (None, None) => d.clone(),
+                };
+                if patch != d {
+                    f.patch_dirs.entry(clip.clone()).or_default().insert(d.clone(), patch);
+                }
+                m.insert(d, sf.slots);
+            }
+            f.clips.insert(clip, m);
+        }
+        for (clip, by_ori) in part.set_clips {
+            if f.set_clips.contains_key(&clip) || f.clips.contains_key(&clip) {
+                return Err(self.invalid(rel, format!("set_clips: {clip} is placed by face.json or another part")));
+            }
+            f.set_clips.insert(clip, by_ori);
+        }
+        // the merged table uses v2 keys whatever face.json's own version
+        f.face_version = f.face_version.max(2);
         Ok(())
     }
 
@@ -1046,14 +1236,46 @@ impl Loader {
             }
         }
         for e in &file.idle_pool {
-            if !meta.behaviors.contains_key(&e.behavior) {
-                return Err(self.invalid(rel, format!("idle_pool: undefined behavior {}", e.behavior)));
+            match (&e.behavior, &e.station) {
+                (Some(b), None) => {
+                    if !meta.behaviors.contains_key(b) {
+                        return Err(self.invalid(rel, format!("idle_pool: undefined behavior {b}")));
+                    }
+                    if e.hold_s.is_some() {
+                        return Err(self.invalid(rel, format!("idle_pool: {b}: hold_s is for station entries")));
+                    }
+                }
+                (None, Some(st)) => {
+                    if !meta.stations.contains_key(st) {
+                        return Err(self.invalid(rel, format!("idle_pool: unknown station {st}")));
+                    }
+                    match e.hold_s {
+                        Some([a, b]) if a.is_finite() && b.is_finite() && 0.0 < a && a <= b => {}
+                        Some(_) => return Err(self.invalid(rel, format!("idle_pool: {st}: hold_s [a, b] needs 0 < a <= b"))),
+                        None => return Err(self.invalid(rel, format!("idle_pool: {st}: a station entry needs hold_s"))),
+                    }
+                }
+                _ => return Err(self.invalid(rel, "idle_pool: an entry needs exactly one of behavior and station")),
             }
+            let name = e.name();
             if !(e.weight >= 0.0 && e.cooldown_s >= 0.0) {
-                return Err(self.invalid(rel, format!("idle_pool: {} needs weight >= 0 and cooldown_s >= 0", e.behavior)));
+                return Err(self.invalid(rel, format!("idle_pool: {name} needs weight >= 0 and cooldown_s >= 0")));
             }
             if let Some(t) = e.traits.keys().find(|t| file.temperament.get(t).is_none()) {
-                return Err(self.invalid(rel, format!("idle_pool: {} has unknown trait {t}", e.behavior)));
+                return Err(self.invalid(rel, format!("idle_pool: {name} has unknown trait {t}")));
+            }
+            if let Some(w) = &e.when {
+                if w.hours.is_some_and(|[a, b]| a > 23 || b > 24) {
+                    return Err(self.invalid(rel, format!("idle_pool: {name}: when.hours are 0-24")));
+                }
+                if w.months.as_ref().is_some_and(|m| m.is_empty() || m.iter().any(|m| !(1..=12).contains(m))) {
+                    return Err(self.invalid(rel, format!("idle_pool: {name}: when.months are 1-12")));
+                }
+            }
+        }
+        if let Some(v) = &meta.variety {
+            if v.max_in_window > 0 && v.window == 0 {
+                return Err(self.invalid(rel, "variety: max_in_window needs a window"));
             }
         }
         let q = &meta.quiet_hours;
@@ -1106,7 +1328,14 @@ fn check_body(b: BodyFile, meta: &mut PackMeta) {
             return false;
         }
         let about = e.about.trim();
-        if about.is_empty() {
+        let groups: &[&str] = if kind == "activities" { &ACTIVITY_GROUPS } else { &EMOTE_GROUPS };
+        if let Some(g) = e.group.as_deref().filter(|g| !groups.contains(g)) {
+            issues.push(format!("{at}: unknown group {g} (one of {})", groups.join(", ")));
+            return false;
+        }
+        // activities and gestures are offered with their about; fidgets, moves, … by name only
+        let group = e.group.as_deref().unwrap_or(groups[0]);
+        if about.is_empty() && (kind == "activities" || group == "gesture") {
             issues.push(format!("{at}: about is empty"));
             return false;
         }
@@ -1120,13 +1349,23 @@ fn check_body(b: BodyFile, meta: &mut PackMeta) {
         }
         true
     };
-    let chain = |at: &str, plays: &[String], meta: &PackMeta, issues: &mut Vec<String>| -> bool {
+    let mut waiting = Vec::new();
+    // false = dropped: a problem (an issue) or art that is not there yet (waiting, #hidden-log)
+    let chain = |kind: &'static str, name: &str, at: &str, plays: &[String], meta: &PackMeta, issues: &mut Vec<String>, waiting: &mut Vec<Waiting>| -> bool {
+        if plays.is_empty() {
+            issues.push(format!("{at}: plays is empty"));
+            return false;
+        }
         if let Some(x) = plays.iter().find(|x| !meta.behaviors.contains_key(*x)) {
             issues.push(format!("{at}: unknown behavior {x}"));
             return false;
         }
         if meta.first_available(plays).is_none() {
-            issues.push(format!("{at}: no available behavior in [{}]", plays.join(", ")));
+            if meta.pack_version < 2 {
+                issues.push(format!("{at}: no available behavior in [{}]", plays.join(", ")));
+            } else {
+                waiting.push(meta.waiting_entry(kind, name, &plays[0]));
+            }
             return false;
         }
         true
@@ -1145,18 +1384,22 @@ fn check_body(b: BodyFile, meta: &mut PackMeta) {
                 issues.push(format!("{at}: unknown station {st}"));
                 continue;
             }
-            // a declared station whose art is not rendered yet can't play: left out (studio lint warns)
+            let group = e.group.clone().unwrap_or_else(|| ACTIVITY_GROUPS[0].to_string());
+            // a declared station whose art is not rendered yet can't play: left out, logged (#hidden-log)
             if meta.available(st) {
-                let a = ActivityMeta { plays: vec![st.clone()], kind: e.kind.unwrap_or_default(), about: e.about.trim().to_string(), station: Some(st.clone()) };
+                let a = ActivityMeta { plays: vec![st.clone()], kind: e.kind.unwrap_or_default(), about: e.about.trim().to_string(), group, station: Some(st.clone()) };
                 body.activities.push((name.clone(), a));
+            } else {
+                waiting.push(meta.waiting_entry("activity", name, st));
             }
             continue;
         }
         let plays = e.plays.clone().unwrap_or_default();
-        if !chain(&at, &plays, meta, &mut issues) {
+        if !chain("activity", name, &at, &plays, meta, &mut issues, &mut waiting) {
             continue;
         }
-        body.activities.push((name.clone(), ActivityMeta { plays, kind: e.kind.unwrap_or_default(), about: e.about.trim().to_string(), station: None }));
+        let group = e.group.clone().unwrap_or_else(|| ACTIVITY_GROUPS[0].to_string());
+        body.activities.push((name.clone(), ActivityMeta { plays, kind: e.kind.unwrap_or_default(), about: e.about.trim().to_string(), group, station: None }));
     }
     for (name, e) in &b.emotes {
         if !common("emotes", name, e, &mut issues) {
@@ -1180,7 +1423,7 @@ fn check_body(b: BodyFile, meta: &mut PackMeta) {
                 }
             },
             (None, Some(plays)) => {
-                if !chain(&at, plays, meta, &mut issues) {
+                if !chain("emote", name, &at, plays, meta, &mut issues, &mut waiting) {
                     continue;
                 }
                 EmoteAct::Plays(plays.clone())
@@ -1200,8 +1443,10 @@ fn check_body(b: BodyFile, meta: &mut PackMeta) {
             issues.push(format!("{at}: {played} holds until stopped; an emote must end by itself"));
             continue;
         }
-        body.emotes.push((name.clone(), EmoteMeta { act, about: e.about.trim().to_string() }));
+        let group = e.group.clone().unwrap_or_else(|| EMOTE_GROUPS[0].to_string());
+        body.emotes.push((name.clone(), EmoteMeta { act, about: e.about.trim().to_string(), group }));
     }
     meta.body = body;
     meta.body_issues = issues;
+    meta.body_waiting = waiting;
 }

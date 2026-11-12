@@ -1,0 +1,62 @@
+{
+ "note": "Stage lean props (render_set.py, chunky superellipsoid toy shapes), pre-rendered with the Stage A camera and pixel step. Each prop sprite = that prop rendered alone with its own ink outline; anchor = pixel of the prop origin. props_<set>_<ori>.png = the props-only frame on the clip canvas.",
+ "ppu": 40.0719967705934,
+ "pass_ids": {
+  "block": 50,
+  "block_panel": 51
+ },
+ "props": {
+  "toy_block": {
+   "set": "lean",
+   "A": {
+    "file": "prop_toy_block_A.png",
+    "size": [
+     60,
+     59
+    ],
+    "anchor": [
+     30,
+     46
+    ],
+    "offset_px_in_set": [
+     0,
+     0
+    ],
+    "layer_key": "toy_block_0"
+   },
+   "B": {
+    "file": "prop_toy_block_B.png",
+    "size": [
+     60,
+     59
+    ],
+    "anchor": [
+     30,
+     46
+    ],
+    "offset_px_in_set": [
+     0,
+     0
+    ],
+    "layer_key": "toy_block_0"
+   },
+   "footprint_world": {
+    "x": [
+     -0.55,
+     0.55
+    ],
+    "y": [
+     -0.55,
+     0.55
+    ],
+    "frame": "prop-local, ori A; ori B: (x, y) -> (-y, -x)"
+   },
+   "origin_world_in_set": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "note": "a big soft-cornered wooden toy block with rose inset panels"
+  }
+ }
+}

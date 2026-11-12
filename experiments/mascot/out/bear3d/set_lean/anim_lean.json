@@ -1,0 +1,290 @@
+{
+ "note": "Stage lean: lean_in -> lean (loop) -> lean_out. Stage B format: each frame is the whole set (block + bear) baked on one canvas; anchor = pixel of the set origin (the block footprint centre on the floor). Hand-off: lean_in frame 0 and lean_out's last frame are pixel-identical to the props-only frame + the Stage A idle sprite (frame 0) at handoff.px from the anchor. Joins: lean_in last = lean 0 = lean_out 0. lean: face layers from face_lean.json set_clips (patch in face_patch_dir).",
+ "sorting": "As Stage B: outside these clips draw the props (prop_*.png or props_<set>_<ori>.png) and the free bear as separate sprites sorted by floor depth; from the first to the last frame of a set clip hide them and draw the baked frame at the set anchor. face_patch_dir is per ori.",
+ "stage": "lean",
+ "fps": 12,
+ "ppu": 40.0719967705934,
+ "sets": {
+  "lean": {
+   "A": {
+    "frame_w": 108,
+    "frame_h": 116,
+    "anchor": [
+     75,
+     78
+    ],
+    "props_frame": "props_lean_A.png",
+    "orientation": "the bear faces SE, the toy block on its left (NE on screen)"
+   },
+   "B": {
+    "frame_w": 108,
+    "frame_h": 116,
+    "anchor": [
+     32,
+     78
+    ],
+    "props_frame": "props_lean_B.png",
+    "orientation": "mirror of A: the bear faces SW, the block on its right (NW on screen)"
+   }
+  }
+ },
+ "anims": {
+  "lean_in": {
+   "set": "lean",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 10,
+   "files": {
+    "A": "lean_in_A.png",
+    "B": "lean_in_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      0.0882,
+      -1.6058
+     ],
+     "px": [
+      -43,
+      24
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "start",
+     "frame": 0,
+     "pos_world": [
+      1.6058,
+      -0.0882
+     ],
+     "px": [
+      43,
+      24
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "lean"
+  },
+  "lean": {
+   "set": "lean",
+   "loop": true,
+   "fps": 12,
+   "frames_n": 30,
+   "files": {
+    "A": "lean_A.png",
+    "B": "lean_B.png"
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "lean or lean_out",
+   "face_patch_dir": {
+    "A": "SE",
+    "B": "SW"
+   }
+  },
+  "lean_out": {
+   "set": "lean",
+   "loop": false,
+   "fps": 12,
+   "frames_n": 10,
+   "files": {
+    "A": "lean_out_A.png",
+    "B": "lean_out_B.png"
+   },
+   "handoff": {
+    "A": {
+     "at": "end",
+     "frame": 9,
+     "pos_world": [
+      0.0882,
+      -1.6058
+     ],
+     "px": [
+      -43,
+      24
+     ],
+     "facing": "SE",
+     "yaw_deg": 90.0,
+     "stage_a_sprite": "../anim/idle_SE.png#0"
+    },
+    "B": {
+     "at": "end",
+     "frame": 9,
+     "pos_world": [
+      1.6058,
+      -0.0882
+     ],
+     "px": [
+      43,
+      24
+     ],
+     "facing": "SW",
+     "yaw_deg": 0.0,
+     "stage_a_sprite": "../anim/idle_SW.png#0"
+    }
+   },
+   "frames": [
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    },
+    {
+     "dur": 83
+    }
+   ],
+   "next": "Stage A idle (rest pose, same spot and facing)"
+  }
+ }
+}

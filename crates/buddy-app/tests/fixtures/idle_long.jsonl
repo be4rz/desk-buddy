@@ -1,0 +1,5 @@
+// Design #idle-brain AC18: an hour of idle life on the bear, nobody talking to it. Replay Items, at_ms after launch.
+// The pool's long entries (read, nap, the desk visit) each hold 20–300 s when picked: for_s / hold_s draws, whole loops.
+// The user is at the keyboard throughout (no away-nap), November, 10:00.
+{"at_ms": 0, "senses": {"user_idle_ms": 0, "month": 11}}
+{"at_ms": 1800000, "senses": {"user_idle_ms": 0}}

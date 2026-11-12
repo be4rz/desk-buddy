@@ -142,6 +142,10 @@ fn main() {
         pack.behaviors.keys().filter(|b| pack.available(b)).count(),
         dir.display()
     );
+    // wired entries whose art has not landed yet: one line, then they are skipped (`#hidden-log`)
+    if let Some(line) = pack.waiting_line() {
+        eprintln!("[buddy] {line}");
+    }
     let icon = tray::icon(&art);
     let t0 = Instant::now();
     let dnd_action = driver::dnd_action(settings.dnd.action);

@@ -312,10 +312,10 @@ fn bad_json_reports_line_and_column() {
 #[test]
 fn unsupported_pack_version() {
     let t = TempPack::new("version");
-    t.edit(|v| v["pack_version"] = json!(2));
+    t.edit(|v| v["pack_version"] = json!(3));
     let e = t.load().unwrap_err();
-    assert!(matches!(e, PackError::Version { found: 2, supported: 1, .. }), "{e:?}");
-    assert!(err_line(&e).ends_with("pack.json: pack_version 2 is not supported (this build reads 1)"));
+    assert!(matches!(e, PackError::Version { found: 3, supported: 2, .. }), "{e:?}");
+    assert!(err_line(&e).ends_with("pack.json: pack_version 3 is not supported (this build reads 2)"));
 }
 
 #[test]
@@ -431,7 +431,7 @@ fn relabelled_one_shot_turn_is_not_replayed() {
 fn errors_are_distinct() {
     let t = TempPack::new("distinct");
     let mut msgs = vec![pack::load(Path::new("/nonexistent")).unwrap_err().to_string()];
-    for edit in [json!(2), json!("x")] {
+    for edit in [json!(3), json!("x")] {
         t.edit(|v| v["pack_version"] = edit.clone());
         msgs.push(t.load().unwrap_err().to_string());
     }
@@ -587,7 +587,7 @@ fn picks(b: &mut Brain, n: usize) -> Vec<String> {
 }
 
 fn pick_now(b: &mut Brain, t: u64) -> String {
-    let p = b.pick(t);
+    let p = b.pick(t).0;
     b.last_start.insert(p.clone(), t);
     p
 }
@@ -596,7 +596,7 @@ fn pick_now(b: &mut Brain, t: u64) -> String {
 fn cooldown_blocks_a_pick() {
     let mut b = brain_with(bear(), 1);
     b.last_start.insert("dash".into(), 10_000);
-    let w = |b: &Brain, t| b.pool_weights(t).into_iter().find(|(n, _)| n == "dash").unwrap().1;
+    let w = |b: &Brain, t| b._named_weights(t).into_iter().find(|(n, _)| n == "dash").unwrap().1;
     assert_eq!(w(&b, 10_000 + 89_000), 0.0);
     assert!(w(&b, 10_000 + 90_000) > 0.0);
     for t in 0..2000 {
@@ -635,13 +635,13 @@ fn energy_shifts_wander_and_dash_share() {
 fn quiet_hours_pool_is_nap_and_rest() {
     let mut b = brain_with(no_cooldowns(&bear()), 2);
     b.quiet = true;
-    let w = b.pool_weights(0);
+    let w = b._named_weights(0);
     assert!(w.iter().all(|(n, _)| n == "nap" || n == "rest"));
     let nap = w.iter().find(|(n, _)| n == "nap").unwrap().1;
     let normal = {
         b.quiet = false;
         // past the warm-up, which keeps nap out at first (quiet hours excepted)
-        b.pool_weights(WARM).into_iter().find(|(n, _)| n == "nap").unwrap().1
+        b._named_weights(WARM).into_iter().find(|(n, _)| n == "nap").unwrap().1
     };
     assert!((nap - 4.0 * normal).abs() < 1e-9);
     b.quiet = true;
@@ -803,7 +803,7 @@ fn sense_at(minutes: u16, idle: u64) -> Senses {
 fn warmup_keeps_nap_out_of_the_first_minutes() {
     let p = no_cooldowns(&bear());
     let b = brain_with(p.clone(), 1);
-    let nap = |b: &Brain, t| b.pool_weights(t).into_iter().find(|(n, _)| n == "nap").unwrap().1;
+    let nap = |b: &Brain, t| b._named_weights(t).into_iter().find(|(n, _)| n == "nap").unwrap().1;
     assert_eq!(nap(&b, 0), 0.0);
     assert_eq!(nap(&b, 179_999), 0.0);
     assert!(nap(&b, 180_000) > 0.0);
@@ -854,9 +854,9 @@ fn quiet_pool_and_warmup_come_from_pack_data() {
     });
     let p = t.load().unwrap();
     let mut b = brain_with(no_cooldowns(&p), 3);
-    assert!(b.pool_weights(0).iter().find(|(n, _)| n == "nap").unwrap().1 > 0.0, "no warm-up");
+    assert!(b._named_weights(0).iter().find(|(n, _)| n == "nap").unwrap().1 > 0.0, "no warm-up");
     b.quiet = true;
-    let w = b.pool_weights(0);
+    let w = b._named_weights(0);
     assert_eq!(w.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["rest", "read"]);
     // bad data is a load error
     t.edit(|v| v["quiet_hours"] = json!({ "pool": ["snooze"] }));
@@ -1047,10 +1047,10 @@ fn r7_a_same_ms_tick_repeats_no_cut_or_motion() {
 
 #[test]
 fn r10_the_pick_fallback_never_returns_weight_zero() {
-    let w = vec![("rest".to_string(), 1.0), ("nap".to_string(), 0.0)];
-    assert_eq!(weighted(&w, 1.0), "rest", "x at the total");
-    assert_eq!(weighted(&w, 0.5), "rest");
-    assert_eq!(weighted(&[("a".to_string(), 0.0)], 0.0), "rest");
+    let w = vec![(0, 1.0), (1, 0.0)];
+    assert_eq!(weighted(&w, 1.0), 0, "x at the total");
+    assert_eq!(weighted(&w, 0.5), 0);
+    assert_eq!(weighted(&[(3, 0.0), (4, 2.0), (5, 0.0)], 9.0), 4, "the last that can play");
 }
 
 #[test]
@@ -1347,7 +1347,7 @@ fn unknown_names_are_errors_before_the_gates() {
     b.senses(&Senses { dnd_toggle: true, ..Senses::default() }, 0);
     let r = do_(&mut b, "juggle", None, 10);
     assert_eq!(r.error.as_deref(), Some("unknown activity \"juggle\""));
-    assert_eq!(r.have, Some(vec!["read".to_string(), "nap".to_string(), "computer".to_string()]));
+    assert_eq!(r.have, Some(vec!["read".to_string(), "nap".to_string(), "computer".to_string(), "lean".to_string()]));
     assert_eq!(r.status, None);
     let r = b.body(&BodyReq::Emote { name: "explode".into() }, 10);
     assert_eq!(r.error.as_deref(), Some("unknown emote \"explode\""));
@@ -1359,11 +1359,16 @@ fn stop_list_and_the_duration_cap() {
     let mut b = brain_with(bear(), 16);
     let l = b.body(&BodyReq::List, 0);
     let v = serde_json::to_value(&l).unwrap();
-    assert_eq!(v["activities"][0], json!({ "name": "read", "about": "sit down and read a book", "kind": "pastime", "defaultForS": 120 }));
+    assert_eq!(v["activities"][0], json!({ "name": "read", "about": "sit down and read a book", "kind": "pastime", "defaultForS": 120, "group": "pastime" }));
     assert_eq!(v["activities"][1]["name"], "nap");
-    assert_eq!(v["emotes"][0], json!({ "name": "wave", "about": "a happy little wave" }));
+    assert_eq!(v["activities"].as_array().unwrap().len(), 4, "entries waiting for art are left out");
+    assert_eq!(v["emotes"][0], json!({ "name": "wave", "about": "a happy little wave", "group": "gesture" }));
+    assert_eq!(v["emotes"].as_array().unwrap().len(), 5);
     assert_eq!((v["maxForS"].clone(), v["playing"].clone()), (json!(1800), Value::Null));
-    assert!(l.message.starts_with("Activities:\n  read      sit down and read a book (default 2m)\n  nap       get into bed and sleep (default 2m)\n  computer  sit at the desk and use the computer (default 2m)\nEmotes:\n  wave      a happy little wave"), "{}", l.message);
+    assert_eq!(
+        l.message,
+        "Activities\n  pastime  read      sit down and read a book              (2m default, 30m max)\n  pastime  nap       get into bed and sleep\n  posture  lean      lean on the wall and rest\n  work     computer  sit at the desk and use the computer  starts at once\nEmotes\n  gesture  wave      a happy little wave\n  gesture  nod       a small yes\n  gesture  shake     a sad little no\n  gesture  jump      a bounce of joy\n  gesture  spin      a twirl"
+    );
     let r = do_(&mut b, "nap", Some(9_000_000), 10);
     assert_eq!(r.for_ms, Some(1_800_000), "capped at max_for_s");
     let v = serde_json::to_value(b.body(&BodyReq::List, 20)).unwrap();
@@ -1442,7 +1447,7 @@ fn a_pack_can_add_activities_and_emotes_with_odd_names() {
     assert_eq!(p.body.activity_names(), ["dance"]);
     let text = body::prompt_text(&p).unwrap();
     assert!(text.contains("- dance: a happy little dance\n") && text.contains("- tea-time: a cheer for tea\n"), "{text}");
-    assert!(text.contains("last 1m unless you give --for, at most 10m;"), "{text}");
+    assert!(text.contains("They last 1m unless you give --for, at most 10m."), "{text}");
     let mut b = brain_with(p, 21);
     let r = do_(&mut b, "dance", None, 0);
     assert_eq!((r.status, r.message.as_str()), (Some(Status::Started), "Started dancing for 1m."));
@@ -1545,13 +1550,15 @@ You are the bear on the user's screen. When the user asks you to do something
 physical, do it with these commands instead of describing it in words. Never say
 you did something the command's reply says did not happen.
 
-Activities (`buddy mascot do <name> [--for 5m]`; they start after your reply and
-last 2m unless you give --for, at most 30m; `buddy mascot stop` ends one):
+Activities (`buddy mascot do <name> [--for 5m]`). Work activities start at once; the
+others start after your reply. They last 2m unless you give --for, at most 30m.
+`buddy mascot stop` ends one.
 - read: sit down and read a book
 - nap: get into bed and sleep
-- computer: sit at the desk and use the computer
+- lean: lean on the wall and rest
+- computer (work): sit at the desk and use the computer
 
-Emotes (`buddy mascot emote <name>`; a short gesture during your reply):
+Gestures (`buddy mascot emote <name>`; a short gesture during your reply):
 - wave: a happy little wave
 - nod: a small yes
 - shake: a sad little no
@@ -1559,7 +1566,7 @@ Emotes (`buddy mascot emote <name>`; a short gesture during your reply):
 - spin: a twirl
 
 When to use them:
-- If the user asks you to read, nap, computer or do another listed activity, run the command
+- If the user asks you to read, nap, lean, computer or do another listed activity, run the command
   and say so briefly.
 - Use at most one emote per reply, only when it matches the mood. Most short
   replies need none.
@@ -1668,7 +1675,7 @@ fn listen_pack() -> Arc<PackMeta> {
 /// The listen fixture with only `rest` in its idle pool, so idle never turns on its own.
 fn listen_pack_still_idle() -> Arc<PackMeta> {
     let mut p = (*listen_pack()).clone();
-    p.idle_pool.retain(|e| e.behavior == "rest");
+    p.idle_pool.retain(|e| e.name() == "rest");
     Arc::new(p)
 }
 
@@ -1908,13 +1915,15 @@ fn ac6_face_v2_without_the_anim_l_source_still_loads() {
     assert_eq!(face.patch_dir("listen", Dir::E), Dir::E, "its patch_dirs went with it");
     assert_eq!(p.resolve(Intent::Listen), p.resolve(Intent::Idle), "listen falls back to rest");
 
-    // nothing optional missing: an unknown face clip is still an error
+    // nothing optional missing (the wired-but-waiting A4 sources dropped too): an unknown face clip is still an error
+    let art = p.art_root.clone();
     t.edit(|v| {
         let srcs: Vec<Value> = v["sources"]
             .as_array()
             .unwrap()
             .iter()
             .filter(|s| !s["path"].as_str().unwrap().contains("anim_l") && !s["path"].as_str().unwrap().contains("anim_d"))
+            .filter(|s| art.join(s["path"].as_str().unwrap()).exists())
             .cloned()
             .collect();
         v["sources"] = json!(srcs);
@@ -2022,4 +2031,38 @@ fn leftover_a_repeated_do_only_moves_the_deadline() {
     assert!(until < 68_000);
     let shows = run_until(&mut b, 8000, 20_000);
     assert!(shows.iter().all(|(_, s)| s.clip == "read"), "no restart: {:?}", segments(&shows));
+}
+
+/// Stage kit clip stages write root motion twice (`frames[i].root_px[dir]` and the clip's `root_px[dir]`, `#anim-stage`):
+/// ONE track. The loader takes the per-frame form once and never adds the clip-level copy.
+#[test]
+fn a_kit_clip_with_both_root_px_forms_moves_once() {
+    let t = TempPack::new("rootpx");
+    let dir = t.root.join("art/anim_k");
+    std::fs::create_dir_all(&dir).unwrap();
+    let dirs = ["S", "SE", "E", "NE", "N", "NW", "W", "SW"];
+    let steps: Vec<[f32; 2]> = vec![[1.0, 0.0], [2.0, 1.0], [0.0, -1.0], [0.0, 0.0]];
+    let mut files = serde_json::Map::new();
+    let mut clip_px = serde_json::Map::new();
+    for d in dirs {
+        let f = format!("fid_k_{d}.png");
+        std::fs::write(dir.join(&f), b"").unwrap();
+        files.insert(d.into(), json!(f));
+        clip_px.insert(d.into(), json!(steps));
+    }
+    let frames: Vec<Value> = steps.iter().map(|s| {
+        let per: serde_json::Map<String, Value> = dirs.iter().map(|d| (d.to_string(), json!(s))).collect();
+        json!({ "dur": 83, "root_world": 0.0, "root_px": per })
+    }).collect();
+    let anims = json!({ "fid_k": { "loop": false, "fps": 12, "frame_w": 84, "frame_h": 123, "anchor": [42, 107], "frames_n": 4,
+        "files": files, "frames": frames, "root_px": clip_px, "root_track": [[0.0, 0.0]], "face": "none", "handoff": {"start": "idle0", "end": "idle0"} } });
+    // as make_stage.py writes it: Stage A's `directions` map, plus root_track and the informational keys
+    let yaws: serde_json::Map<String, Value> = dirs.iter().enumerate().map(|(i, d)| (d.to_string(), json!({ "yaw_deg": (45 + 45 * i) % 360 }))).collect();
+    let j = json!({ "note": "kit", "stage": "k", "fps": 12, "ppu": 40.07, "directions": yaws, "anims": anims });
+    std::fs::write(dir.join("anim_k.json"), j.to_string()).unwrap();
+    t.edit(|p| p["sources"].as_array_mut().unwrap().push(json!({"kind": "stage_a", "path": "anim_k/anim_k.json"})));
+    let p = t.load().unwrap_or_else(|e| panic!("{e}"));
+    for d in Dir::ALL {
+        assert_eq!(p.clips["fid_k"].dirs[&d].root_px, steps, "{d:?}");
+    }
 }

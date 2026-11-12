@@ -1,0 +1,7 @@
+{
+ "id": "lean",
+ "kind": "set",
+ "module": "set_lean",
+ "verify": "verify_lean.py",
+ "note": "Stage lean: the bear leans on a big toy block (lean_in -> lean loop -> lean_out), ori A faces SE, ori B (3D mirror) faces SW. Output out/bear3d/set_lean/."
+}

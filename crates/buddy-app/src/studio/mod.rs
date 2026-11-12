@@ -244,7 +244,7 @@ fn audit_of(pack: Arc<PackMeta>, args: &Value) -> Result<Value, String> {
     }
     let seed = args["seed"].as_u64().unwrap_or(3);
     let a = audit::run(pack.clone(), &audit::quiet(minutes, seed)).map_err(|e| e.0)?;
-    let order: Vec<String> = pack.idle_pool.iter().map(|e| e.behavior.clone()).collect();
+    let order: Vec<String> = pack.idle_pool.iter().map(|e| e.name().to_string()).collect();
     let (w, h, px) = audit::chart(&a, &order);
     let mut v = serde_json::to_value(&a).unwrap_or(Value::Null);
     v["chart"] = json!(format!("data:image/png;base64,{}", ::studio::base64(&::studio::png_bytes(w, h, &px))));

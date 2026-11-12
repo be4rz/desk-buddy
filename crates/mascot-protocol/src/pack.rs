@@ -7,8 +7,10 @@ use std::collections::BTreeMap;
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize, Serializer};
 
-/// The only `pack_version` this build reads.
-pub const PACK_VERSION: u32 = 1;
+/// The newest `pack_version` this build reads (it reads 1 and 2; every v2 key is optional, `#pack-v2`).
+pub const PACK_VERSION: u32 = 2;
+/// The oldest `pack_version` this build reads.
+pub const PACK_VERSION_MIN: u32 = 1;
 
 /// `mascots/<id>/pack.json`.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -42,6 +44,8 @@ pub enum SourceKind {
     StageA,
     StageB,
     Face,
+    /// v2 (`#face-part`): a stage's face placements, merged into the face table.
+    FacePart,
 }
 
 /// One art source, relative to `art_root`.
@@ -214,6 +218,20 @@ mod ordered {
     }
 }
 
+fn one_or_many<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<String>>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Raw {
+        One(String),
+        Many(Vec<String>),
+    }
+    // `"plays": null` stays None, as it did before the one-or-many form
+    Ok(Option::<Raw>::deserialize(d).map_err(|_| de::Error::custom("plays must be a name or a list of names"))?.map(|r| match r {
+        Raw::One(s) => vec![s],
+        Raw::Many(v) => v,
+    }))
+}
+
 fn default_for_s() -> u64 {
     120
 }
@@ -227,7 +245,8 @@ fn max_for_s() -> u64 {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct BodyEntry {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// A behavior name or a fallback chain (`"read"` or `["read", "rest"]`).
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "one_or_many")]
     pub plays: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub intent: Option<String>,
@@ -236,8 +255,13 @@ pub struct BodyEntry {
     /// Activities: `pastime` (default) or `work`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<ActivityKind>,
-    #[serde(default)]
+    /// Optional: fidgets, moves, reactions and surprises are listed by name only.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub about: String,
+    /// v2 (`#pack-body-groups`): activities `pastime | play | posture | work`, emotes
+    /// `gesture | fidget | move | reaction | surprise`. Missing = pastime / gesture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -272,13 +296,15 @@ pub struct StepDef {
 }
 
 /// How often a step plays: absent = once, `[lo, hi]` = uniform inclusive,
-/// `"hold"` = until the intent ends.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+/// `"hold"` = until the intent ends, v2 `{"for_s": [a, b]}` = whole loops until a seeded
+/// draw d in [a, b] seconds has elapsed (`#pack-loops`).
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub enum Loops {
     #[default]
     Once,
     Range(u32, u32),
     Hold,
+    For { for_s: [f64; 2] },
 }
 
 impl Loops {
@@ -293,6 +319,12 @@ impl Serialize for Loops {
             Loops::Once => [1u32, 1].serialize(s),
             Loops::Range(lo, hi) => [lo, hi].serialize(s),
             Loops::Hold => s.serialize_str("hold"),
+            Loops::For { for_s } => {
+                use serde::ser::SerializeMap;
+                let mut m = s.serialize_map(Some(1))?;
+                m.serialize_entry("for_s", &for_s)?;
+                m.end()
+            }
         }
     }
 }
@@ -304,25 +336,139 @@ impl<'de> Deserialize<'de> for Loops {
         enum Raw {
             Range([u32; 2]),
             Word(String),
+            For { for_s: [f64; 2] },
         }
-        match Raw::deserialize(d).map_err(|_| de::Error::custom("loops must be [lo, hi] or \"hold\""))? {
+        const WANT: &str = "loops must be [lo, hi], \"hold\" or {\"for_s\": [a, b]}";
+        match Raw::deserialize(d).map_err(|_| de::Error::custom(WANT))? {
+            Raw::For { for_s: [a, b] } if a.is_finite() && b.is_finite() && 0.0 < a && a <= b => Ok(Loops::For { for_s: [a, b] }),
+            Raw::For { .. } => Err(de::Error::custom("loops {\"for_s\": [a, b]} needs 0 < a <= b")),
             Raw::Range([lo, hi]) if 1 <= lo && lo <= hi => Ok(Loops::Range(lo, hi)),
             Raw::Range(_) => Err(de::Error::custom("loops [lo, hi] needs 1 <= lo <= hi")),
             Raw::Word(w) if w == "hold" => Ok(Loops::Hold),
-            Raw::Word(w) => Err(de::Error::custom(format!("loops must be [lo, hi] or \"hold\", not {w:?}"))),
+            Raw::Word(w) => Err(de::Error::custom(format!("{WANT}, not {w:?}"))),
         }
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+/// One idle pool entry (`#pack-pool`). Exactly one of `behavior` / `station` (the loader checks).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct PoolEntry {
-    pub behavior: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behavior: Option<String>,
+    /// v2: a `stations` key, entered from idle and held for `hold_s`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub station: Option<String>,
+    /// v2, station only and required with it: the seated hold, seconds `[lo, hi]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hold_s: Option<[f64; 2]>,
     pub weight: f64,
     #[serde(default)]
     pub cooldown_s: f64,
     /// Temperament trait → k (effective weight × max(0, 1 + k·(2·trait − 1))).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub traits: BTreeMap<String, f64>,
+    /// v2: the variety class (`max_moves_in_row` counts `move`).
+    #[serde(default, skip_serializing_if = "PoolKind::is_other")]
+    pub kind: PoolKind,
+    /// v2: the variety key; default = the behavior or station name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    /// v2: when the entry is eligible.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub when: Option<When>,
+}
+
+impl PoolEntry {
+    /// The behavior or station it names (a station visit is traced as that behavior).
+    pub fn name(&self) -> &str {
+        self.behavior.as_deref().or(self.station.as_deref()).unwrap_or("")
+    }
+
+    /// The variety key.
+    pub fn group_key(&self) -> &str {
+        self.group.as_deref().unwrap_or_else(|| self.name())
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default, Hash, PartialOrd, Ord)]
+#[serde(rename_all = "lowercase")]
+pub enum PoolKind {
+    Stand,
+    Fidget,
+    Posture,
+    Move,
+    Long,
+    Rare,
+    React,
+    #[default]
+    Other,
+}
+
+impl PoolKind {
+    pub const ALL: [PoolKind; 8] =
+        [PoolKind::Stand, PoolKind::Fidget, PoolKind::Posture, PoolKind::Move, PoolKind::Long, PoolKind::Rare, PoolKind::React, PoolKind::Other];
+
+    pub fn is_other(&self) -> bool {
+        *self == PoolKind::Other
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PoolKind::Stand => "stand",
+            PoolKind::Fidget => "fidget",
+            PoolKind::Posture => "posture",
+            PoolKind::Move => "move",
+            PoolKind::Long => "long",
+            PoolKind::Rare => "rare",
+            PoolKind::React => "react",
+            PoolKind::Other => "other",
+        }
+    }
+}
+
+/// `"when"` of a pool entry: every given condition must hold.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+#[serde(deny_unknown_fields)]
+pub struct When {
+    /// `[from, to)` local hours, wrapping past midnight.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hours: Option<[u8; 2]>,
+    /// 1..=12.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub months: Option<Vec<u8>>,
+    /// A `#pack-contexts` name (evaluated from p4; until then such an entry is never eligible).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
+}
+
+/// `pack.json` `"variety"` (`#pack-variety`): the hard idle rules, applied to each entry's group.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Variety {
+    #[serde(default)]
+    pub no_repeat: bool,
+    #[serde(default)]
+    pub window: u32,
+    /// 0 = off.
+    #[serde(default)]
+    pub max_in_window: u32,
+    /// 0 = off.
+    #[serde(default)]
+    pub max_moves_in_row: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub targets: Option<Targets>,
+}
+
+/// What `buddy studio audit` checks a run of at least `minutes` against.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Targets {
+    pub minutes: f64,
+    pub stand_max: f64,
+    pub stand_move_max: f64,
+    pub distinct_min: u32,
+    pub share_max: f64,
+    pub long_len_s: [f64; 2],
 }
 
 /// Recent-pick memory of the idle scheduler.
@@ -365,6 +511,15 @@ pub struct StageAClip {
     /// A turn clip (`#anim-l`): +1 = one 45° step counter-clockwise in `Dir` order, −1 = clockwise.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub turn_steps: i8,
+    /// `#anim-stage` (optional, informational): `layers | baked | none`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub face: Option<String>,
+    /// `#anim-stage` (optional): per-dir per-frame `[dx, dy]` panel motion.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_px: Option<serde_json::Value>,
+    /// `#anim-stage` (optional, informational): `{"start": "idle0", "end": "idle0"}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handoff: Option<serde_json::Value>,
 }
 
 fn is_zero(v: &i8) -> bool {
@@ -537,6 +692,47 @@ pub struct FaceFile {
     pub set_clips: BTreeMap<String, BTreeMap<String, SetFaceDef>>,
 }
 
+/// `<stage>/face_<id>.json` (`#face-part`): one stage's face placements, merged into face.json's table.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct FacePartFile {
+    /// The stage kit writes `face_part` (stagekit.py `write_face_part`); `face_part_version` is the prototype's name.
+    #[serde(alias = "face_part")]
+    pub face_part_version: u32,
+    #[serde(default)]
+    pub stage: String,
+    /// Clip → dir → `{"patch": "S", "eyes": [...], "mouth": [...]}`; the stage kit leaves `patch` out and
+    /// names turned heads in `patch_dirs` instead (a dir without either draws its own patches).
+    #[serde(default)]
+    pub clips: BTreeMap<String, BTreeMap<String, PartFaceDef>>,
+    /// Clip → body dir → patch dir (the stage kit's form of `patch`).
+    #[serde(default)]
+    pub patch_dirs: BTreeMap<String, BTreeMap<String, String>>,
+    #[serde(default)]
+    pub set_clips: BTreeMap<String, BTreeMap<String, SetFaceDef>>,
+    /// Clip → frames that must equal the expected frame exactly (verify_face.py only; the loader ignores it).
+    #[serde(default)]
+    pub exact: BTreeMap<String, ExactFrames>,
+}
+
+/// A face part's `exact` frames for one clip: the prototype's flat list, or the stage kit's
+/// dir / ori → list (`{"lean": {"A": [0, 1], "B": [0, 1]}}`).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(untagged)]
+pub enum ExactFrames {
+    All(Vec<u32>),
+    By(BTreeMap<String, Vec<u32>>),
+}
+
+/// One dir of a face part's free clip: [`SetFaceDef`] with an optional `patch`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct PartFaceDef {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub patch: Option<String>,
+    /// Slot → top-left per frame.
+    #[serde(flatten)]
+    pub slots: BTreeMap<String, Vec<[i32; 2]>>,
+}
+
 /// One ori of a set clip's face (`#face-v2` `set_clips`): `{"patch": "S", "eyes": [...], "mouth": [...]}`.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct SetFaceDef {
@@ -562,6 +758,17 @@ pub struct LayerDef {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plays_takes_one_many_or_null() {
+        let e: BodyEntry = serde_json::from_str(r#"{"plays":"read"}"#).unwrap();
+        assert_eq!(e.plays, Some(vec!["read".to_string()]));
+        let e: BodyEntry = serde_json::from_str(r#"{"plays":["read","rest"]}"#).unwrap();
+        assert_eq!(e.plays, Some(vec!["read".to_string(), "rest".to_string()]));
+        let e: BodyEntry = serde_json::from_str(r#"{"plays":null,"intent":"happy"}"#).unwrap();
+        assert_eq!(e.plays, None);
+        assert!(serde_json::from_str::<BodyEntry>(r#"{"plays":3}"#).is_err());
+    }
 
     #[test]
     fn loops_parse_all_forms() {

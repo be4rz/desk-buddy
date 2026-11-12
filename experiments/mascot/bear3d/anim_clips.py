@@ -316,3 +316,100 @@ def build_l(V, PXZ):
 
 
 ORDER_L = [f'{c}_{v}' for v in LISTEN_VARIANTS for c in ('listen_in', 'listen', 'listen_out')] + ['turn_ccw', 'turn_cw']
+
+
+# ---------------------------------------------------------------------- Stage K (the stage kit, rig_bear.py --stage k)
+# Stage L's parameters plus (all 0 / 'closed' at rest; stage modules import REST_K / PK and never edit this file):
+#   hp     head pitch, deg: the whole round head mass (Stage L's twist band, never a neck) nods; + = looks down
+#   hr     head roll, deg: tilt; + = the top of the head towards the bear's left (+X), like roll
+#   mouth  'closed' | 'open' | 'wide' | 'tongue': which of the existing mouth meshes shows ('tongue' = wide + tongue)
+#   tx, ty_px  root position (world units, bear-local): tx to the bear's left (+X), ty_px forward (the facing).
+#          Never moves a bone: it is the root track (Stage A's walk method); the frames stay in place and the anim JSON's
+#          root_px moves the sprite (make_stage.py). Like Stage A, a planted foot must slide back by fL/fR in the pose.
+# Objects from a module's add_objects(kit) add vis_<name> (1 shown, 0 hidden) and ox_/oy_/oz_<name> (world offsets)
+# and orz_<name> (deg about the socket) to the pose; their rest values come from the kit, not from REST_K.
+# Limits, asserted at keying time (check_k): |hp| <= HP_MAX, |hr| <= HR_MAX, |earL|, |earR| <= EAR_MAX, |sz - 1| <=
+# SQUASH_MAX, roll = lean = 0 (tilts are head-only), mouth one of MOUTHS, hb whole pixels. A 'layers' clip (face
+# patches drawn at run time) also keeps hp = hr = 0, mouth closed and blink 1 on every frame.
+HP_MAX, HR_MAX, EAR_MAX, SQUASH_MAX = 20.0, 15.0, 15.0, 0.06
+MOUTHS = ('closed', 'open', 'wide', 'tongue')
+REST_K = dict(REST_L, hp=0.0, hr=0.0, mouth='closed', tx=0.0, ty_px=0.0)
+PK = list(REST_K)
+HOLD_K = ('mouth',)            # held (not eased) between keys; vis_* too
+
+
+def KP(**kw):
+    """a Stage K pose: REST_K with these parameters changed."""
+    d = dict(REST_K); d.update(kw); return d
+
+
+def check_k(q, where='', face=None):
+    """assert the Stage K limits on one pose (raises AssertionError naming where)."""
+    w = f'{where}: ' if where else ''
+    assert abs(q['hp']) <= HP_MAX + 1e-9, f'{w}hp {q["hp"]} beyond +-{HP_MAX} (head pitch limit)'
+    assert abs(q['hr']) <= HR_MAX + 1e-9, f'{w}hr {q["hr"]} beyond +-{HR_MAX} (head roll limit)'
+    for e in ('earL', 'earR'):
+        assert abs(q[e]) <= EAR_MAX + 1e-9, f'{w}{e} {q[e]} beyond +-{EAR_MAX}'
+    assert abs(q['sz'] - 1.0) <= SQUASH_MAX + 1e-9, f'{w}sz {q["sz"]}: squash/stretch beyond {SQUASH_MAX:.0%}'
+    assert q['roll'] == 0 and q['lean'] == 0, f'{w}roll/lean must stay 0 in Stage K (tilt the head with hp/hr)'
+    assert q['mouth'] in MOUTHS, f'{w}mouth {q["mouth"]!r} not one of {MOUTHS}'
+    assert float(q['hb']) == int(q['hb']), f'{w}hb {q["hb"]} is not whole pixels'
+    for k, v in q.items():
+        if k.startswith('vis_'): assert v in (0, 1), f'{w}{k} {v} must be 0 or 1'
+    if face == 'layers':
+        assert q['hp'] == 0 and q['hr'] == 0, f'{w}a layers clip keeps hp = hr = 0 (use face "baked" to tilt the head)'
+        assert q['mouth'] == 'closed' and q['blink'] == 1.0, f'{w}a layers clip renders mouth closed, eyes open'
+
+
+def expand_k(n, keys, rest=None):
+    """keys [(frame, {param: value}), ...] -> n poses. A key gives only the params it changes from rest (REST_K or
+    the stage's rest with its object params); numeric params ease (smoothstep) from one key to the next, mouth and
+    vis_* hold the previous key's value. Frames before the first key / after the last hold it. hb is rounded to
+    whole pixels."""
+    rest = dict(REST_K if rest is None else rest)
+    keys = sorted(keys, key=lambda k: k[0])
+    assert keys and all(0 <= f < n for f, _ in keys), f'keys {[f for f, _ in keys]} outside 0..{n - 1}'
+    assert len({f for f, _ in keys}) == len(keys), 'two keys on one frame'
+    full = []
+    for f, kv in keys:
+        bad = set(kv) - set(rest)
+        assert not bad, f'key at frame {f}: unknown params {sorted(bad)}'
+        full.append((f, dict(rest, **kv)))
+    out = []
+    for i in range(n):
+        if i <= full[0][0]: out.append(dict(full[0][1])); continue
+        if i >= full[-1][0]: out.append(dict(full[-1][1])); continue
+        j = max(k for k in range(len(full)) if full[k][0] <= i)
+        (f0, a), (f1, b) = full[j], full[j + 1]
+        t = ease((i - f0) / (f1 - f0)); q = {}
+        for p in rest:
+            if p in HOLD_K or p.startswith('vis_') or isinstance(a[p], str): q[p] = a[p]
+            else: q[p] = a[p] + (b[p] - a[p]) * t
+        q['hb'] = int(round(q['hb']))
+        out.append(q)
+    return out
+
+
+def clip_poses(c, rest=None):
+    """a clips module's clip dict -> its per-frame poses ("poses" given as is, else expand_k of "keys")."""
+    rest = REST_K if rest is None else rest
+    if 'poses' in c:
+        ps = [dict(rest, **q) for q in c['poses']]
+        assert len(ps) == c['frames'], f'{len(ps)} poses for {c["frames"]} frames'
+        return ps
+    return expand_k(c['frames'], c['keys'], rest)
+
+
+MIRROR_PAIRS = (('armL', 'armR'), ('spL', 'spR'), ('fL', 'fR'), ('hL', 'hR'), ('earL', 'earR'))
+
+
+def mirror_k(q, st, mirror_state=None):
+    """ori B of a set frame: the 3D mirror (x, y) -> (-y, -x) of an ori A frame, as a pose of the real (unmirrored)
+    bear (clips_d.mirror_pose + the Stage K head roll and root track). mirror_state(st) mirrors the prop state."""
+    m = dict(q)
+    for a, b in MIRROR_PAIRS: m[a], m[b] = q[b], q[a]
+    if 'X' in q: m['X'], m['Y'] = -q['Y'], -q['X']
+    if 'yaw' in q: m['yaw'] = (90.0 - q['yaw']) % 360
+    for k in ('hy', 'clY', 'ty', 'hr', 'tx'):
+        if k in q: m[k] = -q[k]
+    return m, (mirror_state(st) if mirror_state else dict(st))

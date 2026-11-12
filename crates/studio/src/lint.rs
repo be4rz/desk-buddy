@@ -10,6 +10,7 @@
 //!   the fraction, so this is allowed; it is listed so a reviewer knows).
 //! - `missing_dir`: a behavior's free clip lacks a direction `idle` has (error without `S`). The
 //!   listen behavior's clips need only the front dirs (the brain turns the bear first, §1.4).
+//!   Not checked in a v2 pack with turn clips (every behavior turns first, `#flow-front`).
 //! - `turn_clips_missing` (warn): the pack's `turning` block names a clip it doesn't have, or one
 //!   without every direction `idle` has; those facing changes snap.
 //! - `frame_count`: a strip isn't `frames_n` frames of `frame_w x frame_h`.
@@ -23,6 +24,17 @@
 //!   isn't the set clip's frame count or the patch dir has no layer for a slot.
 //! - `bad_body`: a problem in pack.json's `body` block (activities and emotes), one per entry, from
 //!   `pack::load_report` (the app refuses such a pack).
+//! - `waits_for_art` (warn, v2 `#hidden-log`): a wired idle entry, emote or activity whose art is not
+//!   loaded yet (an optional source not rendered); it is skipped until it lands. Carries `name`,
+//!   `clip` and, when the pack's layout names it, `source`.
+//! - `v2_key_in_v1_pack`: a v2-only key (`variety`, `idle_pool[i].kind`, `loops: {"for_s"}`, a body
+//!   `group`, a `face_part` source, …) in a pack that says `pack_version: 1`.
+//! - `canvas_too_big`: a clip frame above 176×160 (the panel's canvas).
+//! - `dir_set_mismatch`: the free (non-turn) clips of one loaded behavior are drawn in different
+//!   direction sets (the brain turns once, before the first clip, `#flow-front`; in a v2 pack a
+//!   behavior whose later clip lacks a dir of the first one is not available, so it never plays).
+//! - Bad station entries in `idle_pool` (unknown station, `hold_s` missing or reversed, `hold_s` on a
+//!   behavior entry) are load errors (`cannot load mascot …`), so lint never sees them.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -33,7 +45,7 @@ use serde::Serialize;
 /// Issues of one code reported per file at most; the rest are summed in one more line.
 const PER_FILE: usize = 20;
 
-#[derive(Serialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Clone, Debug, PartialEq, Default)]
 pub struct Issue {
     pub code: &'static str,
     pub severity: &'static str,
@@ -45,6 +57,13 @@ pub struct Issue {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub y: Option<usize>,
     pub detail: String,
+    /// `waits_for_art`: the entry, the clip it waits for, and the source that would bring it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clip: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq, Default)]
@@ -68,7 +87,7 @@ impl Report {
 }
 
 fn issue(code: &'static str, severity: &'static str, file: &str, detail: String) -> Issue {
-    Issue { code, severity, file: file.into(), frame: None, x: None, y: None, detail }
+    Issue { code, severity, file: file.into(), detail, ..Issue::default() }
 }
 
 /// Every `#rrggbb` in a palette JSON (any nesting), as RGB.
@@ -101,7 +120,7 @@ pub fn check_pixels(file: &str, w: usize, h: usize, rgba: &[u8], fw: usize, pale
         let n = counts.entry(code).or_default();
         *n += 1;
         if *n <= PER_FILE {
-            r.push(Issue { code, severity: "error", file: file.into(), frame: Some(x / fw), x: Some(x % fw), y: Some(y), detail });
+            r.push(Issue { code, severity: "error", file: file.into(), frame: Some(x / fw), x: Some(x % fw), y: Some(y), detail, ..Issue::default() });
         }
     };
     let a = |x: usize, y: usize| rgba[(y * w + x) * 4 + 3];
@@ -157,6 +176,50 @@ pub fn lint(pack: &PackMeta) -> Report {
     let mut r = Report { pack: pack.id.clone(), ..Default::default() };
     for b in &pack.body_issues {
         r.push(issue("bad_body", "error", "pack.json", b.clone()));
+    }
+    if pack.pack_version < 2 {
+        for k in &pack.v2_keys {
+            r.push(issue("v2_key_in_v1_pack", "error", "pack.json", format!("{k} needs \"pack_version\": 2")));
+        }
+    }
+    for w in pack.waiting() {
+        let detail = format!("{} {}: waits for clip {}{}", w.kind, w.name, w.clip, w.source.as_ref().map(|s| format!(" ({s})")).unwrap_or_default());
+        r.push(Issue {
+            code: "waits_for_art",
+            severity: "warn",
+            file: w.source.clone().unwrap_or_else(|| "pack.json".into()),
+            detail,
+            name: Some(w.name.clone()),
+            clip: Some(w.clip.clone()),
+            source: w.source.clone(),
+            ..Issue::default()
+        });
+    }
+    for (cname, c) in &pack.clips {
+        if c.frame_w > 176 || c.frame_h > 160 {
+            r.push(issue("canvas_too_big", "error", cname, format!("{}x{} is above the 176x160 canvas", c.frame_w, c.frame_h)));
+        }
+    }
+    let turns: BTreeSet<&str> = pack.turning.iter().flat_map(|t| [t.ccw.as_str(), t.cw.as_str()]).collect();
+    for (bname, b) in &pack.behaviors {
+        // every clip loaded (the brain then refuses to play it: a later clip lacking a dir the first has)
+        if b.set.is_some() || b.seq.iter().any(|st| !pack.clips.contains_key(&st.clip)) {
+            continue;
+        }
+        let sets: Vec<(&str, Vec<Dir>)> = b
+            .seq
+            .iter()
+            .filter(|st| !turns.contains(st.clip.as_str()))
+            .filter_map(|st| pack.clips.get(&st.clip).map(|c| (st.clip.as_str(), c.dirs.keys().copied().collect())))
+            .collect();
+        if let Some((first, dirs)) = sets.first() {
+            for (other, d) in &sets[1..] {
+                if d != dirs {
+                    let names = |v: &[Dir]| v.iter().map(|d| d.as_str()).collect::<Vec<_>>().join(" ");
+                    r.push(issue("dir_set_mismatch", "error", other, format!("behavior {bname}: {other} has {} but {first} has {}", names(d), names(dirs))));
+                }
+            }
+        }
     }
     // palettes
     let mut pal = BTreeSet::new();
@@ -245,7 +308,10 @@ pub fn lint(pack: &PackMeta) -> Report {
     } else {
         pack.behaviors.get(lb).map(|b| b.seq.iter().map(|s| s.clip.as_str()).collect()).unwrap_or_default()
     };
-    for cname in &used {
+    // v2 with turn clips: the brain turns to a dir the first clip has (`#flow-front`), so front-only
+    // or back-only behaviors are fine; dir_set_mismatch checks them instead
+    let turns_first = pack.pack_version >= 2 && pack.turning.as_ref().is_some_and(|t| pack.clips.contains_key(&t.ccw) && pack.clips.contains_key(&t.cw));
+    for cname in used.iter().filter(|_| !turns_first) {
         let Some(c) = pack.clips.get(cname) else { continue };
         if c.set.is_some() {
             continue;

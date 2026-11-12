@@ -24,6 +24,23 @@
 #     whole-pixel bob (hb); the arms follow the twist by ARM_W of it so they stay on the belly, under the face;
 #   - the root bone takes the turn yaw ty (turn_ccw / turn_cw);
 #   - clips_l.json face_px includes the head bob.
+#
+# --stage k (the stage kit, run_stage.sh) = everything --stage l does, keying a stage module's clips instead:
+#   Blender -b bear.blend -P rig_bear.py -- --stage k --clips-module <clips_<id>|set_<id>> --out <scratch>.blend
+#           --clips <scratch>/clips_<id>.json
+#   The module is imported from $BEAR3D_STAGES (if set), then this directory. Pose = anim_clips.REST_K (Stage L +
+#   hp, hr, mouth, tx, ty_px; limits asserted by anim_clips.check_k) + the module's object params. Additions:
+#   - hp / hr pitch and roll the head bone about the head pivot (the whole round head mass, Stage L's twist band;
+#     no neck); the face, eyes, mouth, beanie and ears follow rigidly, the arms by ARM_W;
+#   - mouth: mouth (closed), mouth_open, mouth_wide and tongue each ride their own bone under 'mouth'; the hidden ones
+#     are tucked inside the body and scaled to 1e-6 by the action (no render flags);
+#   - paw sockets paw_L / paw_R (children of the arms, at the mitten tips) and the module's add_objects(kit) hook:
+#     toy objects in a 'Kit' collection (never 'Bear', so render_anim.py's pixel fit is unchanged), each on its own
+#     bone obj_<name> under its socket (root, head, paw_L, paw_R), shown by vis_<name> = 1, offset by ox_/oy_/oz_<name>
+#     (world units) and orz_<name> (deg);
+#   - tx / ty_px are the root track (bear-local, world units), written to the clips json, never to a bone;
+#   - a set module (SETS) is keyed once per orientation as actions '<clip>@A' and '<clip>@B' (B = anim_clips.mirror_k),
+#     the placement X, Y, Z, yaw on the root bone (render_set.py only picks action + frame).
 
 # Armature 'Rig' (child of BearRoot). Every part is rigidly parented to one bone, so there is no skin
 # weighting and the face decals can't smear:
@@ -51,12 +68,21 @@ import anim_clips
 argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
 def arg(n, d=None): return argv[argv.index(n) + 1] if n in argv else d
 STAGE = arg('--stage', 'a')
-if STAGE not in ('a', 'c', 'l'): raise SystemExit(f'rig_bear.py: --stage must be a, c or l, not {STAGE!r}')
-STAGE_C = STAGE in ('c', 'l')   # Stage L builds on the Stage C rig
-STAGE_L = STAGE == 'l'
-if STAGE_L and not arg('--out'): raise SystemExit('rig_bear.py: --stage l needs --out (the Stage L rig is scratch)')
+if STAGE not in ('a', 'c', 'l', 'k'): raise SystemExit(f'rig_bear.py: --stage must be a, c, l or k, not {STAGE!r}')
+STAGE_C = STAGE in ('c', 'l', 'k')   # Stage L builds on the Stage C rig, Stage K on Stage L
+STAGE_L = STAGE in ('l', 'k')
+STAGE_K = STAGE == 'k'
+if STAGE_L and not arg('--out'): raise SystemExit(f'rig_bear.py: --stage {STAGE} needs --out (the rig is scratch)')
+if STAGE_K and not (arg('--clips') and arg('--clips-module')):
+    raise SystemExit('rig_bear.py: --stage k needs --clips-module <module> and --clips <scratch json>')
 OUT = arg('--out', os.path.join(HERE, 'bear_rig_c.blend' if STAGE_C else 'bear_rig.blend'))
-CLIPS_JSON = arg('--clips', os.path.join(HERE, {'a': 'clips.json', 'c': 'clips_c.json', 'l': 'clips_l.json'}[STAGE]))
+CLIPS_JSON = arg('--clips') or os.path.join(HERE, {'a': 'clips.json', 'c': 'clips_c.json', 'l': 'clips_l.json'}[STAGE])
+if STAGE_K:
+    import importlib
+    for d in [HERE] + ([os.environ['BEAR3D_STAGES']] if os.environ.get('BEAR3D_STAGES') else []):
+        sys.path.insert(0, d)                    # $BEAR3D_STAGES first, then this directory
+    MOD = importlib.import_module(arg('--clips-module'))
+    IS_SET = hasattr(MOD, 'SETS')
 FIT, FIT_YAW = 105.0, 112.5   # the cute 100 px renders: same pixel size
 
 sc = bpy.context.scene; vl = bpy.context.view_layer
@@ -153,6 +179,61 @@ if STAGE_L:
     del BIND['body']                  # skinned below, not bone-parented
     print(f'HEAD twist z {HEAD_Z0}..{HEAD_Z1}, arms follow {ARM_W:.2f}')
 
+if STAGE_K:
+    # ---------------------------------------------------------------- Stage K: mouth bones, paw sockets, kit objects
+    MOUTH_MESH = {'closed': ['mouth'], 'open': ['mouth_open'], 'wide': ['mouth_wide'], 'tongue': ['mouth_wide', 'tongue']}
+    for n in ('mouth', 'mouth_open', 'mouth_wide', 'tongue'):
+        O[n].hide_render = False                 # shown / hidden by the action (bone scale), not by render flags
+        PIV['m_' + n] = PIV['mouth'].copy(); PARENT['m_' + n] = 'mouth'; BIND[n] = 'm_' + n
+    TUCK = Vector((0, 0.10, 0.80))               # inside the body: where hidden meshes go (scaled to 1e-6)
+    for s_ in ('L', 'R'):
+        av = wverts(O['arm_' + s_]); sh = PIV['arm_' + s_]
+        PIV['paw_' + s_] = Vector(av[np.argmax(((av - np.array(sh)) ** 2).sum(1))]); PARENT['paw_' + s_] = 'arm_' + s_
+    kcol = bpy.data.collections.new('Kit'); sc.collection.children.link(kcol)
+    KIT_OBJ = {}
+
+    class Kit:
+        """what add_objects(kit) gets: PIV (socket pivots), PXZ, V, PPU, and solid()."""
+        PIV = {k: tuple(PIV[k]) for k in ('root', 'head', 'paw_L', 'paw_R')}
+        def __init__(self): self.PPU, self.PXZ, self.V = PPU, PXZ, V
+        def solid(self, name, socket, shapes, pid):
+            """a toy object on bone obj_<name> under socket: shapes = [(centre, radii, e1, e2[, opts])], superellipsoids
+            in socket-relative world axes (rest pose), pass index pid (>= 50, the module's PARTS table)."""
+            assert socket in self.PIV, f'socket {socket!r}: one of {sorted(self.PIV)}'
+            assert pid >= 50, f'{name}: kit pass ids start at 50 (bear 1-21, Stage B 22-37, Stage D 38-48)'
+            assert name not in KIT_OBJ, f'object {name} added twice'
+            bm = bmesh.new(); p0 = PIV[socket]
+            for sh_ in shapes:
+                c, r, e1, e2 = sh_[:4]; o_ = sh_[4] if len(sh_) > 4 else {}
+                superq_bm(bm, (p0.x + c[0], p0.y + c[1], p0.z + c[2]), r, e1, e2, **o_)
+            bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+            me = bpy.data.meshes.new(name); bm.to_mesh(me); bm.free()
+            for f_ in me.polygons: f_.use_smooth = True
+            m = bpy.data.materials.new('MK_' + name); m.pass_index = pid; me.materials.append(m)
+            ob = bpy.data.objects.new(name, me); kcol.objects.link(ob); ob.pass_index = pid
+            PIV['obj_' + name] = p0.copy(); PARENT['obj_' + name] = socket; BIND[name] = 'obj_' + name
+            KIT_OBJ[name] = dict(socket=socket, pid=pid)
+            return ob
+
+    def sgp(w, e): return math.copysign(abs(w) ** e, w)
+    def superq_bm(bm, center, radii, e1, e2, board=False, segs=40, rings=20):   # as render_d.py
+        tmp = bmesh.new(); bmesh.ops.create_uvsphere(tmp, u_segments=segs, v_segments=rings, radius=1.0)
+        for vx in tmp.verts:
+            x, y, z = vx.co; phi = math.asin(max(-1.0, min(1.0, z))); th = math.atan2(y, x)
+            X = sgp(math.cos(phi), e1) * sgp(math.cos(th), e2); Y = sgp(math.cos(phi), e1) * sgp(math.sin(th), e2)
+            Z = sgp(math.sin(phi), e1)
+            if board: X, Y, Z = X, -Z, Y
+            vx.co = (center[0] + X * radii[0], center[1] + Y * radii[1], center[2] + Z * radii[2])
+        me = bpy.data.meshes.new('tmp'); tmp.to_mesh(me); tmp.free(); bm.from_mesh(me); bpy.data.meshes.remove(me)
+
+    if hasattr(MOD, 'add_objects'):
+        assert not IS_SET, 'a set module carries props (build_props), not held objects'
+        MOD.add_objects(Kit())
+    OBJ_PARAMS = {}
+    for n in KIT_OBJ: OBJ_PARAMS.update({f'vis_{n}': 0, f'ox_{n}': 0.0, f'oy_{n}': 0.0, f'oz_{n}': 0.0, f'orz_{n}': 0.0})
+    REST_FULL = {**anim_clips.REST_K, **OBJ_PARAMS, **getattr(MOD, 'REST', {})}
+    if IS_SET: REST_FULL = dict(REST_FULL, X=0.0, Y=0.0, Z=0.0, yaw=0.0)
+
 # ------------------------------------------------------------------ armature
 arm = bpy.data.armatures.new('RigData'); rig = bpy.data.objects.new('Rig', arm); col.objects.link(rig)
 rig.parent = root; rig.matrix_world = Matrix.Identity(4)
@@ -226,7 +307,35 @@ def deltas(q):
         for n in ('face', 'eyes', 'mouth', 'hat', 'ear_L', 'ear_R'): D[n] = Rh @ D[n]
         for n in ('arm_L', 'arm_R'): D[n] = Matrix.Rotation(math.radians(q['hy'] * ARM_W), 4, 'Z') @ D[n]
         D['root'] = Matrix.Rotation(math.radians(q['ty']), 4, 'Z')
+    if STAGE_K:
+        tilt = about(PIV['head'], rx(q['hp']) @ ry(q['hr']))
+        Rk = Matrix.Translation((0, 0, q['hb'] * PXZ)) @ Matrix.Rotation(math.radians(q['hy']), 4, 'Z') @ tilt
+        D['head'] = D['body'] @ Rk
+        for n in ('face', 'eyes', 'mouth', 'hat', 'ear_L', 'ear_R'): D[n] = Rk @ Rh.inverted() @ D[n]
+        aw = Matrix.Rotation(math.radians(q['hy'] * ARM_W), 4, 'Z') @ about(PIV['head'], rx(q['hp'] * ARM_W) @ ry(q['hr'] * ARM_W))
+        for n in ('arm_L', 'arm_R'): D[n] = aw @ Matrix.Rotation(math.radians(q['hy'] * ARM_W), 4, 'Z').inverted() @ D[n]
+        if IS_SET:
+            D['root'] = Matrix.Translation((q['X'], q['Y'], q['Z'])) @ rz(q['yaw']) @ D['root']
+        def hidden(n):
+            # tucked inside the (placed) body and scaled to 1e-6, as a delta under n's posed parent
+            return chain(PARENT[n], D).inverted() @ D['root'] @ Matrix.Translation(TUCK) @ scl(1e-6, 1e-6, 1e-6) @ Matrix.Translation(-PIV[n])
+        shown = set(MOUTH_MESH[q['mouth']])
+        for n in ('mouth', 'mouth_open', 'mouth_wide', 'tongue'):
+            D['m_' + n] = Matrix.Identity(4) if n in shown else hidden('m_' + n)
+        for s_ in ('L', 'R'): D['paw_' + s_] = Matrix.Identity(4)
+        for n in KIT_OBJ:
+            if q[f'vis_{n}']:
+                D['obj_' + n] = Matrix.Translation((q[f'ox_{n}'], q[f'oy_{n}'], q[f'oz_{n}'])) @ about(PIV['obj_' + n], rz(q[f'orz_{n}']))
+            else:
+                D['obj_' + n] = hidden('obj_' + n)
     return D
+
+def rz(d): return Matrix.Rotation(math.radians(d), 4, 'Z')
+def chain(b, D):
+    """the posed armature-space delta of bone b (its parents' deltas, then its own)."""
+    M = Matrix.Identity(4)
+    while b: M = D[b] @ M; b = PARENT[b]
+    return M
 
 def face_px(p, D, hb=0):
     """Stage C: whole screen pixels the body's motion lifts point p (the eyes / mouth shift up by this);
@@ -255,10 +364,49 @@ if STAGE_C:
     ORDER = anim_clips.ORDER_C + ['idle_ref', 'face_rest', 'face_eyes_closed']
 if STAGE_L:
     clips = anim_clips.build_l(V, PXZ); ORDER = anim_clips.ORDER_L
+if STAGE_K:
+    # the module's clips -> per-frame poses (checked), keyed as one action each ('<clip>@<ori>' for sets)
+    KMETA = dict(stage='k', module=arg('--clips-module'), kind='set' if IS_SET else 'clips',
+                 kit=dict(bear_meshes=sorted(o.name for o in meshes), objects=KIT_OBJ,
+                          parts=getattr(MOD, 'PARTS', {})))
+    clips = {}; ORDER = []
+    if IS_SET:
+        KMETA['sets'] = {}
+        for sname, sdef in MOD.SETS.items():
+            g = MOD.geometry(sname, PPU, PXZ)
+            built = MOD.build(sname, g)
+            KMETA['sets'][sname] = dict(geom=g, handoff=MOD.handoff(sname, g), clips=list(sdef['clips']))
+            for cname in sdef['clips']:
+                fr_ = built[cname]
+                assert len(fr_) == sdef['counts'][cname], (cname, len(fr_), sdef['counts'][cname])
+                for ori in ('A', 'B'):
+                    qs, sts = [], []
+                    for i, (q, st) in enumerate(fr_):
+                        q = dict(REST_FULL, **q)
+                        if ori == 'B': q, st = anim_clips.mirror_k(q, st, getattr(MOD, 'mirror_state', None))
+                        anim_clips.check_k(q, f'{cname}@{ori} frame {i}', 'layers' if cname in sdef.get('face', []) else None)
+                        qs.append(q); sts.append(st)
+                    a = f'{cname}@{ori}'; ORDER.append(a)
+                    clips[a] = dict(loop=cname in sdef['loop'], root=[0.0] * len(qs), next_root=0.0, frames=qs,
+                                    extra=dict(set=sname, clip=cname, ori=ori, st=sts))
+    else:
+        cdefs = MOD.build(V, PXZ) if hasattr(MOD, 'build') else MOD.CLIPS
+        for cname in MOD.ORDER:
+            c = cdefs[cname]
+            qs = anim_clips.clip_poses(c, REST_FULL)
+            for i, q in enumerate(qs): anim_clips.check_k(q, f'{cname} frame {i}', c.get('face'))
+            after = c.get('root_after', [qs[-1]['tx'], qs[-1]['ty_px']])
+            track = [[q['tx'], q['ty_px']] for q in qs] + [list(after)]
+            ORDER.append(cname)
+            clips[cname] = dict(loop=c.get('loop', False), root=[0.0] * len(qs), next_root=0.0, frames=qs,
+                                extra=dict(root_track=track, face=c.get('face'), dirs=c.get('dirs'),
+                                           handoff=c.get('handoff'), patch_dir=c.get('patch_dir'),
+                                           frame=c.get('frame'), anchor=c.get('anchor')))
 sc.render.fps = anim_clips.FPS; sc.render.fps_base = 1
 bpy.context.preferences.edit.keyframe_new_interpolation_type = 'CONSTANT'
 rig.animation_data_create()
 meta = dict(fps=anim_clips.FPS, ppu=PPU, V=V, PXZ=PXZ, order=ORDER, clips={})
+if STAGE_K: meta = dict(KMETA, **meta)
 for cname in ORDER:
     c = clips[cname]
     act = bpy.data.actions.new(cname); act.use_fake_user = True
@@ -272,6 +420,7 @@ for cname in ORDER:
                                 poses=c['frames'])
     if STAGE_C:
         meta['clips'][cname]['face_px'] = {s: [face_px(PIV[s], deltas(q), q.get('hb', 0)) for q in c['frames']] for s in ('eyes', 'mouth')}
+    if STAGE_K: meta['clips'][cname].update(c['extra'])
     print('CLIP', cname, len(c['frames']), 'frames')
 rig.animation_data.action = bpy.data.actions[ORDER[0]]
 sc.frame_start, sc.frame_end = 0, meta['clips'][ORDER[0]]['n'] - 1

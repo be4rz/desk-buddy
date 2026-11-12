@@ -130,7 +130,7 @@ fn the_desk_pack_has_a_playable_desk_and_the_bear_waits_for_its_art() {
     let sit = &p.clips["desk_sit"];
     assert_eq!((sit.handoff[&Ori::A].facing, sit.handoff[&Ori::B].facing), (Dir::SE, Dir::SW));
 
-    assert!(crate::body::prompt_text(&p).unwrap().contains("- computer: sit at the desk and use the computer"));
+    assert!(crate::body::prompt_text(&p).unwrap().contains("- computer (work): sit at the desk and use the computer"));
 
     // declared, but anim_d not there (the desk pack minus its anim_d source): never plays, isn't offered
     let (_t, r) = desk_temp("no-art", drop_anim_d, |_| {});
@@ -591,4 +591,109 @@ fn a_computer_activity_naming_an_unknown_station_fails_the_app_and_the_studio_re
     let p = pack::load_report(&t.0).unwrap_or_else(|e| panic!("{e}"));
     assert!(p.body.activity("computer").is_none() && p.available("desk"));
     assert!(p.body_issues.iter().any(|i| i.contains("unknown station garage")), "{:?}", p.body_issues);
+}
+
+/// `#face-part` merge (p1 integration): a part in the stage kit's own shape (`face_part`, `exact` by ori) places a
+/// set clip moved out of face.json; the same clip in face.json and a part, or in two parts, is a load error.
+#[test]
+fn face_parts_merge_and_refuse_a_clip_placed_twice() {
+    use serde_json::{json, Value};
+    fn part_root(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("mascot-desk-{}-{tag}", std::process::id()))
+    }
+    fn write_part(tag: &str, file: &str, clip: &Value) -> PathBuf {
+        let path = part_root(tag).join(file);
+        let part = json!({"face_part": 1, "stage": "x", "anim": "anim_d.json", "note": "test",
+                          "set_clips": {"desk_ask": clip}, "exact": {"desk_ask": {"A": [0], "B": [0]}}});
+        std::fs::write(&path, part.to_string()).unwrap();
+        path
+    }
+    fn add_part(p: &mut Value, path: PathBuf) {
+        p["sources"].as_array_mut().unwrap().push(json!({"kind": "face_part", "path": path}));
+    }
+    let src = repo().join("crates/mascot-core/tests/fixtures/desk_pack/face/face.json");
+    let face: Value = serde_json::from_str(&std::fs::read_to_string(src).unwrap()).unwrap();
+    let ask = face["set_clips"]["desk_ask"].clone();
+
+    // moved into a part: loads, and the part's placement is the one drawn
+    let a = ask.clone();
+    let (_t, r) = desk_temp("part-ok", |p| { let f = write_part("part-ok", "face_x.json", &a); add_part(p, f) },
+                            |f| { f["set_clips"].as_object_mut().unwrap().remove("desk_ask"); });
+    let meta = r.unwrap_or_else(|e| panic!("{e}"));
+    let face = meta.face.as_ref().expect("face");
+    assert!(face.set_face("desk_ask", Ori::A).is_some() && face.set_face("desk_ask", Ori::B).is_some());
+
+    // the prototype's flat `exact` and `face_part_version` read too
+    let a = ask.clone();
+    let (_t, r) = desk_temp("part-proto", |p| {
+        let path = part_root("part-proto").join("face_x.json");
+        std::fs::write(&path, json!({"face_part_version": 1, "set_clips": {"desk_ask": a}, "exact": {"desk_ask": [0]}}).to_string()).unwrap();
+        add_part(p, path)
+    }, |f| { f["set_clips"].as_object_mut().unwrap().remove("desk_ask"); });
+    r.unwrap_or_else(|e| panic!("{e}"));
+
+    // in face.json and a part
+    let a = ask.clone();
+    let e = load_err("part-dup-face", |p| { let f = write_part("part-dup-face", "face_x.json", &a); add_part(p, f) }, |_| {});
+    assert!(e.contains("set_clips: desk_ask is placed by face.json or another part"), "{e}");
+
+    // in two parts
+    let a = ask.clone();
+    let e = load_err("part-dup-parts", |p| {
+        let f1 = write_part("part-dup-parts", "face_x.json", &a);
+        let f2 = write_part("part-dup-parts", "face_y.json", &a);
+        add_part(p, f1);
+        add_part(p, f2);
+    }, |f| { f["set_clips"].as_object_mut().unwrap().remove("desk_ask"); });
+    assert!(e.contains("set_clips: desk_ask is placed by face.json or another part"), "{e}");
+
+    // an unknown part version is refused
+    let a = ask;
+    let e = load_err("part-v9", |p| {
+        let path = part_root("part-v9").join("face_x.json");
+        std::fs::write(&path, json!({"face_part": 9, "set_clips": {"desk_ask": a}}).to_string()).unwrap();
+        add_part(p, path)
+    }, |f| { f["set_clips"].as_object_mut().unwrap().remove("desk_ask"); });
+    assert!(e.contains("face_part_version 9 is not supported"), "{e}");
+}
+
+/// A clip stage's face part as `make_stage.py` writes it: `clips` entries without `patch`, turned heads in a
+/// top-level `patch_dirs`. `listen` moved out of face.json draws the same patches; a clip name claimed as a free
+/// clip by one source and a set clip by another is refused.
+#[test]
+fn a_clip_stage_face_part_keeps_its_patch_dirs() {
+    use serde_json::{json, Value};
+    let src = repo().join("crates/mascot-core/tests/fixtures/desk_pack/face/face.json");
+    let face: Value = serde_json::from_str(&std::fs::read_to_string(src).unwrap()).unwrap();
+    let listen = face["clips"]["listen"].clone();
+    let pd = face["patch_dirs"]["listen"].clone();
+    let root = |tag: &str| std::env::temp_dir().join(format!("mascot-desk-{}-{tag}", std::process::id()));
+    let part = |tag: &str, body: Value| {
+        let path = root(tag).join("face_l2.json");
+        std::fs::write(&path, body.to_string()).unwrap();
+        json!({"kind": "face_part", "path": path})
+    };
+    let kit = json!({"face_part": 1, "stage": "l2", "anim": "anim_l2.json", "clips": {"listen": listen},
+                     "patch_dirs": {"listen": pd}, "exact": {"listen": {"S": [0], "SE": [0]}}});
+    let k = kit.clone();
+    let (_t, r) = desk_temp("clip-part", |p| { let s = part("clip-part", k); p["sources"].as_array_mut().unwrap().push(s) },
+                            |f| { f["clips"].as_object_mut().unwrap().remove("listen"); f["patch_dirs"].as_object_mut().unwrap().remove("listen"); });
+    let meta = r.unwrap_or_else(|e| panic!("{e}"));
+    let face = meta.face.as_ref().expect("face");
+    assert!(face.covers("listen", Dir::E));
+    assert_eq!((face.patch_dir("listen", Dir::E), face.patch_dir("listen", Dir::SW), face.patch_dir("listen", Dir::S)), (Dir::SE, Dir::S, Dir::S));
+
+    // a patch_dirs entry for a clip the part does not place
+    let mut bad = kit.clone();
+    bad["patch_dirs"]["talk"] = json!({"S": "S"});
+    let e = load_err("clip-part-pd", |p| { let s = part("clip-part-pd", bad); p["sources"].as_array_mut().unwrap().push(s) },
+                     |f| { f["clips"].as_object_mut().unwrap().remove("listen"); f["patch_dirs"].as_object_mut().unwrap().remove("listen"); });
+    assert!(e.contains("patch_dirs: talk is not in this part's clips"), "{e}");
+
+    // desk_talk is a set clip in face.json: a part placing it as a free clip is refused
+    let mut clash = kit;
+    clash["clips"] = json!({"desk_talk": clash["clips"]["listen"].clone()});
+    clash["patch_dirs"] = json!({});
+    let e = load_err("clip-part-kind", |p| { let s = part("clip-part-kind", clash); p["sources"].as_array_mut().unwrap().push(s) }, |_| {});
+    assert!(e.contains("clips: desk_talk is placed by face.json or another part"), "{e}");
 }

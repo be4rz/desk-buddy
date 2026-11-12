@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 
-use mascot_protocol::pack::{ActivityKind, Loops, Temperament, Turn};
+use mascot_protocol::pack::{ActivityKind, Loops, PoolEntry, PoolKind, Temperament, Turn, When};
 use mascot_protocol::{Emotion, MascotEvent, WorkKind};
 use serde::{Deserialize, Serialize};
 
@@ -183,6 +183,9 @@ pub struct Senses {
     pub windows: Vec<WinRect>,
     pub panel: Option<WinRect>,
     pub now_playing: Option<NowPlaying>,
+    /// Local month 1..=12 for idle entries' `when.months`; 0 = unknown (those entries wait).
+    #[serde(default)]
+    pub month: u8,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -369,12 +372,43 @@ struct Play {
     turns: VecDeque<i8>,
     /// A set behavior's ori, drawn when its turns are done (no set is shown while turning).
     ori_after: Option<Ori>,
+    /// A `{"for_s": [a, b]}` step: it ends at the first loop end at or after this time.
+    for_until: Option<u64>,
 }
 
 impl Play {
     fn new(intent: Intent, behavior: &str, t: u64) -> Play {
-        Play { intent, behavior: behavior.to_string(), step: 0, left: Some(1), frame: 0, frame_start: t, ori: None, pinned: false, drag: false, turns: VecDeque::new(), ori_after: None }
+        Play {
+            intent,
+            behavior: behavior.to_string(),
+            step: 0,
+            left: Some(1),
+            frame: 0,
+            frame_start: t,
+            ori: None,
+            pinned: false,
+            drag: false,
+            turns: VecDeque::new(),
+            ori_after: None,
+            for_until: None,
+        }
     }
+}
+
+/// A station visit picked from the idle pool (`#pack-pool` `{"station": …, "hold_s": …}`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct IdleSeat {
+    /// The seeded draw from `hold_s`.
+    hold_ms: u64,
+    /// When the loop role ends: set the first time it starts.
+    until: Option<u64>,
+}
+
+/// One idle pick, for the variety rules (`#pack-variety`).
+#[derive(Clone, Debug, PartialEq)]
+struct Picked {
+    group: String,
+    kind: PoolKind,
 }
 
 pub struct Brain {
@@ -423,6 +457,13 @@ pub struct Brain {
     // idle scheduler memory
     last_start: BTreeMap<String, u64>,
     recent: VecDeque<String>,
+    /// The last idle picks, newest first (the variety window).
+    picks: VecDeque<Picked>,
+    /// A station visit from the idle pool, while it lasts.
+    idle_seat: Option<IdleSeat>,
+    /// The latest local time and month (`when`).
+    local: LocalTime,
+    month: u8,
     // timers
     blink_at: u64,
     blink_first: u64,
@@ -475,6 +516,10 @@ impl Brain {
             started: now_ms,
             last_start: BTreeMap::new(),
             recent: VecDeque::new(),
+            picks: VecDeque::new(),
+            idle_seat: None,
+            local: LocalTime::default(),
+            month: 0,
             blink_at: u64::MAX,
             blink_first: now_ms,
             closed_until: None,
@@ -625,6 +670,8 @@ impl Brain {
         let t = self.t;
         self.panel = s.panel;
         self.windows.clone_from(&s.windows);
+        self.local = s.local;
+        self.month = s.month;
         self.follow_edge(t, s.fullscreen);
         self.quiet = s.quiet_hours;
         self.dnd = s.fullscreen || s.screen_share || s.dnd_toggle;
@@ -864,6 +911,11 @@ impl Brain {
         self.trace.as_slices().0
     }
 
+    /// Takes every trace line so far (the trace keeps only the last 256): a long audit drains it as it runs.
+    pub fn drain_trace(&mut self) -> Vec<TraceLine> {
+        self.trace.drain(..).collect()
+    }
+
     // ---- time ----
 
     fn advance(&mut self, now: u64) {
@@ -965,7 +1017,7 @@ impl Brain {
             let to_station = self.play.intent != Intent::Idle && self.station_to_enter().is_some_and(|s| s != self.play.behavior);
             let release = self.desired() != self.play.intent || (self.play.drag && !self.dragging) || once_cue || to_station;
             let step_done = match &mut self.play.left {
-                None => release,
+                None => release || self.play.for_until.is_some_and(|u| t >= u),
                 Some(n) => {
                     *n = n.saturating_sub(1);
                     *n == 0
@@ -989,7 +1041,8 @@ impl Brain {
         let want = self.desired();
         // idle plays any pool pick (`behavior_for(Idle)` is only its rest), so for idle only the intent counts
         let moved_on = if self.in_station() {
-            self.station_to_enter() != Some(self.play.behavior.as_str())
+            let idle_visit = self.idle_seat.is_some() && want == Intent::Idle;
+            !idle_visit && self.station_to_enter() != Some(self.play.behavior.as_str())
         } else {
             want != self.play.intent || (want != Intent::Idle && self.behavior_for(want) != self.play.behavior)
         };
@@ -1021,6 +1074,10 @@ impl Brain {
         if !std::mem::replace(&mut self.turn_open, true) {
             self.tally = Tally { open_at: t, tools: 0, blocked: false };
             self.seat_hold = None;
+        }
+        // seated from idle: the turn takes the seat over (a seated turn, `#pack-pool`)
+        if self.idle_seat.take().is_some() {
+            self.note(t, "seat", "turn".into());
         }
     }
 
@@ -1078,7 +1135,9 @@ impl Brain {
             Some(_) => None,
             None if self.turn_open => Some(Role::Loop),
             None if self.seat_hold.is_some_and(|h| self.t < h) => Some(Role::Talk),
-            None => self.activity.as_ref().is_some_and(|a| a.until.is_some() && a.behavior == self.play.behavior).then_some(Role::Loop),
+            None if self.activity.as_ref().is_some_and(|a| a.until.is_some() && a.behavior == self.play.behavior) => Some(Role::Loop),
+            // an idle visit types until its hold_s draw is over
+            None => self.idle_seat.is_some_and(|s| s.until.is_none_or(|u| self.t < u)).then_some(Role::Loop),
         }
     }
 
@@ -1140,6 +1199,7 @@ impl Brain {
             self.play.intent = want;
             if want == Intent::Do && !self.step_loops().is_once() {
                 self.play.left = None; // an activity holds its loop until it ends
+                self.play.for_until = None; // its deadline, not an idle for_s draw
             }
             return;
         }
@@ -1214,18 +1274,34 @@ impl Brain {
         self.play.step = step;
         self.play.frame = 0;
         self.play.frame_start = t;
+        self.play.for_until = None;
         if self.in_station() {
             let role = Role::from_step(step).unwrap_or(Role::Loop);
             self.play.intent = Self::role_intent(role);
+            if let Some(seat) = self.idle_seat.as_mut() {
+                // an idle visit is idle, except where it faces the person (a click's listen)
+                if !matches!(role, Role::Talk | Role::Ask | Role::Listen) {
+                    self.play.intent = Intent::Idle;
+                }
+                if role == Role::Loop && seat.until.is_none() {
+                    seat.until = Some(t + seat.hold_ms);
+                }
+            }
             self.play.left = if role.holds() { None } else { Some(1) };
             return;
         }
         self.play.left = match loops {
             Loops::Once => Some(1),
-            // an activity holds its loop until it ends
+            // an activity holds its loop until it ends (its deadline wins over for_s)
             _ if self.play.intent == Intent::Do && self.activity.is_some() => None,
             Loops::Range(lo, hi) => Some(self.rng.range(lo, hi)),
             Loops::Hold => None,
+            Loops::For { for_s: [a, b] } => {
+                let d = a + self.rng.unit() * (b - a);
+                self.play.for_until = Some(t + (d * 1000.0).round() as u64);
+                self.note(t, "hold", format!("for {d:.1}s"));
+                None
+            }
         };
     }
 
@@ -1253,8 +1329,17 @@ impl Brain {
                 self.start("hold", Intent::Idle, t);
                 self.pin(t);
             } else {
-                let b = self.pick(t);
+                let (b, hold_s) = self.pick(t);
                 self.start(&b, Intent::Idle, t);
+                if let Some([lo, hi]) = hold_s.filter(|_| self.in_station()) {
+                    let d = lo + self.rng.unit() * (hi - lo);
+                    self.idle_seat = Some(IdleSeat { hold_ms: (d * 1000.0).round() as u64, until: None });
+                    self.note(t, "seat", format!("idle {d:.1}s"));
+                    // start() entered the role before the visit was known: relabel it idle
+                    if self.play.turns.is_empty() && self.role() == Some(Role::Enter) {
+                        self.play.intent = Intent::Idle;
+                    }
+                }
             }
         } else {
             let b = self.behavior_for(want);
@@ -1269,6 +1354,7 @@ impl Brain {
         if pack.station(behavior).is_none() {
             self.seat_hold = None;
         }
+        self.idle_seat = None;
         self.play = Play::new(intent, behavior, t);
         let first = pack.clips.get(&def.seq[0].clip);
         let mut ori = None;
@@ -1292,6 +1378,10 @@ impl Brain {
                 Some(to) => self.face_toward(&[to], t),
                 None => self.face_toward(&[Dir::E, Dir::W], t),
             }
+        } else if let Some(c) = first.filter(|c| self.pack.pack_version >= 2 && !c.dirs.is_empty() && !c.dirs.contains_key(&self.dir)) {
+            // turn first (§1.5): face the nearest dir the first clip is drawn in, then play it
+            let dirs: Vec<Dir> = c.dirs.keys().copied().collect();
+            self.face_toward(&dirs, t);
         }
         if self.play.turns.is_empty() {
             self.play.ori = ori;
@@ -1595,6 +1685,14 @@ impl Brain {
                 }
                 self.activity = Some(Activity { name: name.clone(), behavior, for_ms, until, work });
                 self.note(t, "activity", format!("{} {name}", if queued { "queue" } else { "start" }));
+                if until.is_some() {
+                    // an idle desk visit gives way: the computer takes the seat, anything else stands it up
+                    if work {
+                        self.idle_seat = None;
+                    } else if let Some(s) = self.idle_seat.as_mut() {
+                        s.until = Some(t);
+                    }
+                }
                 if playing {
                     self.interrupt(t);
                 }
@@ -1677,35 +1775,106 @@ impl Brain {
 
     // ---- idle scheduler ----
 
-    fn pick(&mut self, t: u64) -> String {
-        let weights = self.pool_weights(t);
-        let total: f64 = weights.iter().map(|(_, w)| w).sum();
-        let chosen = if total <= 0.0 {
-            "rest".to_string()
+    /// The next idle pick (§1.3, `#flow-pick`): its name (a behavior, or a station visit) and,
+    /// for a station entry, its `hold_s`.
+    fn pick(&mut self, t: u64) -> (String, Option<[f64; 2]>) {
+        let pack = self.pack.clone();
+        let mut relaxed: Option<&'static str> = None;
+        let mut weights = self.pool_weights(t, Rules::ALL);
+        let mut total: f64 = weights.iter().map(|(_, w)| w).sum();
+        if total <= 0.0 && pack.variety.is_some() {
+            // the relax ladder: without max_in_window, then without cooldowns (no_repeat stays)
+            for (rules, rule) in [(Rules { window: false, cooldown: true }, "max_in_window"), (Rules { window: false, cooldown: false }, "cooldown")] {
+                weights = self.pool_weights(t, rules);
+                total = weights.iter().map(|(_, w)| w).sum();
+                relaxed = Some(rule);
+                if total > 0.0 {
+                    break;
+                }
+            }
+        }
+        let entry = if total <= 0.0 {
+            if pack.variety.is_some() {
+                relaxed = Some("rest");
+            }
+            // rest, or look_around after a rest (no_repeat holds while another entry can play)
+            let rest_last = self.picks.front().is_some_and(|p| Some(p.group.as_str()) == pack.idle_pool.iter().find(|e| e.name() == "rest").map(PoolEntry::group_key));
+            let alt = if pack.variety.is_some() && rest_last && !self.quiet && pack.available("look_around") { "look_around" } else { "rest" };
+            pack.idle_pool.iter().position(|e| e.name() == alt).map_or(Err(alt), Ok)
         } else {
-            weighted(&weights, self.rng.unit() * total)
+            Ok(weighted(&weights, self.rng.unit() * total))
         };
+        let (chosen, group, kind, hold_s) = match entry {
+            Ok(i) => {
+                let e = &pack.idle_pool[i];
+                (e.name().to_string(), e.group_key().to_string(), e.kind, e.hold_s)
+            }
+            Err(name) => (name.to_string(), name.to_string(), PoolKind::Other, None),
+        };
+        if let Some(rule) = relaxed {
+            self.note(t, "pick", format!("relaxed {rule}"));
+        }
         self.recent.push_front(chosen.clone());
         self.recent.truncate(self.pack.memory.recent);
-        self.note(t, "pick", format!("total {total:.3}"));
-        chosen
+        self.picks.push_front(Picked { group, kind });
+        self.picks.truncate(pack.variety.as_ref().map_or(1, |v| (v.window as usize).max(v.max_moves_in_row as usize).max(1)));
+        self.note(t, "pick", format!("{chosen} total {total:.3}"));
+        (chosen, hold_s)
     }
 
-    /// Effective weight of every pool entry now (0 = in cooldown / unavailable).
-    fn pool_weights(&self, t: u64) -> Vec<(String, f64)> {
+    /// Pool weights by entry name (tests).
+    #[cfg(test)]
+    pub(crate) fn _named_weights(&self, t: u64) -> Vec<(String, f64)> {
+        self.pool_weights(t, Rules::ALL).into_iter().map(|(i, w)| (self.pack.idle_pool[i].name().to_string(), w)).collect()
+    }
+
+    /// Whether a pool entry's `when` holds now (a `context` waits for p4: never).
+    fn when_ok(&self, w: &When) -> bool {
+        if w.context.is_some() {
+            return false;
+        }
+        if let Some([from, to]) = w.hours {
+            let h = (self.local.minutes / 60) as u8;
+            let inside = if from <= to { from <= h && h < to } else { h >= from || h < to };
+            if !inside {
+                return false;
+            }
+        }
+        w.months.as_ref().is_none_or(|m| m.contains(&self.month))
+    }
+
+    /// Effective weight of every pool entry now, by pool index (0 = in cooldown, unavailable,
+    /// not eligible or barred by a variety rule).
+    fn pool_weights(&self, t: u64, rules: Rules) -> Vec<(usize, f64)> {
         let pack = &self.pack;
         let quiet = &pack.quiet_hours;
         let warming = !self.quiet && ((t.saturating_sub(self.started)) as f64) < pack.warmup.duration_s * 1000.0;
         let temper = self.temper();
+        let variety = pack.variety.as_ref();
+        let last_group = self.picks.front().map(|p| p.group.as_str());
+        let moves_in_row = self.picks.iter().take_while(|p| p.kind == PoolKind::Move).count();
         pack.idle_pool
             .iter()
-            .filter(|e| !self.quiet || quiet.pool.contains(&e.behavior))
-            .map(|e| {
-                let cooling = e.cooldown_s > 0.0
-                    && self.last_start.get(&e.behavior).is_some_and(|s| (t.saturating_sub(*s) as f64) < e.cooldown_s * 1000.0);
-                let skipped = warming && pack.warmup.exclude.contains(&e.behavior);
-                if cooling || skipped || !pack.available(&e.behavior) {
-                    return (e.behavior.clone(), 0.0);
+            .enumerate()
+            .filter(|(_, e)| !self.quiet || quiet.pool.iter().any(|q| q == e.name()))
+            .map(|(i, e)| {
+                let name = e.name();
+                let cooling = rules.cooldown
+                    && e.cooldown_s > 0.0
+                    && self.last_start.get(name).is_some_and(|s| (t.saturating_sub(*s) as f64) < e.cooldown_s * 1000.0);
+                let skipped = warming && pack.warmup.exclude.iter().any(|x| x == name);
+                let eligible = e.when.as_ref().is_none_or(|w| self.when_ok(w));
+                if cooling || skipped || !eligible || !pack.available(name) {
+                    return (i, 0.0);
+                }
+                if let Some(v) = variety {
+                    let g = e.group_key();
+                    let barred = (v.no_repeat && last_group == Some(g))
+                        || (rules.window && v.max_in_window > 0 && self.picks.iter().take((v.window as usize).saturating_sub(1)).filter(|p| p.group == g).count() >= v.max_in_window as usize)
+                        || (v.max_moves_in_row > 0 && e.kind == PoolKind::Move && moves_in_row >= v.max_moves_in_row as usize);
+                    if barred {
+                        return (i, 0.0);
+                    }
                 }
                 let mut w = e.weight;
                 for (name, k) in &e.traits {
@@ -1713,14 +1882,14 @@ impl Brain {
                     w *= (1.0 + k * (2.0 * v - 1.0)).max(0.0);
                 }
                 for r in &self.recent {
-                    if *r == e.behavior {
+                    if r == name {
                         w *= pack.memory.penalty;
                     }
                 }
                 if self.quiet {
-                    w *= quiet.boost.get(&e.behavior).copied().unwrap_or(1.0);
+                    w *= quiet.boost.get(name).copied().unwrap_or(1.0);
                 }
-                (e.behavior.clone(), w)
+                (i, w)
             })
             .collect()
     }
@@ -1854,16 +2023,27 @@ impl Brain {
     }
 }
 
-/// The entry `x` (0..total) lands on. R10: rounding can run `x` past the end;
+/// Which variety rules and cooldowns a pick applies (the relax ladder drops them in order).
+#[derive(Clone, Copy, Debug)]
+struct Rules {
+    window: bool,
+    cooldown: bool,
+}
+
+impl Rules {
+    const ALL: Rules = Rules { window: true, cooldown: true };
+}
+
+/// The entry `x` (0..total, total > 0) lands on. R10: rounding can run `x` past the end;
 /// the fallback is then the last entry that can play, never a weight-0 one.
-fn weighted(weights: &[(String, f64)], mut x: f64) -> String {
-    for (b, w) in weights {
+fn weighted(weights: &[(usize, f64)], mut x: f64) -> usize {
+    for (i, w) in weights {
         if x < *w {
-            return b.clone();
+            return *i;
         }
         x -= w;
     }
-    weights.iter().rev().find(|(_, w)| *w > 0.0).map_or_else(|| "rest".into(), |(b, _)| b.clone())
+    weights.iter().rev().find(|(_, w)| *w > 0.0).map_or(0, |(i, _)| *i)
 }
 
 #[cfg(test)]
@@ -1873,3 +2053,7 @@ mod tests;
 #[cfg(test)]
 #[path = "brain_desk_tests.rs"]
 mod desk_tests;
+
+#[cfg(test)]
+#[path = "brain_idle_tests.rs"]
+mod idle_tests;
