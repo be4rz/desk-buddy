@@ -215,10 +215,11 @@ fn bear_loads_and_every_intent_resolves_before_the_art_round() {
         (Intent::Oops, "rest"),
         (Intent::Celebrate, "rest"),
         (Intent::Sleepy, "nap"),
-        (Intent::Spin, "dash"),
-        (Intent::Greet, "look_around"),
-        (Intent::Remind, "look_around"),
-        (Intent::Dodge, "wander"),
+        // A5: own clip first, then a borrowed fallback, then rest (mascots/bear/README.md § gestures)
+        (Intent::Spin, "rest"),
+        (Intent::Greet, "rest"),
+        (Intent::Remind, "rest"),
+        (Intent::Dodge, "dash"),
     ];
     for (i, b) in expect {
         assert_eq!(p.resolve(i), b, "{i:?}");
@@ -248,8 +249,8 @@ fn real_bear_has_a_face_and_the_six_art_round_clips() {
         (Intent::Oops, "oops"),
         (Intent::Happy, "happy"),
         (Intent::Celebrate, "celebrate"),
-        (Intent::Jump, "celebrate"),
-        (Intent::Remind, "ask"),
+        (Intent::Jump, "jump"),
+        (Intent::Remind, "remind"),
     ];
     for (i, b) in expect {
         assert_eq!(p.resolve(i), b, "{i:?}");
@@ -1607,6 +1608,22 @@ Gestures (`buddy mascot emote <name>`; a short gesture during your reply):
 - shake: a sad little no
 - jump: a bounce of joy
 - spin: a twirl
+- greet: a big two-paw hello
+- stretch: a big stretch
+- sad: a sad little droop
+- surprised: a surprised little hop
+- dodge: a quick step aside
+- remind: a raised paw: don't forget
+- shrug: a shrug: who knows
+- facepalm: facepalm at a silly mistake
+- thumbs_up: a paw up: well done
+- clap: clap its paws
+- point_bubble: point at what you just said
+- shy_hide: hide its face, shy
+- laugh: a happy laugh
+- pout: a little pout
+- proud: puff its chest, proud
+- head_scratch: scratch its head, confused
 
 Fidgets: weight_shift, ear_twitch, look_up, look_down, tummy_rub, wave_small, peek, butt_wiggle, rock_heels, head_tilt, scratch, yawn, shake_off, sneeze, nod_off, squat
 Moves: tiptoe, skip, shuffle, back_waddle, hop, roll, trip, chase, slide

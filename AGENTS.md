@@ -50,7 +50,7 @@ and talks through speech bubbles, powered by an LLM.
   CLI `buddy widget list|open|close`, `buddy music play|pause|next|status`, `buddy browser goto|snapshot|click|type`
   (browser reads taint the chat; click/type then ask). Body tools: `buddy mascot list|do <activity> [--for 5m]|stop|emote <name>`
   (activities and emotes from the pack's `body` block, `mascots/bear/README.md`; the prompt's "Your body" section is
-  `mascot_core::body::prompt_text`; replay `crates/buddy-app/tests/fixtures/activity.jsonl`). Music/Spotify control is AppleScript to an already-running app
+  `mascot_core::body::prompt_text`; replay `crates/buddy-app/tests/fixtures/activity.jsonl`, gestures `emotes.jsonl`). Music/Spotify control is AppleScript to an already-running app
   only (`src/media_os.rs`). Edges: drop the bear on a window's top edge (`settings.edges.enabled`), `src/senses/windows.rs`
   polls window bounds only while it sits (never window names). Debug only: `BUDDY_MEDIA_FAKE=1` (local stand-in for
   YouTube). Real-window browser test: `cargo build -p host --bin buddy && cargo test -p buddy-app --test browser_widget -- --ignored`.
@@ -144,6 +144,12 @@ and talks through speech bubbles, powered by an LLM.
   face none: hop, spin 84×123; roll, trip 132×135; pounce, slide_stop 132×123 (anchors [W/2,107]); pounce and slide_stop
   start at Stage A `run_stop#0` (chase = run_start → run → pounce; slide = … → slide_stop). `python3 verify_t.py`: kit
   checks + forward/in-place root tracks + art ≥ 2 px from every canvas edge.
+  The A5 gesture stages (p3), `kind` clips, one-shots in S SE E W SW, 84×123, idle#0 both ends: Stage e (`stages/e.json`,
+  `clips_e.py`): wave, nod, shake, greet, sad, surprised, jump, dodge, remind (wave/remind layers, `face_e.json`; dodge
+  side-steps by root_px and ends displaced); Stage x (`stages/x.json`, `clips_x.py`): shrug, facepalm, thumbs_up, clap,
+  point_bubble, shy_hide, laugh, pout, proud, head_scratch (shrug/thumbs_up/point_bubble/proud layers, `face_x.json`).
+  `python3 verify_e.py` / `verify_x.py` (`--self-test`, exit 1 = works). Freeze check after p3: add `--own anim_e anim_x`.
+  The pack wires them as the 11 intents' own clips and 16 gesture emotes (`mascots/bear/README.md` § gestures).
 - `python3 verify_b.py`: Stage B hand-off frames must be pixel-identical to props + the idle sprite; run it after any re-render.
 - `python3 verify_face.py [--part FILE]` (`--self-test`: in-memory mutations (3 with face.json v2, 4 with `set_clips`, 5 with a face part), each must be caught, exit 1): the face invariant
   "T" (amends design §3.4). Default patches drawn at each frame's position must equal the expected frame (the anim_c

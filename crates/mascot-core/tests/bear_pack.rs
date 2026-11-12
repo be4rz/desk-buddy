@@ -2,7 +2,9 @@
 //!
 //! - every A4 storyboard behavior is rendered (available) and in the idle pool, none hidden;
 //! - the pack carries the bear's `variety` block;
-//! - a long seeded run keeps the variety rules with an energetic temperament and in quiet hours.
+//! - a long seeded run keeps the variety rules with an energetic temperament and in quiet hours;
+//! - (A5: AC13) each of the 11 intents plays its own clip, the new gestures are listed emotes, and
+//!   without their art the intents fall back down their chains.
 //!
 //! `buddy studio audit` (AC11, AC17) measures time shares and targets; this file pins what the
 //! pack itself must hold, so a pack edit that drops an A4 entry or breaks the rules fails here.
@@ -10,7 +12,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use mascot_core::{pack, Brain, BrainConfig, DndAction, LocalTime, PackMeta, Senses};
+use mascot_core::{body, pack, replay, Brain, BrainConfig, DndAction, Intent, LocalTime, PackMeta, Senses};
 use mascot_protocol::pack::{PoolKind, Temperament};
 
 fn bear() -> Arc<PackMeta> {
@@ -186,4 +188,116 @@ fn every_posture_and_long_entry_with_a_get_up_clip_exits_through_it() {
         }
     }
     assert!(checked >= 6, "only {checked} entries end in a get-up clip");
+}
+
+/// The 11 A5 intents (AC13): each has its own clip, rendered by stage e (gestures-a) or by the p2
+/// stages (`stretch` from g, `spin` from t).
+const A5_INTENTS: [&str; 11] = ["wave", "nod", "shake", "greet", "stretch", "sad", "surprised", "jump", "spin", "dodge", "remind"];
+
+/// The A5 emotes the agent can use: stage x's 10 gestures (gestures-b) and the intents that were not emotes yet.
+const A5_EMOTES: [&str; 16] = [
+    "shrug", "facepalm", "thumbs_up", "clap", "point_bubble", "shy_hide", "laugh", "pout", "proud", "head_scratch", // x
+    "greet", "stretch", "sad", "surprised", "dodge", "remind",
+];
+
+fn clips_of(p: &PackMeta, behavior: &str) -> Vec<String> {
+    p.behavior(behavior).map_or_else(Vec::new, |b| b.seq.iter().map(|s| s.clip.clone()).collect())
+}
+
+#[test]
+fn each_a5_intent_plays_its_own_clip() {
+    let p = bear();
+    let firsts: Vec<(&str, String)> = A5_INTENTS.iter().map(|n| (*n, p.resolve(Intent::parse(n).unwrap()).to_string())).collect();
+    // own behavior playing exactly its own clip (named as the intent) is stricter than the
+    // prototype's rule "no other intent's first behavior uses its clips": the 11 names differ
+    for (intent, b) in &firsts {
+        assert_eq!(b, intent, "{intent}: resolves to {b}, not its own behavior");
+        assert_eq!(clips_of(&p, b), [intent.to_string()], "{intent}: {b} plays more than its own clip");
+        // a fallback chain stays behind it
+        assert!(p.intents[&Intent::parse(intent).unwrap()].len() >= 2, "{intent}: no fallback behind its own behavior");
+    }
+}
+
+#[test]
+fn the_a5_gestures_are_listed_and_in_the_prompt() {
+    let p = bear();
+    let listed = body::emotes(&p);
+    let prompt = body::prompt_text(&p).unwrap();
+    for name in A5_EMOTES {
+        let e = listed.iter().find(|e| e.name == name).unwrap_or_else(|| panic!("{name}: not in `buddy mascot list`"));
+        assert_eq!(e.group, "gesture", "{name}");
+        assert!(!e.about.is_empty(), "{name}: no about");
+        assert!(prompt.contains(&format!("- {name}: {}\n", e.about)), "{name}: not in the prompt's gestures");
+    }
+    let waiting: Vec<String> = p.waiting().into_iter().map(|w| w.name).filter(|n| A5_EMOTES.contains(&n.as_str())).collect();
+    assert!(waiting.is_empty(), "A5 emotes wait for art: {waiting:?}");
+}
+
+/// Non-happy: without stages e and x the intents fall back down their chains and the gestures
+/// wait for art (left out of the list, named in the load log), the pack still loads.
+#[test]
+fn without_stages_e_and_x_the_intents_fall_back_and_the_gestures_wait() {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../mascots/bear");
+    let dir = std::env::temp_dir().join(format!("mascot-bear-no-ex-{}", std::process::id()));
+    let mut v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(src.join("pack.json")).unwrap()).unwrap();
+    let abs = |rel: &serde_json::Value| serde_json::Value::String(src.join(rel.as_str().unwrap()).canonicalize().unwrap().to_string_lossy().into_owned());
+    v["art_root"] = abs(&v["art_root"]);
+    v["palettes"] = v["palettes"].as_array().unwrap().iter().map(abs).collect();
+    let sources = v["sources"].as_array_mut().unwrap();
+    sources.retain(|s| !s["path"].as_str().unwrap().starts_with("anim_e/") && !s["path"].as_str().unwrap().starts_with("anim_x/"));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("pack.json"), serde_json::to_string_pretty(&v).unwrap()).unwrap();
+    let p = pack::load(&dir);
+    std::fs::remove_dir_all(&dir).unwrap();
+    let p = p.expect("the bear pack loads without stages e and x");
+    let want = [("wave", "happy"), ("nod", "happy"), ("shake", "oops"), ("greet", "happy"), ("sad", "oops"), ("surprised", "oops"), ("jump", "celebrate"), ("dodge", "dash"), ("remind", "ask"), ("stretch", "stretch"), ("spin", "spin")];
+    for (intent, b) in want {
+        assert_eq!(p.resolve(Intent::parse(intent).unwrap()), b, "{intent}");
+    }
+    let listed: Vec<String> = body::emotes(&p).into_iter().map(|e| e.name).collect();
+    for name in ["remind", "shrug", "facepalm", "thumbs_up", "clap", "point_bubble", "shy_hide", "laugh", "pout", "proud", "head_scratch"] {
+        assert!(!listed.iter().any(|n| n == name), "{name}: listed without its art");
+        assert!(p.waiting().iter().any(|w| w.kind == "emote" && w.name == name), "{name}: not waiting");
+    }
+    for name in ["greet", "sad", "surprised", "dodge", "stretch"] {
+        assert!(listed.iter().any(|n| n == name), "{name}: an intent emote stays listed (it falls back)");
+    }
+    let line = p.waiting_line().expect("a waiting line");
+    assert!(line.contains("wait for art") && line.contains("remind"), "{line}");
+}
+
+/// AC13: `crates/buddy-app/tests/fixtures/emotes.jsonl` (each gesture emote once, 5 s apart) plays
+/// every emote's own behavior through the brain.
+#[test]
+fn the_emotes_fixture_plays_each_gesture_with_its_own_behavior() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../buddy-app/tests/fixtures/emotes.jsonl");
+    let items: Vec<replay::Item> = std::fs::read_to_string(path)
+        .unwrap()
+        .lines()
+        .filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with("//"))
+        .map(|l| serde_json::from_str(l).unwrap_or_else(|e| panic!("{l}: {e}")))
+        .collect();
+    let names: Vec<String> = items.iter().filter_map(|i| match &i.event {
+        Some(mascot_protocol::MascotEvent::Emote { name }) => Some(name.clone()),
+        _ => None,
+    }).collect();
+    let p = bear();
+    let gestures: std::collections::BTreeSet<String> = body::emotes(&p).into_iter().filter(|e| e.group == "gesture").map(|e| e.name).collect();
+    assert_eq!(names.iter().cloned().collect::<std::collections::BTreeSet<_>>(), gestures, "the fixture has each gesture emote once");
+    assert_eq!(names.len(), gestures.len());
+    let end = items.last().unwrap().at_ms + 8000;
+    let tl = replay::Timeline { timeline_version: replay::TIMELINE_VERSION, seed: 7, duration_ms: end, start_local: "10:00".into(), weekday: 2, items };
+    let log = replay::run(p, &tl);
+    let items = &tl.items;
+    for (k, name) in names.iter().enumerate() {
+        let (from, to) = (items[k].at_ms, items.get(k + 1).map_or(end, |i| i.at_ms));
+        // a `plays` emote runs under intent emote, an `intent` emote under its own intent
+        let played: Vec<&str> = log
+            .iter()
+            .filter(|l| (from..to).contains(&l.t_ms) && (l.intent == Intent::Emote || l.intent.as_str() == name))
+            .map(|l| l.behavior.as_str())
+            .collect();
+        assert!(played.contains(&name.as_str()), "emote {name} at {from} ms played {played:?}");
+        assert!(played.iter().all(|b| b == name), "emote {name} at {from} ms also played {played:?}");
+    }
 }

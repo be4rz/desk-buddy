@@ -1,0 +1,23 @@
+// Aliveness A5 (AC13): every gesture emote once, 5 s apart, on an idle bear (no agent turn). Replay with
+// BUDDY_EVENTS=crates/buddy-app/tests/fixtures/emotes.jsonl: each `[buddy] intent … → <behavior>` line names the emote's own behavior.
+{"at_ms": 6000, "event": {"type": "emote", "name": "wave"}}
+{"at_ms": 11000, "event": {"type": "emote", "name": "nod"}}
+{"at_ms": 16000, "event": {"type": "emote", "name": "shake"}}
+{"at_ms": 21000, "event": {"type": "emote", "name": "jump"}}
+{"at_ms": 26000, "event": {"type": "emote", "name": "spin"}}
+{"at_ms": 31000, "event": {"type": "emote", "name": "greet"}}
+{"at_ms": 36000, "event": {"type": "emote", "name": "stretch"}}
+{"at_ms": 41000, "event": {"type": "emote", "name": "sad"}}
+{"at_ms": 46000, "event": {"type": "emote", "name": "surprised"}}
+{"at_ms": 51000, "event": {"type": "emote", "name": "dodge"}}
+{"at_ms": 56000, "event": {"type": "emote", "name": "remind"}}
+{"at_ms": 61000, "event": {"type": "emote", "name": "shrug"}}
+{"at_ms": 66000, "event": {"type": "emote", "name": "facepalm"}}
+{"at_ms": 71000, "event": {"type": "emote", "name": "thumbs_up"}}
+{"at_ms": 76000, "event": {"type": "emote", "name": "clap"}}
+{"at_ms": 81000, "event": {"type": "emote", "name": "point_bubble"}}
+{"at_ms": 86000, "event": {"type": "emote", "name": "shy_hide"}}
+{"at_ms": 91000, "event": {"type": "emote", "name": "laugh"}}
+{"at_ms": 96000, "event": {"type": "emote", "name": "pout"}}
+{"at_ms": 101000, "event": {"type": "emote", "name": "proud"}}
+{"at_ms": 106000, "event": {"type": "emote", "name": "head_scratch"}}

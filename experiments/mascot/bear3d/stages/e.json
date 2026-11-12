@@ -1,0 +1,7 @@
+{
+ "id": "e",
+ "kind": "clips",
+ "module": "clips_e",
+ "verify": "verify_e.py",
+ "note": "Stage e (gestures-a, p3 aliveness): 9 intent gestures in Stage A's 84x123 frame, anchor [42,107], S SE E W SW, every clip one-shot from and to idle#0. wave and remind use face layers (face part face_e.json); nod, shake, greet, sad, surprised, jump, dodge are baked. dodge side-steps to the bear's left by root_px (tx) and ends on idle#0 displaced. Output out/bear3d/anim_e/."
+}

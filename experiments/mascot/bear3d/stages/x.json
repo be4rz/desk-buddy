@@ -1,0 +1,7 @@
+{
+ "id": "x",
+ "kind": "clips",
+ "module": "clips_x",
+ "verify": "verify_x.py",
+ "note": "Stage x (gestures-b, p3 aliveness): 10 emote gestures in Stage A's 84x123 frame, anchor [42,107], S SE E W SW, every clip a one-shot starting and ending on idle#0, in place. shrug, facepalm, thumbs_up, clap, point_bubble, shy_hide, laugh, pout, proud, head_scratch. Face: layers on shrug, thumbs_up, point_bubble, proud (face part face_x.json); baked on the rest. Output out/bear3d/anim_x/."
+}

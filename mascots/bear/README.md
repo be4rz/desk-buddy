@@ -146,6 +146,33 @@ Contract notes (lead decisions for p1):
   `"severity": "warn"`; `waits_for_art` issues add `name`, `clip` and `source`. Warnings never
   change the exit code. The studio window (`studio.js`) reads it unchanged.
 
+## The bear's gestures (A5, p3)
+
+Stage e (`anim_e/`, gestures-a) and stage x (`anim_x/`, gestures-b) are one-shot clips in
+`S SE E W SW` (84×123, idle#0 at both ends); each has a behavior of the same name.
+
+- **Intents with their own clip.** `wave nod shake greet sad surprised jump dodge remind` play
+  stage e's clip, `stretch` the p2 fidget (stage g) and `spin` the p2 tumble (stage t). Each
+  chain is own behavior first, then a borrowed fallback, then `rest` (`wave nod → happy`,
+  `shake sad surprised → oops`, `greet → wave → happy`, `jump spin → celebrate`,
+  `dodge → dash`, `remind → ask`, `stretch → rest`), so a missing stage falls back with no
+  pack edit. `bear_pack.rs` checks that each of the 11 resolves to its own behavior playing
+  only its own clip (so no two share one).
+- **Reminders.** A `reminder` event holds intent `remind` for the bubble's time, and `remind`
+  is a one-shot (1.7 s, idle#0 at both ends), so the bear repeats the paw wag until the bubble
+  goes (it held `ask` before).
+- **Dodge** steps aside by its `root_px` (the panel moves, as for walks) and ends on idle#0 at
+  the new spot. Lint warns `non_integer_root` on dodge S/E/W (sub-pixel iso steps), a warning only.
+- **Gesture emotes** (group `gesture`): the intent emotes `wave nod shake jump spin greet
+  stretch sad surprised dodge` and the `plays` emotes `remind` and stage x's `shrug facepalm
+  thumbs_up clap point_bubble shy_hide laugh pout proud head_scratch`. `remind` is a `plays`
+  emote because its intent falls back to `ask`, which holds, and an emote must end by itself.
+  Without its art a `plays` emote waits (left out of `mascot list` and the prompt, named in the
+  load line); an intent emote stays listed and plays its fallback.
+- `point_bubble` and `thumbs_up` raise the left mitten (screen right in S, toward the bubble).
+  `proud` is the subtlest gesture. Replay: `BUDDY_EVENTS=crates/buddy-app/tests/fixtures/emotes.jsonl`
+  (every gesture emote once, 5 s apart).
+
 ## The body block (what the agent can do)
 
 `body` in `pack.json` lists what the agent may ask the bear to do. The agent sees it through
