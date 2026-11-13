@@ -70,6 +70,14 @@ impl AgentState {
     }
 }
 
+/// One entry of the tray's Model menu.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModelChoice {
+    pub provider: String,
+    pub id: String,
+    pub name: String,
+}
+
 /// Where credentials come from (the keychain, plus session-only dev keys) and the dev hooks.
 pub struct Config {
     pub store: Box<dyn CredentialStore>,
@@ -560,6 +568,50 @@ impl Harness {
 
     pub fn model(&self) -> Option<ModelRef> {
         self.agent.model()
+    }
+
+    /// The models the person can pick (tray "Model"): every model the sidecar's catalog lists for the
+    /// providers that have a credential, as (provider id, model id, name). Asks the sidecar (call off the
+    /// main thread); empty while it is down or nothing is signed in.
+    pub fn models(&self) -> Vec<ModelChoice> {
+        let providers: Vec<&str> = if self.fake { vec!["fake"] } else { self.catalog.iter().filter(|p| self.creds.has(&p.id)).map(|p| p.id.as_str()).collect() };
+        if providers.is_empty() || !self.agent.is_running() {
+            return Vec::new();
+        }
+        let reply = match self.agent.cmd("models", json!({ "providers": providers })) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("[buddy] models: {e}");
+                return Vec::new();
+            }
+        };
+        let list = reply["models"].as_array().cloned().unwrap_or_default();
+        list.iter()
+            .filter_map(|m| {
+                let provider = m["provider"].as_str()?.to_string();
+                let id = m["id"].as_str()?.to_string();
+                let name = m["name"].as_str().unwrap_or(&id).to_string();
+                Some(ModelChoice { provider, id, name })
+            })
+            .collect()
+    }
+
+    /// The person picked a model (tray "Model"): it is `settings.model` from now on and the sidecar
+    /// switches at once. Call off the main thread.
+    pub fn pick_model(&self, provider: &str, model: &str) {
+        if self.fake || !self.creds.has(provider) {
+            return;
+        }
+        let saved = settings::Model { provider: provider.into(), model: model.into(), ..self.wanted.lock().unwrap().clone() };
+        *self.wanted.lock().unwrap() = saved.clone();
+        post(Inbox::Call(Box::new(move |a| a.model_chosen(saved))));
+        eprintln!("[buddy] model: {provider}/{model}");
+        if let Err(e) = self.agent.set_model(Some(ModelRef { provider: provider.into(), model: model.into() })) {
+            eprintln!("[buddy] set_model: {e}");
+        }
+        if self.agent.is_running() {
+            self.set_state(self.running_state());
+        }
     }
 
     fn no_model(&self) -> BridgeError {

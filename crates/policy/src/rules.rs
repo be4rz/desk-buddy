@@ -291,6 +291,72 @@ pub fn read_only(seg: &Segment) -> bool {
     }
 }
 
+/// Words that run the command after them.
+const WRAPPERS: [&str; 9] = ["env", "nohup", "time", "command", "exec", "nice", "xargs", "builtin", "caffeinate"];
+const PUBLISHERS: [&str; 7] = ["npm", "pnpm", "yarn", "bun", "cargo", "twine", "gem"];
+
+fn base(word: &str) -> &str {
+    word.rsplit('/').next().unwrap_or(word)
+}
+
+/// Full access (`full` mode) still asks before this segment: why, in the card's words. The list is the
+/// commands that can't be taken back or reach outside the person's files: administrator rights, deleting
+/// folders, erasing disks, rewriting git history, system settings, the keychain, other apps, publishing.
+pub fn attention(seg: &Segment) -> Option<&'static str> {
+    if seg.words.iter().any(|w| sensitive_path(w.split_once('=').map_or(w.as_str(), |(_, v)| v))) {
+        return Some("it touches keys, passwords or startup files");
+    }
+    // the command word: after `VAR=x`, wrappers and their flags
+    let mut w = seg.words.iter().map(String::as_str).skip_while(|w| w.contains('=') || w.starts_with('-') || WRAPPERS.contains(&base(w)));
+    let cmd = base(w.next()?);
+    let args: Vec<&str> = w.collect();
+    let flag = |short: char, long: &str| args.iter().any(|a| *a == long || (a.starts_with('-') && !a.starts_with("--") && a.contains(short)));
+    let sub = args.iter().find(|a| !a.starts_with('-')).copied().unwrap_or("");
+    match cmd {
+        "sudo" | "su" | "doas" => Some("it runs as administrator"),
+        "rm" if flag('r', "--recursive") || flag('R', "--recursive") => Some("it deletes whole folders"),
+        "find" if args.contains(&"-delete") => Some("it deletes files"),
+        "dd" | "diskutil" | "fdisk" => Some("it can erase a disk"),
+        c if c.starts_with("mkfs") || c.starts_with("newfs") => Some("it can erase a disk"),
+        "shutdown" | "reboot" | "halt" => Some("it turns the computer off"),
+        "launchctl" | "csrutil" | "spctl" | "nvram" | "systemsetup" | "dscl" | "crontab" => Some("it changes system settings"),
+        "security" => Some("it reads or changes the keychain"),
+        "osascript" => Some("it controls other apps"),
+        "killall" | "pkill" => Some("it stops other apps"),
+        "chmod" | "chown" if flag('R', "--recursive") => Some("it changes permissions on a whole folder"),
+        "git" => match sub {
+            "push" if flag('f', "--force") || args.iter().any(|a| a.starts_with("--force") || *a == "--delete" || *a == "--mirror" || a.starts_with('+')) => Some("it rewrites or deletes git history on the server"),
+            "reset" if args.contains(&"--hard") => Some("it throws away uncommitted work"),
+            "clean" => Some("it deletes untracked files"),
+            _ => None,
+        },
+        c if PUBLISHERS.contains(&c) && (sub == "publish" || (c == "gem" && sub == "push") || (c == "twine" && sub == "upload")) => Some("it publishes a package"),
+        _ => None,
+    }
+}
+
+/// `attention` for a line the split can't read as plain words (`$(…)`, unclosed quotes): any risky command
+/// name anywhere in it.
+pub fn attention_raw(command: &str) -> Option<&'static str> {
+    const NAMES: [&str; 22] = ["sudo", "su", "doas", "rm", "dd", "diskutil", "fdisk", "shutdown", "reboot", "halt", "launchctl", "csrutil", "spctl", "nvram", "systemsetup", "dscl", "crontab", "security", "osascript", "killall", "pkill", "eval"];
+    let risky = command.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')).any(|w| NAMES.contains(&w) || w.starts_with("mkfs") || w.starts_with("newfs"));
+    (risky || sensitive_path(command)).then_some("it runs a risky command inside another, which can’t be checked")
+}
+
+/// A path that holds keys, passwords or scripts the system runs by itself.
+pub fn sensitive_path(path: &str) -> bool {
+    let p = path.replace('\\', "/").to_ascii_lowercase();
+    const DIRS: [&str; 9] = [".ssh", ".aws", ".gnupg", ".kube", ".docker", "launchagents", "launchdaemons", "keychains", ".config/gh"];
+    const FILES: [&str; 9] = [".netrc", ".npmrc", ".pypirc", ".zshrc", ".zshenv", ".zprofile", ".bashrc", ".bash_profile", ".profile"];
+    let parts: Vec<&str> = p.split('/').collect();
+    let name = parts.last().copied().unwrap_or("");
+    DIRS.iter().any(|d| format!("/{p}/").contains(&format!("/{d}/")))
+        || FILES.contains(&name)
+        || name == ".env"
+        || (name.starts_with(".env.") && !name.ends_with(".example") && !name.ends_with(".sample"))
+        || ["/etc/", "/private/etc/", "/system/", "/library/"].iter().any(|r| p.starts_with(r))
+}
+
 /// Tools whose first argument is a subcommand, so a rule names both words.
 const TWO_WORD: [&str; 14] = ["git", "npm", "pnpm", "yarn", "bun", "cargo", "docker", "gh", "gcloud", "buddy", "brew", "pip", "uv", "npx"];
 

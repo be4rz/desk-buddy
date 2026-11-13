@@ -155,7 +155,10 @@ fn judge(wins: Option<&[CgWin]>, front_pid: i32, screens: &[fullscreen::Rect]) -
 fn sample() -> Sample {
     let wins = read_windows();
     let screens = if wins.is_some() { fullscreen::displays() } else { Vec::new() };
-    let (fullscreen, share) = judge(wins.as_deref(), FRONT_PID.load(Ordering::Relaxed), &screens);
+    let front = FRONT_PID.load(Ordering::Relaxed);
+    // sharing is about any display; a fullscreen app only about the one the bear is on
+    let (_, share) = judge(wins.as_deref(), front, &screens);
+    let (fullscreen, _) = judge(wins.as_deref(), front, &fullscreen::bear_displays(&screens));
     Sample { idle_ms: idle::idle_ms(), local: clock::now(), month: month_now(), fullscreen, share }
 }
 
@@ -300,6 +303,10 @@ mod tests {
     fn gate_applies_settings_and_toggle() {
         let mut st = Settings::default();
         let raw = Senses { fullscreen: true, screen_share: true, local: LocalTime { minutes: 23 * 60, weekday: 0 }, ..Senses::default() };
+        // by default a fullscreen app doesn't hide the bear; "Hide over fullscreen apps" turns that on
+        let g = gate(&raw, &st, false, true);
+        assert!(!g.fullscreen && g.screen_share && g.quiet_hours && !g.dnd_toggle);
+        st.dnd.fullscreen = true;
         let g = gate(&raw, &st, false, true);
         assert!(g.fullscreen && g.screen_share && g.quiet_hours && !g.dnd_toggle);
         st.dnd.fullscreen = false;

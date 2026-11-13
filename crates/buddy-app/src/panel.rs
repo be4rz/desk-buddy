@@ -261,6 +261,7 @@ impl Panel {
         p.panel.orderFrontRegardless();
         p.start_watch();
         p.install_observers();
+        p.note_display();
         p.check_fullscreen("startup");
         p.report("startup");
         p
@@ -607,6 +608,7 @@ impl Panel {
                 m.report("backing changed");
             });
             self.observe(&dc, NSWindowDidChangeScreenNotification, Some(me), |m| {
+                m.note_display();
                 m.apply_geometry();
                 m.report("screen changed");
             });
@@ -620,6 +622,15 @@ impl Panel {
                 m.check_fullscreen_later();
             });
         }
+    }
+
+    /// Tell the fullscreen sense which display the bear is on (CG global points, top-left origin).
+    fn note_display(&self) {
+        let d = self.panel.screen().zip(self.primary_h()).map(|(s, ph)| {
+            let f = s.frame();
+            [f.origin.x, ph - (f.origin.y + f.size.height), f.size.width, f.size.height]
+        });
+        crate::senses::fullscreen::set_bear_display(d);
     }
 
     /// Space switches animate; re-check once the new Space has settled.

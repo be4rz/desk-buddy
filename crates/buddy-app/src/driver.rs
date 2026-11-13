@@ -141,6 +141,9 @@ pub struct App {
     pub on_hidden: Option<Box<dyn Fn(bool)>>,
     /// the tray's agent line
     pub on_agent: Option<Box<dyn Fn(&AgentState)>>,
+    /// tray Model menu (see `models_changed`)
+    #[allow(clippy::type_complexity)]
+    pub on_models: Option<Box<dyn Fn(&[crate::harness::ModelChoice], Option<&bridge::protocol::ModelRef>)>>,
     /// the tray's "Reset web caution" (shown while tainted)
     pub on_taint: Option<Box<dyn Fn(bool)>>,
     /// the tray's Approvals submenu (the policy's mode: ask / allowlist / skip)
@@ -250,6 +253,7 @@ pub fn start(init: Init, handle: tauri::AppHandle) {
         presented: 0,
         on_hidden: None,
         on_agent: None,
+        on_models: None,
         on_taint: None,
         on_mode: None,
         policy_mode: "allowlist".into(),
@@ -505,6 +509,23 @@ impl App {
         self.brain.set_dnd_action(dnd_action(a), now);
         self.regate(now);
         self.wake();
+    }
+
+    /// Tray "Hide over fullscreen apps" (persisted as `dnd.fullscreen`; off = the bear stays visible).
+    pub fn set_dnd_fullscreen(&mut self, on: bool) {
+        self.settings.dnd.fullscreen = on;
+        self.save_settings();
+        eprintln!("[buddy] hide over fullscreen apps {}", if on { "on" } else { "off" });
+        let now = self.now_ms();
+        self.regate(now);
+        self.wake();
+    }
+
+    /// The tray's Model menu: the list to pick from and the model in use (empty while the agent is down).
+    pub fn models_changed(&self, list: &[crate::harness::ModelChoice], current: Option<&bridge::protocol::ModelRef>) {
+        if let Some(f) = &self.on_models {
+            f(list, current);
+        }
     }
 
     /// Tray "Quiet hours" (persisted as `quiet_hours.enabled`).
@@ -947,6 +968,17 @@ impl App {
         }
         let signed_out = matches!(s, AgentState::SignedOut | AgentState::Keychain(_));
         let ready = matches!(s, AgentState::Running { .. });
+        // the Model menu follows: the sidecar lists the models (off the main thread), or nothing to pick
+        if ready {
+            std::thread::spawn(|| {
+                if let Some(h) = crate::harness::get() {
+                    let (list, current) = (h.models(), h.model());
+                    post(Inbox::Call(Box::new(move |a| a.models_changed(&list, current.as_ref()))));
+                }
+            });
+        } else {
+            self.models_changed(&[], None);
+        }
         let now = self.now_ms();
         let mut out = self.bubble.agent(signed_out, ready, now);
         // the very first launch: say hello, or offer to connect a model, once (settings.onboarded)

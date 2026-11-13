@@ -208,6 +208,7 @@ fn main() {
                 dnd_action: settings.dnd.action,
                 quiet_enabled: q.enabled,
                 quiet_span: format!("{}–{}", q.start, q.end),
+                dnd_fullscreen: settings.dnd.fullscreen,
             };
             let wanted = settings.model.clone();
             let home2 = home.clone();

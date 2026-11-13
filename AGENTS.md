@@ -47,6 +47,11 @@ and talks through speech bubbles, powered by an LLM.
   `BUDDY_CRED_STORE=memory|fail` (no real keychain), `BUDDY_FAKE_OAUTH=1`, `BUDDY_PROMPT=<text>`,
   `BUDDY_ANSWER=allow|deny`. Real keychain test (prompts): `BUDDY_KEYCHAIN_TEST=1 cargo test -p bridge keychain`.
   SIGTERM/SIGINT quit like the tray's Quit (host.json removed).
+  Tray settings: **Hide over fullscreen apps** (`dnd.fullscreen`, off by default; only a fullscreen app on the bear's own
+  display counts; settings.json is v2, a v1 file is read with it off once), **Model ▸** (the signed-in providers' models,
+  listed by the sidecar's `models` command; writes `settings.model`), **Approvals ▸ Full access** (policy mode `full`:
+  everything runs except ask rules, `policy::rules::attention` commands and `sensitive_path` files; deny rules still
+  deny, and it runs as `allowlist` while the chat is marked by the web).
   Widgets (p5): `crates/widgets` (manifests `crates/widgets/<id>/widget.json`, the loopback widget server on a random
   port, logged `[buddy] widgets at http://127.0.0.1:<wport>`; pages `<id>/index.html?mock=<state>`) + `src/widgets.rs`
   (windows, run-time capabilities: each widget page gets only its own `widget_*` commands, the browser's page none).

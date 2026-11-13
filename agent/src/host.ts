@@ -245,6 +245,11 @@ export async function host(init: Init, input: AsyncIterator<Record<string, unkno
         await conv.configure({ model: piModel(model), modelTools }, ctx);
         return {};
       }
+      case "models": {
+        // The chat models the catalog knows for these providers (the tray's Model menu). Ids and names only.
+        const wanted = Array.isArray(cmd.providers) ? (cmd.providers as unknown[]).map(String) : [];
+        return { models: wanted.flatMap((p) => models.getModels(p).map((m) => ({ provider: p, id: m.id, name: m.name || m.id }))) };
+      }
       case "snapshot": {
         if (closing) throw closingError();
         const v = await conv.context(ctx);

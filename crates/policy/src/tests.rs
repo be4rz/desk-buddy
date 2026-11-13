@@ -271,6 +271,65 @@ fn too_many_pending_cards_deny_and_unknown_tools_deny() {
 }
 
 #[test]
+fn full_access_runs_everything_except_what_needs_attention() {
+    let mut fx = Fixture::new("full");
+    let port = fx.root.join("host.json");
+    fs::write(&port, "{}").unwrap();
+    fx.at.secrets = vec![port.clone()];
+    let p = policy();
+    p.ui(&fx.at, &json!({ "op": "set_mode", "mode": "full" })).unwrap();
+    // anything ordinary runs with no card: outside the allowlist, writes, redirects, files outside the work folder
+    for (i, cmd) in ["rm notes/x", "npm install", "git commit -am wip && git push", "echo hi > out.txt", "python3 build.py", "echo $(ls)", "mkdir -p a/b && mv a c", "chmod +x run.sh"].iter().enumerate() {
+        assert_eq!(p.decide(&fx.at, &bash(&format!("ok{i}"), cmd)), Decision::Allow, "{cmd}");
+    }
+    assert_eq!(p.decide(&fx.at, &file("f1", "write", "/tmp/buddy-full-test.txt")), Decision::Allow);
+    assert_eq!(p.decide(&fx.at, &file("f2", "edit", "src/main.rs")), Decision::Allow);
+    // what needs attention still asks, with the reason and no "always"
+    let risky = [
+        ("rm -rf notes", "Run rm?"),
+        ("cd notes && sudo make install", "Run sudo?"),
+        ("git push --force origin main", "Run git push?"),
+        ("git reset --hard HEAD~3", "Run git reset?"),
+        ("FOO=1 env rm -fr /tmp/x", "Run FOO=1?"),
+        ("find . -name '*.log' -delete", "Run find?"),
+        ("osascript -e 'tell app \"Finder\" to empty trash'", "Run osascript?"),
+        ("security find-generic-password -s desk-buddy -w", "Run security?"),
+        ("cat ~/.ssh/id_ed25519", "Run cat?"),
+        ("npm publish", "Run npm?"),
+        ("echo $(sudo whoami)", "Run echo?"),
+    ];
+    for (i, (cmd, _)) in risky.iter().enumerate() {
+        let d = p.decide(&fx.at, &bash(&format!("r{i}"), cmd));
+        let a = asks(&d);
+        assert!(a["detail"].as_str().unwrap().starts_with("Full access still asks"), "{cmd}: {a}");
+        assert_eq!(a["offerAlways"], false, "{cmd}");
+        p.ui(&fx.at, &json!({ "op": "approval_answer", "callId": format!("r{i}"), "answer": "deny" })).unwrap();
+    }
+    // an ask rule (the fetch rules) asks as in every mode but skip
+    let a = asks(&p.decide(&fx.at, &bash("c1", "curl https://example.com"))).clone();
+    assert!(a["detail"].as_str().unwrap().starts_with("A rule asks"), "{a}");
+    p.ui(&fx.at, &json!({ "op": "approval_answer", "callId": "c1", "answer": "deny" })).unwrap();
+    // sensitive files ask, by any file tool; deny rules and secrets still deny
+    for (i, (tool, path)) in [("read", "~/.ssh/id_rsa"), ("write", "~/.zshrc"), ("edit", ".env"), ("write", "~/Library/LaunchAgents/x.plist"), ("write", "/etc/hosts")].iter().enumerate() {
+        let d = p.decide(&fx.at, &file(&format!("s{i}"), tool, path));
+        assert!(asks(&d)["detail"].as_str().unwrap().starts_with("Full access still asks"), "{tool} {path}");
+        p.ui(&fx.at, &json!({ "op": "approval_answer", "callId": format!("s{i}"), "answer": "deny" })).unwrap();
+    }
+    assert_eq!(p.decide(&fx.at, &file("e1", "read", ".env.example")), Decision::Allow);
+    assert!(matches!(p.decide(&fx.at, &file("d1", "write", ".buddy/x")), Decision::Deny { .. }));
+    assert!(matches!(p.decide(&fx.at, &file("d2", "write", ".git/config")), Decision::Deny { .. }));
+    assert!(matches!(p.decide(&fx.at, &bash("d3", "cat ../host.json")), Decision::Deny { .. }));
+    // once the conversation read the web, full access pauses: it behaves as the allowlist
+    assert!(p.taint(&fx.at, "browser", "https://example.com/"));
+    let a = asks(&p.decide(&fx.at, &bash("t1", "npm install"))).clone();
+    assert!(a["detail"].as_str().unwrap().contains("read the web"), "{a}");
+    assert_eq!(p.decide(&fx.at, &bash("t2", "ls notes")), Decision::Allow);
+    p.ui(&fx.at, &json!({ "op": "approval_answer", "callId": "t1", "answer": "deny" })).unwrap();
+    p.ui(&fx.at, &json!({ "op": "clear_taint" })).unwrap();
+    assert_eq!(p.decide(&fx.at, &bash("t3", "npm install")), Decision::Allow);
+}
+
+#[test]
 fn the_port_file_and_git_config_are_off_limits_even_in_skip_mode() {
     let mut fx = Fixture::new("secret");
     let port = fx.root.join("host.json");

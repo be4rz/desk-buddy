@@ -39,6 +39,29 @@ pub fn displays() -> Vec<Rect> {
         .collect()
 }
 
+/// The display the bear's panel is on (the panel sets it at launch and whenever it changes screens), for
+/// the sensor thread: "hide over fullscreen apps" is about that display only.
+static BEAR_DISPLAY: std::sync::Mutex<Option<Rect>> = std::sync::Mutex::new(None);
+
+pub fn set_bear_display(d: Option<Rect>) {
+    *BEAR_DISPLAY.lock().unwrap_or_else(|e| e.into_inner()) = d;
+}
+
+/// The displays a fullscreen app must cover to count for the bear: its own display when that is known
+/// and still attached, else every display.
+pub fn watched(displays: &[Rect], bear: Option<Rect>) -> Vec<Rect> {
+    let same = |a: &Rect, b: &Rect| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1.0);
+    match bear.and_then(|b| displays.iter().find(|d| same(d, &b))) {
+        Some(d) => vec![*d],
+        None => displays.to_vec(),
+    }
+}
+
+/// `watched` for the bear's display now.
+pub fn bear_displays(displays: &[Rect]) -> Vec<Rect> {
+    watched(displays, *BEAR_DISPLAY.lock().unwrap_or_else(|e| e.into_inner()))
+}
+
 /// Does `w` cover display `d` exactly (within a point)?
 pub fn covers(w: &CgWin, d: &Rect) -> bool {
     (w.x - d[0]).abs() < 1.0 && (w.y - d[1]).abs() < 1.0 && (w.w - d[2]).abs() < 1.0 && (w.h - d[3]).abs() < 1.0
@@ -76,6 +99,17 @@ mod tests {
         // no displays known
         assert!(!is_fullscreen(&[w(7, 0, 0.0, 0.0, 1512.0, 982.0)], 7, &[]));
         assert!(!is_fullscreen(&[], 7, &SCREENS));
+    }
+
+    #[test]
+    fn only_the_bears_display_counts_once_it_is_known() {
+        let on_second = [w(7, 0, 1512.0, -200.0, 1920.0, 1080.0)];
+        // the bear is on the first display: a fullscreen app on the second one doesn't count
+        assert!(!is_fullscreen(&on_second, 7, &watched(&SCREENS, Some(SCREENS[0]))));
+        assert!(is_fullscreen(&on_second, 7, &watched(&SCREENS, Some(SCREENS[1]))));
+        // unknown, or a display that was unplugged: every display counts, as before
+        assert!(is_fullscreen(&on_second, 7, &watched(&SCREENS, None)));
+        assert!(is_fullscreen(&on_second, 7, &watched(&SCREENS, Some([9000.0, 0.0, 800.0, 600.0]))));
     }
 
     #[test]

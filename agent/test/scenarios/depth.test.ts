@@ -171,6 +171,12 @@ test("look is offered only while the model takes images", async () => {
   await d.waitRunEnd(0, 20000);
   expect(offered(bodies(since).at(-1)!)).not.toContain("look");
   expect(offered(bodies(since).at(-1)!)).toEqual(expect.arrayContaining(["bash", "read", "web_fetch", "web_search", "task"]));
+  // the tray's Model menu: the catalog's models for the asked providers, ids and names only
+  const listed = await d.send("models", { providers: ["fake", "no-such-provider"] });
+  expect((listed as any).models ?? (listed as any).result?.models).toEqual([
+    { provider: "fake", id: "fake-1", name: FAKE_MODELS[0]!.name },
+    { provider: "fake", id: "fake-eyes", name: "Fake Eyes" },
+  ]);
   expect((await d.send("set_model", { model: { provider: "fake", model: "fake-eyes" } })).ok).toBe(true);
   const n = d.records.length;
   await d.prompt("look at the picture");

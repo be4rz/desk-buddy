@@ -120,7 +120,10 @@ impl Decision {
 
 // ------------------------------------------------------------ policy.json
 
-pub const MODES: [&str; 3] = ["ask", "allowlist", "skip"];
+/// `full` (full access): everything runs except what needs the person's attention: ask rules, the built-in
+/// risky commands and sensitive files (`rules::attention`, `rules::sensitive_path`); deny rules still deny, and
+/// while the conversation is marked by the web it runs as `allowlist`.
+pub const MODES: [&str; 4] = ["ask", "allowlist", "full", "skip"];
 
 /// The default rules: computed, never stored, shown with `origin: "default"`.
 /// The `buddy` commands that drive the bear's own body and reminders run without a card, marked or not.
@@ -379,7 +382,8 @@ impl Production {
         }
         let tainted = f.taint.is_some();
         let rules = Rules::of(f, !tainted);
-        let mode = f.mode.as_str();
+        // Full access pauses while the conversation is marked: a web page must not steer a bear that runs anything.
+        let mode = if f.mode == "full" && tainted { "allowlist" } else { f.mode.as_str() };
         match req.tool.as_str() {
             "bash" => Self::shell(at, f, &rules, mode, tainted, req.args["command"].as_str().unwrap_or("")),
             "read" | "write" | "edit" => {
@@ -427,13 +431,18 @@ impl Production {
         // Every ask rule a segment matches.
         let hits: Vec<&String> = line.segments.iter().flat_map(|s| rules.ask.iter().filter(|(_, p)| p.matches_segment(s)).map(|(id, _)| id)).collect();
         let asked = hits.first().map(|id| (*id).clone());
+        // Full access: only an ask rule or a risky command (`rules::attention`) asks.
+        let risky = (mode == "full").then(|| line.segments.iter().find_map(|s| rules::attention(s).map(|why| (Some(s), why))).or_else(|| if line.complex { rules::attention_raw(command).map(|why| (None, why)) } else { None })).flatten();
+        if mode == "full" && asked.is_none() && risky.is_none() {
+            return Verdict::Allow;
+        }
         // An allow rule names a command, not where it writes: a redirect still asks.
         let runs = |s: &Segment| !line.complex && (rules::read_only(s) || (!s.writes && first(&rules.allow, |p| p.matches_segment(s)).is_some()));
         let needs: Vec<&Segment> = line.segments.iter().filter(|s| !runs(s)).collect();
         if mode == "allowlist" && asked.is_none() && needs.is_empty() {
             return Verdict::Allow;
         }
-        let name = needs.first().copied().or(line.segments.first()).map(|s| {
+        let name = risky.and_then(|(s, _)| s).or(needs.first().copied()).or(line.segments.first()).map(|s| {
             // `buddy say` and `git push` read better than `buddy` or `git`.
             match (s.words.first(), s.words.get(1)) {
                 (Some(a), Some(b)) if (a == "buddy" || a == "git") && !b.starts_with('-') => format!("{a} {b}"),
@@ -450,6 +459,8 @@ impl Production {
             format!("A rule asks before {} runs.", pattern_text(id, f))
         } else if mode == "ask" {
             "Ask every time is on.".to_string()
+        } else if let Some((_, why)) = risky {
+            format!("Full access still asks before this: {why}.")
         } else if tainted {
             "This conversation read the web, so commands outside the built-in allowlist ask every time.".to_string()
         } else if line.complex {
@@ -526,6 +537,10 @@ impl Production {
             return Verdict::Allow;
         }
         let asked = first(&rules.ask, |p| p.matches_file(tool, &t)).is_some();
+        // Full access: only an ask rule or a file that holds keys, passwords or startup scripts asks.
+        if mode == "full" && !asked && !rules::sensitive_path(&t.abs.to_string_lossy()) {
+            return Verdict::Allow;
+        }
         if mode == "allowlist" && !asked {
             let inside = t.inside && !own_records;
             // The bundled skills its prompt points it at hold nothing of the person's.
@@ -543,6 +558,8 @@ impl Production {
             "Ask every time is on."
         } else if asked {
             "A rule asks before this file changes."
+        } else if mode == "full" {
+            "Full access still asks before files that hold keys, passwords or startup scripts."
         } else if tainted && tool == FileTool::Read {
             "This conversation read the web, so reading files outside the work folder asks every time."
         } else {
@@ -725,7 +742,7 @@ impl Production {
                 "set_mode" => {
                     let mode = op["mode"].as_str().unwrap_or("");
                     if !MODES.contains(&mode) {
-                        return Err(PolicyError::new("usage", "Pick ask, allowlist or skip."));
+                        return Err(PolicyError::new("usage", "Pick ask, allowlist, full or skip."));
                     }
                     f.mode = mode.into();
                 }

@@ -1,4 +1,5 @@
-//! `settings.json` v1 (design §3.2, frozen). Every key has a default; unknown keys
+//! `settings.json` v2 (design §3.2; v2 only changes a default: `dnd.fullscreen` is off, and a v1 file
+//! is read with it off once, see `load`). Every key has a default; unknown keys
 //! (top level and inside each object) are kept and written back. A file that does not
 //! parse is renamed `settings.json.bad` and defaults are used. Writes are atomic.
 
@@ -7,7 +8,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 
 type Extra = Map<String, Value>;
 
@@ -78,7 +79,8 @@ pub struct Dnd {
 }
 impl Default for Dnd {
     fn default() -> Self {
-        Dnd { action: DndAct::Hide, fullscreen: true, screen_share: true, extra: Extra::new() }
+        // the bear stays over a fullscreen app unless the person turns "Hide over fullscreen apps" on
+        Dnd { action: DndAct::Hide, fullscreen: false, screen_share: true, extra: Extra::new() }
     }
 }
 
@@ -180,8 +182,16 @@ pub fn load(home: &Path) -> (Settings, Option<LoadNote>) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (Settings::default(), None),
         Err(e) => e.to_string(),
         Ok(text) => match serde_json::from_str::<Settings>(&text) {
-            Ok(s) => match s.validate() {
-                Ok(()) => return (s, None),
+            Ok(mut s) => match s.validate() {
+                Ok(()) => {
+                    // v1 wrote `dnd.fullscreen: true` as its default, so the file can't tell a choice from
+                    // the old default: v2 starts everyone at "stay visible" (the tray toggle turns it back on)
+                    if s.settings_version < 2 {
+                        s.dnd.fullscreen = false;
+                        s.settings_version = VERSION;
+                    }
+                    return (s, None);
+                }
                 Err(why) => why,
             },
             Err(e) => e.to_string(),
@@ -229,14 +239,28 @@ mod tests {
         assert_eq!(note, None);
         let v = serde_json::to_value(&s).unwrap();
         let want: Value = serde_json::from_str(
-            r#"{"settings_version":1,"pack":"bear","zoom":1,"position":null,
-            "dnd":{"action":"hide","fullscreen":true,"screen_share":true},
+            r#"{"settings_version":2,"pack":"bear","zoom":1,"position":null,
+            "dnd":{"action":"hide","fullscreen":false,"screen_share":true},
             "quiet_hours":{"enabled":true,"start":"22:30","end":"07:30"},
             "attention":{"per_hour":4},"model":{"provider":"anthropic","model":"claude-sonnet-5-5"},
             "edges":{"enabled":true},"studio":{"packs_dir":null},"onboarded":false}"#,
         )
         .unwrap();
         assert_eq!(v, want);
+    }
+
+    #[test]
+    fn a_v1_file_stops_hiding_over_fullscreen_once_and_a_v2_choice_is_kept() {
+        let h = tmp_home("v1");
+        std::fs::write(path(&h), r#"{"settings_version":1,"zoom":2,"dnd":{"action":"hide","fullscreen":true,"screen_share":true}}"#).unwrap();
+        let (mut s, note) = load(&h);
+        assert_eq!(note, None);
+        assert_eq!((s.settings_version, s.dnd.fullscreen, s.dnd.screen_share, s.zoom), (2, false, true, 2));
+        // the person turns it back on: v2 keeps it
+        s.dnd.fullscreen = true;
+        s.save(&h).unwrap();
+        let (s, _) = load(&h);
+        assert_eq!((s.settings_version, s.dnd.fullscreen), (2, true));
     }
 
     #[test]
