@@ -1,0 +1,31 @@
+{
+ "name": "scene_grove",
+ "note": "Bamboo grove: tall bamboo, a stone lantern, a koi pond; fireflies at night",
+ "W": 188,
+ "H": 300,
+ "origin": [
+  77,
+  244
+ ],
+ "ppu": 40.0719967705934,
+ "variants": {
+  "day": {
+   "amb": 0
+  },
+  "night": {
+   "amb": -1
+  }
+ },
+ "layers": [
+  "all"
+ ],
+ "bear": {
+  "json": "anim_p/anim_p.json",
+  "clip": "sit_floor",
+  "dir": "SE",
+  "at": [
+   0,
+   0
+  ]
+ }
+}

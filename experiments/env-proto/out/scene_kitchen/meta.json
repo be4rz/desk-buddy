@@ -1,0 +1,29 @@
+{
+ "name": "scene_kitchen",
+ "note": "Mini kitchen: counter, stove with a steaming kettle, shelves, a little fridge",
+ "W": 250,
+ "H": 192,
+ "origin": [
+  116,
+  181
+ ],
+ "ppu": 40.0719967705934,
+ "variants": {
+  "": {
+   "amb": 0
+  }
+ },
+ "layers": [
+  "all"
+ ],
+ "bear": {
+  "json": "set_sit_a/anim_sit_a.json",
+  "set": "snack",
+  "ori": "A",
+  "file": "snack_munch_A.png",
+  "at": [
+   0,
+   0
+  ]
+ }
+}

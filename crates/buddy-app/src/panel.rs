@@ -135,6 +135,10 @@ struct State {
     polls: u64,
     /// the bear's floor anchor in the canvas (sprite px): the cursor sense's origin
     anchor: Option<[i32; 2]>,
+    /// the feet in sprite px from the canvas's bottom-left corner (`Position::feet`)
+    feet: [i32; 2],
+    /// where a saved position without `feet` had them (the canvas before room art)
+    old_feet: [i32; 2],
     /// the cursor sense (`senses::cursor`): relative samples, ≤ 10 Hz, to the brain only
     cursor: Feed,
     /// last `Inbox::DragMoved` (ms since `born`)
@@ -183,6 +187,18 @@ extern "C" {
     fn CGDisplayCreateUUIDFromDisplayID(display: u32) -> Option<NonNull<CFUUID>>;
 }
 
+/// How far (points) a saved window origin moves so the feet stay put when they sat `saved`
+/// sprite px from the corner and now sit `now` sprite px from it.
+fn feet_shift(saved: [i32; 2], now: [i32; 2], pt: f64) -> (f64, f64) {
+    (((saved[0] - now[0]) as f64 * pt).round(), ((saved[1] - now[1]) as f64 * pt).round())
+}
+
+/// A window origin (one axis) after its size goes from `old` to `new` points, with the feet
+/// at `frac` of the size from that origin staying where they are.
+fn keep_feet(origin: f64, old: f64, new: f64, frac: f64) -> f64 {
+    (origin + frac * (old - new)).round()
+}
+
 /// The CGDisplay UUID of a screen, as a string (settings `position.display`).
 fn screen_uuid(s: &NSScreen) -> Option<String> {
     let desc = s.deviceDescription();
@@ -196,7 +212,7 @@ fn screen_uuid(s: &NSScreen) -> Option<String> {
 impl Panel {
     /// A panel for a `w x h` sprite-px canvas, placed at `pos` when that display is
     /// still attached (else S1's initial placement), shown front.
-    pub fn new(mtm: MainThreadMarker, w: usize, h: usize, zoom: u32, pos: Option<&Position>) -> Rc<Self> {
+    pub fn new(mtm: MainThreadMarker, w: usize, h: usize, zoom: u32, pos: Option<&Position>, feet: [i32; 2], old_feet: [i32; 2]) -> Rc<Self> {
         let rect = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(w as f64, h as f64));
         let style = NSWindowStyleMask::Borderless | NSWindowStyleMask::NonactivatingPanel;
         let panel = NSPanel::initWithContentRect_styleMask_backing_defer(
@@ -248,6 +264,8 @@ impl Panel {
                 watch_timer: None,
                 polls: 0,
                 anchor: None,
+                feet,
+                old_feet,
                 cursor: Feed::default(),
                 drag_posted: None,
                 born: Instant::now(),
@@ -306,12 +324,19 @@ impl Panel {
         };
         let vf = scr.visibleFrame();
         let (w, h) = self.size_pt();
-        let (x, y) = (pos.x as f64, pos.y as f64);
+        // keep the feet where they were: the canvas (and so the corner) moves when room art changes
+        let (_, pt) = self.sprite_pt();
+        let (feet, old_feet) = {
+            let st = self.st.borrow();
+            (st.feet, st.old_feet)
+        };
+        let (dx, dy) = feet_shift(pos.feet.unwrap_or(old_feet), feet, pt);
+        let (x, y) = (pos.x as f64 + dx, pos.y as f64 + dy);
         let overlaps = x < vf.origin.x + vf.size.width && x + w > vf.origin.x && y < vf.origin.y + vf.size.height && y + h > vf.origin.y;
         if !overlaps {
             return false;
         }
-        // position = the window origin (kept fixed, unlike zoom which keeps the centre)
+        // position = the window origin (kept fixed, unlike zoom which keeps the feet)
         self.panel.setFrame_display(CGRect::new(CGPoint::new(x, y), CGSize::new(w, h)), true);
         self.set_layer_frame();
         true
@@ -321,7 +346,8 @@ impl Panel {
     pub fn position(&self) -> Option<Position> {
         let f = self.panel.frame();
         let display = self.panel.screen().and_then(|s| screen_uuid(&s))?;
-        Some(Position { display, x: f.origin.x.round() as i32, y: f.origin.y.round() as i32, extra: Default::default() })
+        let feet = Some(self.st.borrow().feet);
+        Some(Position { display, x: f.origin.x.round() as i32, y: f.origin.y.round() as i32, feet, extra: Default::default() })
     }
 
     /// The primary display's height: Cocoa (bottom-left) ↔ CG (top-left) global points.
@@ -354,13 +380,16 @@ impl Panel {
         [(anchor[0] as f64 * pt).round() as i32, (anchor[1] as f64 * pt).round() as i32]
     }
 
-    /// Resize around the current centre and snap the origin to whole points.
+    /// Resize keeping the feet where they are on screen (room art puts them far from the
+    /// canvas centre) and snap the origin to whole points.
     fn apply_geometry(&self) {
         let (w, h) = self.size_pt();
         let f = self.panel.frame();
-        let cx = f.origin.x + f.size.width / 2.0;
-        let cy = f.origin.y + f.size.height / 2.0;
-        let r = CGRect::new(CGPoint::new((cx - w / 2.0).round(), (cy - h / 2.0).round()), CGSize::new(w, h));
+        let (fx, fy) = {
+            let st = self.st.borrow();
+            (st.feet[0] as f64 / st.w.max(1) as f64, st.feet[1] as f64 / st.h.max(1) as f64)
+        };
+        let r = CGRect::new(CGPoint::new(keep_feet(f.origin.x, f.size.width, w, fx), keep_feet(f.origin.y, f.size.height, h, fy)), CGSize::new(w, h));
         if r != f {
             self.panel.setFrame_display(r, true);
         }
@@ -747,4 +776,28 @@ fn frontmost_is_fullscreen(_mtm: MainThreadMarker) -> bool {
     }
     let Some(wins) = crate::senses::read_windows() else { return false };
     crate::senses::fullscreen::is_fullscreen(&wins, pid, &crate::senses::fullscreen::displays())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{feet_shift, keep_feet};
+
+    #[test]
+    fn a_saved_position_keeps_the_feet_when_the_canvas_grows() {
+        // the feet were 60 px right of / 20 px above the corner; room art puts them at 150 / 110
+        assert_eq!(feet_shift([60, 20], [150, 110], 1.0), (-90.0, -90.0));
+        assert_eq!(feet_shift([60, 20], [150, 110], 2.0), (-180.0, -180.0));
+        // same canvas: the origin stays
+        assert_eq!(feet_shift([150, 110], [150, 110], 1.5), (0.0, 0.0));
+    }
+
+    #[test]
+    fn a_size_change_keeps_the_feet_on_screen() {
+        // a 374 pt wide window at x 100, feet at 186/374 of it: at twice the size the feet stay at 286
+        let x = keep_feet(100.0, 374.0, 748.0, 186.0 / 374.0);
+        assert_eq!(x, -86.0);
+        assert_eq!(x + 748.0 * 186.0 / 374.0, 100.0 + 186.0);
+        // same size: the origin only snaps to whole points
+        assert_eq!(keep_feet(100.4, 374.0, 374.0, 0.5), 100.0);
+    }
 }

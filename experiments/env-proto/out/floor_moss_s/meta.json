@@ -1,0 +1,27 @@
+{
+ "name": "floor_moss_s",
+ "note": "Moss garden: stepping stones, bamboo leaves, clover",
+ "W": 202,
+ "H": 126,
+ "origin": [
+  102,
+  62
+ ],
+ "ppu": 40.0719967705934,
+ "variants": {
+  "": {
+   "amb": 0
+  }
+ },
+ "layers": [
+  "all"
+ ],
+ "bear": {
+  "clip": "idle",
+  "dir": "S",
+  "at": [
+   0,
+   0
+  ]
+ }
+}

@@ -38,7 +38,7 @@ fn show(behavior: &str, clip: &str, dir: Dir, ori: Option<Ori>, frame: u16) -> S
     }
 }
 
-const BARE: View = View { cam: [0, 0], floor: false, vignette: false };
+const BARE: View = View { cam: [0, 0], floor: false, vignette: false, patch: None, scenes: true, hour: 12 };
 
 fn scratch(name: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("mascot-render-{}-{name}", std::process::id()));
@@ -341,4 +341,217 @@ fn desk_talk_draws_the_set_face_on_the_set_frame() {
     let so = &p.sets["desk"].oris[&Ori::A];
     let h = handoff_px(&p, "desk", Ori::A).unwrap();
     assert_frame_at(&a, &p.clips["desk_type"].oris[&Ori::A].file, so.frame_w, so.frame_h, 3, so.anchor, [ax - h[0], ay - h[1]]);
+}
+
+// ---------- room art: floors and pocket scenes ----------
+
+fn room() -> &'static RoomMeta {
+    static R: OnceLock<RoomMeta> = OnceLock::new();
+    R.get_or_init(|| mascot_core::room::load(&repo().join("rooms/starter")).expect("rooms/starter loads"))
+}
+
+fn room_art() -> &'static Art {
+    static A: OnceLock<Art> = OnceLock::new();
+    A.get_or_init(|| Art::load_with(bear(), Some(room())).expect("bear + starter room art loads"))
+}
+
+fn compose_room(s: &Show, v: &View) -> Canvas {
+    let mut c = room_art().canvas();
+    compose(room_art(), s, v, &mut c);
+    c
+}
+
+/// `px`, un-premultiplied (room pixels are composed at alpha 254).
+fn straight(c: &Canvas, x: i32, y: i32) -> [u8; 4] {
+    let p = px(c, x, y);
+    let a = p[3] as u32;
+    let un = |v: u8| if a == 0 { 0 } else { ((v as u32 * 255 + a / 2) / a).min(255) as u8 };
+    [un(p[0]), un(p[1]), un(p[2]), p[3]]
+}
+
+/// Same colour? Alpha 254 cannot hold every 8-bit value exactly, so a channel may be 1 off.
+fn close(a: &[u8], b: &[u8]) -> bool {
+    a.iter().zip(b).all(|(x, y)| x.abs_diff(*y) <= 1)
+}
+
+/// Straight RGBA of every pixel of a room PNG.
+fn room_png(rel: &str) -> (i32, i32, Vec<u8>) {
+    let (w, h, rgba) = read_png(&repo().join("rooms/starter").join(rel)).unwrap();
+    (w as i32, h as i32, rgba)
+}
+
+/// How many opaque pixels of `rel` (origin on the anchor, mirrored or not) show their own colour at
+/// alpha 254 on the canvas, and how many are covered by the mascot (alpha 255).
+fn room_pixels(c: &Canvas, rel: &str, origin: [i32; 2], flip: bool) -> (usize, usize, usize) {
+    let (w, h, rgba) = room_png(rel);
+    let [ax, ay] = room_art().anchor();
+    let (mut same, mut covered, mut wrong) = (0, 0, 0);
+    for y in 0..h {
+        for x in 0..w {
+            let p = &rgba[((y * w + x) * 4) as usize..][..4];
+            if p[3] == 0 {
+                continue;
+            }
+            let d = x - origin[0];
+            let got = straight(c, if flip { ax - d } else { ax + d }, ay + y - origin[1]);
+            match got[3] {
+                254 if close(&got[..3], &p[..3]) => same += 1,
+                255 => covered += 1,
+                _ => wrong += 1,
+            }
+        }
+    }
+    (same, covered, wrong)
+}
+
+const LAPTOP: (&str, &str) = ("laptop", "laptop_type");
+
+#[test]
+fn the_canvas_holds_all_room_art_and_the_bear_alone_keeps_its_size() {
+    let (w, h) = room_art().size();
+    let [ax, ay] = room_art().anchor();
+    for f in &room().floors {
+        let (fw, fh, _) = room_png(f.file.strip_prefix(&room().dir).unwrap().to_str().unwrap());
+        assert!(ax - f.origin[0] >= 0 && ay - f.origin[1] >= 0 && ax - f.origin[0] + fw <= w as i32 && ay - f.origin[1] + fh <= h as i32, "floor {}", f.id);
+    }
+    for s in &room().scenes {
+        let (sw, sh, _) = room_png(s.variants[0].back.strip_prefix(&room().dir).unwrap().to_str().unwrap());
+        let (l, r) = (s.origin[0], sw - 1 - s.origin[0]);
+        // both placements: as made (A) and mirrored (B)
+        assert!(ax - l.max(r) >= 0 && ax + l.max(r) < w as i32 && ay - s.origin[1] >= 0 && ay - s.origin[1] + sh <= h as i32, "scene {}", s.id);
+    }
+    assert_eq!(art().size(), canvas_size(bear()), "without a room the canvas is the pack's own");
+    assert!(w > art().size().0 && h > art().size().1);
+}
+
+#[test]
+fn a_floor_patch_is_drawn_under_the_bear_and_never_takes_a_click() {
+    let s = show("idle", "idle", Dir::S, None, 0);
+    for (i, f) in room().floors.iter().enumerate() {
+        assert_eq!(room_art().floor_index(&f.id), Some(i));
+        let c = compose_room(&s, &View { patch: Some(i), ..View::default() });
+        let rel = format!("floors/{}.png", f.id);
+        let (same, covered, wrong) = room_pixels(&c, &rel, f.origin, false);
+        assert_eq!(wrong, 0, "{rel}: every floor pixel shows or is behind the bear");
+        assert!(same > 3000 && covered > 50, "{rel}: {same} shown, {covered} behind the bear");
+        // the hit mask is the bear's alone: the same as with no floor at all
+        let bare = compose_room(&s, &View { floor: false, ..View::default() });
+        let (mut a, mut b) = (vec![false; c.w * c.h], vec![false; c.w * c.h]);
+        hit_mask(&c, &mut a);
+        hit_mask(&bare, &mut b);
+        assert!(a == b && a.iter().any(|h| *h), "{rel}: clicks reach only the bear");
+    }
+    assert_eq!(room_art().floor_index("lava"), None);
+    // an index the room does not have draws the grid's fallback (nothing), not a panic
+    let c = compose_room(&s, &View { patch: Some(99), floor: false, ..View::default() });
+    assert_eq!(c, compose_room(&s, &View { floor: false, ..View::default() }));
+}
+
+#[test]
+fn a_scene_shows_during_its_activity_only_and_follows_the_hour() {
+    let v = |hour| View { hour, ..View::default() };
+    let s = show(LAPTOP.0, LAPTOP.1, Dir::SE, Some(Ori::A), 0);
+    let nook = &room().scenes[0];
+    for (hour, name) in [(6, "dawn"), (12, "day"), (18, "dusk"), (23, "night"), (2, "night")] {
+        let c = compose_room(&s, &v(hour));
+        let (same, covered, wrong) = room_pixels(&c, &format!("scenes/nook_{name}.png"), nook.origin, false);
+        assert_eq!(wrong, 0, "nook {name} at {hour}h");
+        assert!(same > 20_000 && covered > 500, "nook {name}: {same} shown, {covered} behind the bear");
+    }
+    assert_ne!(compose_room(&s, &v(12)), compose_room(&s, &v(23)));
+    // the scene has no floor of its own: it sits on the selected floor patch, which shows around it
+    let on = compose_room(&s, &View { patch: Some(0), ..v(12) });
+    let (same, _, wrong) = room_pixels(&on, "scenes/nook_day.png", nook.origin, false);
+    assert!(wrong == 0 && same > 5_000, "nook over a floor: {same} shown, {wrong} wrong");
+    let f = &room().floors[0];
+    let (floor_px, _, _) = room_pixels(&on, f.file.strip_prefix(&room().dir).unwrap().to_str().unwrap(), f.origin, false);
+    assert!(floor_px > 5_000, "the floor shows around the scene: {floor_px}");
+    assert_ne!(on, compose_room(&s, &View { floor: false, ..v(12) }));
+    // scenes off: the activity as before (no room pixel at all)
+    let off = compose_room(&s, &View { scenes: false, floor: false, ..v(12) });
+    assert!(off.px.chunks_exact(4).all(|p| p[3] != 254));
+    // not this scene's activity: nothing
+    let idle = show("idle", "idle", Dir::S, None, 0);
+    assert_eq!(room_art().scene(&idle, &v(12)), None);
+    assert!(compose_room(&idle, &View { floor: false, ..v(12) }).px.chunks_exact(4).all(|p| p[3] != 254));
+    // every scene is wired to a behavior the bear has
+    for sc in &room().scenes {
+        for b in &sc.for_ {
+            assert!(bear().behaviors.contains_key(b), "scene {} is for {b}, which the bear does not have", sc.id);
+        }
+    }
+    // floor sitting is a free clip (no set): the grove shows in any direction, never mirrored
+    let sit = show("sit_floor", "sit_floor", Dir::W, None, 3);
+    assert_eq!(room_art().scene(&sit, &v(12)), Some((3, 0, false)));
+    assert_eq!(room_art().scene(&sit, &v(22)), Some((3, 1, false)));
+    let mut hidden = s.clone();
+    hidden.visibility = Visibility::Hidden;
+    assert_eq!(room_art().scene(&hidden, &v(12)), None);
+}
+
+#[test]
+fn the_tea_table_is_drawn_over_the_bear_and_scenes_never_take_a_click() {
+    let s = show("tea", "tea_sip", Dir::SE, Some(Ori::A), 0);
+    let c = compose_room(&s, &View::default());
+    let tea = &room().scenes[2];
+    // every front pixel shows its own colour, over the bear (255) or over the room (254)
+    let (w, h, rgba) = room_png("scenes/tearoom_base_front.png");
+    let [ax, ay] = room_art().anchor();
+    let (mut n, mut over_bear) = (0, 0);
+    for y in 0..h {
+        for x in 0..w {
+            let p = &rgba[((y * w + x) * 4) as usize..][..4];
+            if p[3] == 255 {
+                let got = straight(&c, ax + x - tea.origin[0], ay + y - tea.origin[1]);
+                assert!(close(&got[..3], &p[..3]), "front pixel {x},{y}: {got:?} is not {p:?}");
+                n += 1;
+                over_bear += (got[3] == 255) as usize;
+            }
+        }
+    }
+    assert!(n > 500, "the front layer has art ({n} px)");
+    // clicks: exactly where the bear's own frame is opaque
+    let bare = compose_room(&s, &View { scenes: false, floor: false, ..View::default() });
+    let (mut a, mut b) = (vec![false; c.w * c.h], vec![false; c.w * c.h]);
+    hit_mask(&c, &mut a);
+    hit_mask(&bare, &mut b);
+    assert!(a == b, "the scene adds no clickable pixel ({over_bear} front px sit over the bear)");
+}
+
+#[test]
+fn placement_b_mirrors_the_scene_about_the_bear() {
+    let s = show(LAPTOP.0, LAPTOP.1, Dir::SW, Some(Ori::B), 0);
+    assert_eq!(room_art().scene(&s, &View::default()), Some((0, 1, true)));
+    let c = compose_room(&s, &View::default());
+    let (same, covered, wrong) = room_pixels(&c, "scenes/nook_day.png", room().scenes[0].origin, true);
+    assert_eq!(wrong, 0);
+    assert!(same > 20_000 && covered > 500, "{same} shown, {covered} behind the bear");
+    // and not as made
+    let (_, _, wrong) = room_pixels(&c, "scenes/nook_day.png", room().scenes[0].origin, false);
+    assert!(wrong > 1000);
+    // still turning toward the set (no placement yet): no scene, so it never shows unmirrored first
+    let turning = show(LAPTOP.0, "idle", Dir::SW, None, 0);
+    assert_eq!(room_art().scene(&turning, &View::default()), None);
+    assert!(compose_room(&turning, &View { floor: false, ..View::default() }).px.chunks_exact(4).all(|p| p[3] != 254));
+}
+
+#[test]
+fn bad_room_art_is_refused() {
+    let d = scratch("badroom");
+    let write = |name: &str, w: usize, h: usize, rgba: &[u8]| write_png(&d.join(name), w, h, rgba).unwrap();
+    write("ok.png", 2, 2, &[10, 20, 30, 255, 0, 0, 0, 0, 0, 0, 0, 0, 10, 20, 30, 255]);
+    write("soft.png", 2, 2, &[10, 20, 30, 128, 0, 0, 0, 0, 0, 0, 0, 0, 10, 20, 30, 255]);
+    write("big.png", 3, 2, &[10, 20, 30, 255].repeat(6));
+    let load = |json: &str| {
+        std::fs::write(d.join("room.json"), json).unwrap();
+        Art::load_with(bear(), Some(&mascot_core::room::load(&d).unwrap())).err().map(|e| e.to_string())
+    };
+    let floor = |file: &str, origin: &str| format!(r#"{{"room_version":1,"id":"t","floors":[{{"id":"f","file":"{file}","origin":{origin}}}]}}"#);
+    assert_eq!(load(&floor("ok.png", "[1,1]")), None);
+    assert!(load(&floor("soft.png", "[1,1]")).unwrap().contains("alpha 0 or 255"));
+    assert!(load(&floor("ok.png", "[2,0]")).unwrap().contains("outside the 2x2 image"));
+    let scene = r#"{"room_version":1,"id":"t","scenes":[{"id":"s","for":["tea"],"origin":[0,0],"variants":[{"name":"v","back":"ok.png","front":"big.png"}]}]}"#;
+    assert!(load(scene).unwrap().contains("front is 3x2, back is 2x2"));
+    std::fs::write(d.join("junk.png"), b"not a png").unwrap();
+    assert!(load(&floor("junk.png", "[0,0]")).is_some());
 }

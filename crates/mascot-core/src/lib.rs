@@ -10,6 +10,7 @@ pub mod reaction;
 pub mod reflex;
 pub mod replay;
 pub mod rng;
+pub mod room;
 #[cfg(test)]
 mod test_pack;
 
@@ -22,3 +23,4 @@ pub use pack::{load, load_report, ActivityMeta, BodyMeta, EmoteAct, EmoteMeta, C
 pub use reaction::Cursor;
 pub use reflex::Reflexes;
 pub use rng::Rng;
+pub use room::{FloorMeta, RoomError, RoomMeta, SceneMeta, VariantMeta};

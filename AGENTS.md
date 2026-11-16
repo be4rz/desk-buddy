@@ -52,6 +52,17 @@ and talks through speech bubbles, powered by an LLM.
   listed by the sidecar's `models` command; writes `settings.model`), **Approvals ▸ Full access** (policy mode `full`:
   everything runs except ask rules, `policy::rules::attention` commands and `sensitive_path` files; deny rules still
   deny, and it runs as `allowlist` while the chat is marked by the web).
+  Rooms (floors and pocket scenes, D13): a room pack is `rooms/<id>/room.json` + PNGs, mascot-independent
+  (`rooms/README.md`; loader `mascot_core::room`, drawn by `mascot-render` via `Art::load_with`). `settings.room` (default
+  `starter`), `BUDDY_ROOM=<dir>` overrides; a broken room exits 1 with `[buddy] cannot load room …`, none at all runs with
+  the grid only. Tray **Floor ▸** (Grid, None, then the room's floors; `settings.floor`) and **Scenes around activities**
+  (`settings.scenes`, on by default): a scene (`for` = behavior or set names; furniture and decorations only, no floor or walls of its own) is
+  drawn over the selected floor while that behavior plays, mirrored for set placement B, its timed variant picked by the local hour. Room pixels are composed at alpha 254,
+  so they never take clicks (the hit mask is alpha 255 only). The canvas grows to hold the room art; a saved
+  `position` carries `feet` so the bear stays put when the canvas changes. Replay
+  `crates/buddy-app/tests/fixtures/scenes.jsonl`. Art: `experiments/env-proto/` (`sh build.sh`, ~2 min: renders,
+  pixelizes, writes `rooms/starter/` and verifies it, byte-identical each run; `python3 verify_env.py [--room DIR]` checks palette, alpha 0/255, edges and hours;
+  `--self-test`, exit 1 = works; `python3 review.py` → `out/review/index.html`).
   Widgets (p5): `crates/widgets` (manifests `crates/widgets/<id>/widget.json`, the loopback widget server on a random
   port, logged `[buddy] widgets at http://127.0.0.1:<wport>`; pages `<id>/index.html?mock=<state>`) + `src/widgets.rs`
   (windows, run-time capabilities: each widget page gets only its own `widget_*` commands, the browser's page none).

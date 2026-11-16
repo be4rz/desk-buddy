@@ -1,0 +1,27 @@
+{
+ "name": "floor_tile_s",
+ "note": "Cream and sage checker tiles with terracotta insets",
+ "W": 268,
+ "H": 146,
+ "origin": [
+  134,
+  67
+ ],
+ "ppu": 40.0719967705934,
+ "variants": {
+  "": {
+   "amb": 0
+  }
+ },
+ "layers": [
+  "all"
+ ],
+ "bear": {
+  "clip": "idle",
+  "dir": "S",
+  "at": [
+   0,
+   0
+  ]
+ }
+}

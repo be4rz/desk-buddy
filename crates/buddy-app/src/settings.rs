@@ -25,6 +25,12 @@ pub struct Settings {
     pub model: Model,
     pub edges: Edges,
     pub studio: Studio,
+    /// The room pack (floors and pocket scenes): a folder under `rooms/`.
+    pub room: String,
+    /// The floor under the mascot: `grid` (the drawn iso grid), `none`, or a floor id of the room pack.
+    pub floor: String,
+    /// Show the room's pocket scenes around the mascot during the activities they belong to.
+    pub scenes: bool,
     /// The first-launch hello (or the setup bubble) was shown: it never repeats.
     pub onboarded: bool,
     #[serde(flatten)]
@@ -44,6 +50,9 @@ impl Default for Settings {
             model: Model::default(),
             edges: Edges::default(),
             studio: Studio::default(),
+            room: "starter".into(),
+            floor: "grid".into(),
+            scenes: true,
             onboarded: false,
             extra: Extra::new(),
         }
@@ -56,6 +65,10 @@ pub struct Position {
     pub display: String,
     pub x: i32,
     pub y: i32,
+    /// The mascot's feet in sprite px from that origin when this was saved. The canvas grows with
+    /// the room art, so the feet (not the window corner) are what a restore keeps in place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feet: Option<[i32; 2]>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -243,7 +256,8 @@ mod tests {
             "dnd":{"action":"hide","fullscreen":false,"screen_share":true},
             "quiet_hours":{"enabled":true,"start":"22:30","end":"07:30"},
             "attention":{"per_hour":4},"model":{"provider":"anthropic","model":"claude-sonnet-5-5"},
-            "edges":{"enabled":true},"studio":{"packs_dir":null},"onboarded":false}"#,
+            "edges":{"enabled":true},"studio":{"packs_dir":null},
+            "room":"starter","floor":"grid","scenes":true,"onboarded":false}"#,
         )
         .unwrap();
         assert_eq!(v, want);
@@ -261,6 +275,20 @@ mod tests {
         s.save(&h).unwrap();
         let (s, _) = load(&h);
         assert_eq!((s.settings_version, s.dnd.fullscreen), (2, true));
+    }
+
+    #[test]
+    fn a_file_from_before_rooms_gets_the_grid_and_scenes_and_a_choice_is_kept() {
+        let h = tmp_home("rooms");
+        std::fs::write(path(&h), r#"{"settings_version":2,"zoom":2}"#).unwrap();
+        let (mut s, note) = load(&h);
+        assert_eq!(note, None);
+        assert_eq!((s.room.as_str(), s.floor.as_str(), s.scenes), ("starter", "grid", true));
+        s.floor = "moss".into();
+        s.scenes = false;
+        s.save(&h).unwrap();
+        let (s, _) = load(&h);
+        assert_eq!((s.floor.as_str(), s.scenes, s.zoom), ("moss", false, 2));
     }
 
     #[test]

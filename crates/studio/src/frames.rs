@@ -152,7 +152,7 @@ pub fn render(pack: &PackMeta, art: &Art, opts: &RenderOpts) -> Result<Frame> {
 /// `show` composed and cropped to its clip's frame box, at sprite resolution (premultiplied).
 pub fn composed(pack: &PackMeta, art: &Art, show: &Show) -> Result<Canvas> {
     let mut c = art.canvas();
-    compose(art, show, &View { cam: [0, 0], floor: false, vignette: false }, &mut c);
+    compose(art, show, &View { cam: [0, 0], floor: false, vignette: false, ..View::default() }, &mut c);
     let r = frame_box(pack, art, &show.clip, show.ori).ok_or_else(|| Error(format!("clip “{}” has no frame box", show.clip)))?;
     Ok(crop(&c, r))
 }

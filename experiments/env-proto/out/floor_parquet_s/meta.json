@@ -1,0 +1,27 @@
+{
+ "name": "floor_parquet_s",
+ "note": "Honey oak herringbone parquet",
+ "W": 272,
+ "H": 150,
+ "origin": [
+  136,
+  69
+ ],
+ "ppu": 40.0719967705934,
+ "variants": {
+  "": {
+   "amb": 0
+  }
+ },
+ "layers": [
+  "all"
+ ],
+ "bear": {
+  "clip": "idle",
+  "dir": "S",
+  "at": [
+   0,
+   0
+  ]
+ }
+}

@@ -80,6 +80,25 @@ fn pack_dir(id: &str, home: &Path) -> PathBuf {
     c.iter().find(|d| d.join("pack.json").is_file()).cloned().unwrap_or_else(|| c[0].clone())
 }
 
+/// The room pack's folder (floors and pocket scenes): `BUDDY_ROOM`, else `<id>` under the repo's
+/// `rooms/` (debug builds) or `BUDDY_HOME/rooms`. `None` when no such folder has a `room.json`:
+/// the app then runs with the grid only.
+fn room_dir(id: &str, home: &Path) -> Option<PathBuf> {
+    if let Some(p) = std::env::var_os("BUDDY_ROOM").filter(|p| !p.is_empty()) {
+        return Some(PathBuf::from(p));
+    }
+    let mut roots = vec![];
+    if cfg!(debug_assertions) {
+        roots.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rooms"));
+    }
+    roots.push(home.join("rooms"));
+    // an id is one folder name, never a path out of the roots
+    if id.is_empty() || id.contains(['/', '\\']) || id.starts_with('.') {
+        return None;
+    }
+    roots.into_iter().map(|r| r.join(id)).find(|d| d.join("room.json").is_file())
+}
+
 fn fail(what: &str, e: impl std::fmt::Display) -> ! {
     eprintln!("[buddy] cannot load {what}: {e}");
     std::process::exit(1);
@@ -123,10 +142,30 @@ fn main() {
         Ok(p) => Arc::new(p),
         Err(e) => fail("mascot pack", e),
     };
-    let art = match mascot_render::Art::load(&pack) {
-        Ok(a) => a,
-        Err(e) => fail("mascot art", e),
+    // a room that is there but broken stops the launch like a broken pack; none at all is fine
+    let room = match room_dir(&settings.room, &home) {
+        Some(d) => match mascot_core::room::load(&d) {
+            Ok(r) => Some(r),
+            Err(e) => fail("room", e),
+        },
+        None => {
+            eprintln!("[buddy] no room pack \"{}\": floors and scenes are off", settings.room);
+            None
+        }
     };
+    let art = match mascot_render::Art::load_with(&pack, room.as_ref()) {
+        Ok(a) => a,
+        Err(e) => fail(if room.is_some() { "mascot or room art" } else { "mascot art" }, e),
+    };
+    if let Some(r) = &room {
+        eprintln!("[buddy] room {}: {} floors, {} scenes, from {}", r.id, r.floors.len(), r.scenes.len(), r.dir.display());
+        // a room is mascot-independent, so a name this mascot lacks is fine, but say it: a typo never shows
+        for (sc, n) in r.scenes.iter().flat_map(|sc| sc.for_.iter().map(move |n| (sc, n))) {
+            if !pack.behaviors.contains_key(n) && !pack.sets.contains_key(n) && !pack.stations.contains_key(n) {
+                eprintln!("[buddy] room {}: scene {} is for \"{n}\", which this mascot has no behavior or set of", r.id, sc.id);
+            }
+        }
+    }
     let items = match std::env::var_os("BUDDY_EVENTS") {
         Some(f) => match events::load(Path::new(&f)) {
             Ok(v) => Some(v),
@@ -134,7 +173,7 @@ fn main() {
         },
         None => None,
     };
-    let (cw, ch) = mascot_render::canvas_size(&pack);
+    let (cw, ch) = art.size();
     eprintln!(
         "[buddy] pack {}: {} behaviors ({} available), canvas {cw}x{ch} sprite px, from {}",
         pack.id,
@@ -197,8 +236,8 @@ fn main() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             let (pack, art, settings, home, brain, items, warning, icon) = boot.take().unwrap();
             let mtm = MainThreadMarker::new().expect("setup runs on the main thread");
-            let (w, h) = mascot_render::canvas_size(&pack);
-            let panel = panel::Panel::new(mtm, w, h, zoom, settings.position.as_ref());
+            let (w, h) = art.size();
+            let panel = panel::Panel::new(mtm, w, h, zoom, settings.position.as_ref(), art.feet(), mascot_render::feet_without_room(&pack));
             let q = &settings.quiet_hours;
             let tray_init = tray::TrayInit {
                 pack_id: pack.id.clone(),
@@ -209,6 +248,9 @@ fn main() {
                 quiet_enabled: q.enabled,
                 quiet_span: format!("{}–{}", q.start, q.end),
                 dnd_fullscreen: settings.dnd.fullscreen,
+                floors: art.room().map(|r| r.floors.iter().map(|f| (f.id.clone(), f.name.clone())).collect()).unwrap_or_default(),
+                floor: driver::floor_choice(&art, &settings.floor).to_string(),
+                scenes: art.room().is_some_and(|r| !r.scenes.is_empty()).then_some(settings.scenes),
             };
             let wanted = settings.model.clone();
             let home2 = home.clone();

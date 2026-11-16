@@ -1,0 +1,188 @@
+{
+  "room_version": 1,
+  "id": "starter",
+  "name": "Starter room",
+  "palettes": [
+    "../../experiments/env-proto/palette-env.json",
+    "../../experiments/scene-proto/palette.json",
+    "../../experiments/bear-proto/palette-bear.json",
+    "../../experiments/mascot/bear3d/palette-ext.json",
+    "../../experiments/mascot/bear3d/palette-ext-out.json"
+  ],
+  "floors": [
+    {
+      "id": "tatami",
+      "name": "Tatami",
+      "file": "floors/tatami.png",
+      "origin": [
+        138,
+        69
+      ]
+    },
+    {
+      "id": "parquet",
+      "name": "Parquet",
+      "file": "floors/parquet.png",
+      "origin": [
+        136,
+        69
+      ]
+    },
+    {
+      "id": "tile",
+      "name": "Checker tile",
+      "file": "floors/tile.png",
+      "origin": [
+        134,
+        67
+      ]
+    },
+    {
+      "id": "moss",
+      "name": "Moss garden",
+      "file": "floors/moss.png",
+      "origin": [
+        102,
+        62
+      ]
+    },
+    {
+      "id": "snow",
+      "name": "Snow",
+      "file": "floors/snow.png",
+      "origin": [
+        104,
+        68
+      ]
+    }
+  ],
+  "scenes": [
+    {
+      "id": "nook",
+      "name": "Window nook",
+      "for": [
+        "laptop",
+        "notebook"
+      ],
+      "origin": [
+        121,
+        186
+      ],
+      "variants": [
+        {
+          "name": "dawn",
+          "back": "scenes/nook_dawn.png",
+          "hours": [
+            5,
+            8
+          ]
+        },
+        {
+          "name": "day",
+          "back": "scenes/nook_day.png",
+          "hours": [
+            8,
+            17
+          ]
+        },
+        {
+          "name": "dusk",
+          "back": "scenes/nook_dusk.png",
+          "hours": [
+            17,
+            20
+          ]
+        },
+        {
+          "name": "night",
+          "back": "scenes/nook_night.png",
+          "hours": [
+            20,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "id": "kitchen",
+      "name": "Mini kitchen",
+      "for": [
+        "snack"
+      ],
+      "origin": [
+        116,
+        181
+      ],
+      "variants": [
+        {
+          "name": "base",
+          "back": "scenes/kitchen_base.png"
+        }
+      ]
+    },
+    {
+      "id": "tearoom",
+      "name": "Tea room",
+      "for": [
+        "tea"
+      ],
+      "origin": [
+        133,
+        175
+      ],
+      "variants": [
+        {
+          "name": "base",
+          "back": "scenes/tearoom_base.png",
+          "front": "scenes/tearoom_base_front.png"
+        }
+      ]
+    },
+    {
+      "id": "grove",
+      "name": "Bamboo grove",
+      "for": [
+        "sit_floor"
+      ],
+      "origin": [
+        77,
+        244
+      ],
+      "variants": [
+        {
+          "name": "day",
+          "back": "scenes/grove_day.png",
+          "hours": [
+            6,
+            19
+          ]
+        },
+        {
+          "name": "night",
+          "back": "scenes/grove_night.png",
+          "hours": [
+            19,
+            6
+          ]
+        }
+      ]
+    },
+    {
+      "id": "library",
+      "name": "Fireside library",
+      "for": [
+        "read"
+      ],
+      "origin": [
+        140,
+        182
+      ],
+      "variants": [
+        {
+          "name": "evening",
+          "back": "scenes/library_evening.png"
+        }
+      ]
+    }
+  ]
+}

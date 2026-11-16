@@ -1,0 +1,38 @@
+{
+ "name": "scene_nook",
+ "note": "Window nook: a window seat by a big window; the sky follows the time of day",
+ "W": 254,
+ "H": 228,
+ "origin": [
+  121,
+  186
+ ],
+ "ppu": 40.0719967705934,
+ "variants": {
+  "dawn": {
+   "amb": 0
+  },
+  "day": {
+   "amb": 0
+  },
+  "dusk": {
+   "amb": -1
+  },
+  "night": {
+   "amb": -1
+  }
+ },
+ "layers": [
+  "all"
+ ],
+ "bear": {
+  "json": "set_sit_b/anim_sit_b.json",
+  "set": "laptop",
+  "ori": "A",
+  "file": "laptop_type_A.png",
+  "at": [
+   0,
+   0
+  ]
+ }
+}

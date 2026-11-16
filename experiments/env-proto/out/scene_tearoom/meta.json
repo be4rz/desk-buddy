@@ -1,0 +1,30 @@
+{
+ "name": "scene_tearoom",
+ "note": "Tea room: tatami, glowing shoji screens, a round window, an alcove with a scroll",
+ "W": 276,
+ "H": 220,
+ "origin": [
+  133,
+  175
+ ],
+ "ppu": 40.0719967705934,
+ "variants": {
+  "": {
+   "amb": 0
+  }
+ },
+ "layers": [
+  "all",
+  "front"
+ ],
+ "bear": {
+  "json": "set_sit_a/anim_sit_a.json",
+  "set": "tea",
+  "ori": "A",
+  "file": "tea_sip_A.png",
+  "at": [
+   0,
+   0
+  ]
+ }
+}

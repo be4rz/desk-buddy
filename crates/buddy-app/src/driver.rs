@@ -93,7 +93,8 @@ struct Key {
     mouth: MouthState,
     effect: Option<String>,
     visibility: Visibility,
-    cam: [i32; 2],
+    /// camera, floor, scenes on/off and the hour (a scene's timed variant)
+    view: View,
 }
 
 pub struct App {
@@ -211,6 +212,27 @@ pub struct Init {
     pub t0: Instant,
 }
 
+/// The floor a `settings.floor` value means with this art: `grid`, `none` or a floor id of the
+/// loaded room. Anything else (a floor of a room that is gone, a typo) is the grid.
+pub fn floor_choice<'a>(art: &Art, wanted: &'a str) -> &'a str {
+    match wanted {
+        "grid" | "none" => wanted,
+        id if art.floor_index(id).is_some() => id,
+        _ => "grid",
+    }
+}
+
+/// Point `view` at the floor `wanted` resolves to, and return that floor.
+fn set_floor_view<'a>(art: &Art, wanted: &'a str, view: &mut View) -> &'a str {
+    let f = floor_choice(art, wanted);
+    if f != wanted {
+        eprintln!("[buddy] floor \"{wanted}\" is not in the room pack: using the grid");
+    }
+    view.floor = f == "grid";
+    view.patch = art.floor_index(f);
+    f
+}
+
 /// Install the app on the main thread and start the inbox forwarder.
 pub fn start(init: Init, handle: tauri::AppHandle) {
     let (tx, rx) = channel::<Inbox>();
@@ -222,6 +244,9 @@ pub fn start(init: Init, handle: tauri::AppHandle) {
         (d, every)
     });
     let canvas = init.art.canvas();
+    let mut view = View::default();
+    set_floor_view(&init.art, &init.settings.floor, &mut view);
+    view.scenes = init.settings.scenes;
     init.panel.set_anchor(init.art.anchor());
     let app = App {
         brain: init.brain,
@@ -240,7 +265,7 @@ pub fn start(init: Init, handle: tauri::AppHandle) {
         art: init.art,
         canvas,
         last_px: vec![],
-        view: View::default(),
+        view,
         t0: init.t0,
         shown: None,
         timer: None,
@@ -402,7 +427,7 @@ impl App {
         self.settings.zoom = z.clamp(1, 3);
         self.panel.set_zoom(self.settings.zoom);
         self.edges_cfg();
-        // the zoom re-centres the panel: one write with the new zoom and position
+        // the zoom moves the panel's corner (the feet stay put): one write with the new zoom and position
         if let Some(p) = self.panel.position() {
             self.settings.position = Some(p);
         }
@@ -572,6 +597,23 @@ impl App {
         self.wake();
     }
 
+    /// Tray "Floor": `grid`, `none` or a floor of the room pack (persisted as `floor`).
+    pub fn set_floor(&mut self, id: &str) {
+        self.settings.floor = id.to_string();
+        self.save_settings();
+        eprintln!("[buddy] floor {}", set_floor_view(&self.art, id, &mut self.view));
+        self.wake();
+    }
+
+    /// Tray "Scenes" (persisted as `scenes`): the room's pocket scenes around the activities.
+    pub fn set_scenes(&mut self, on: bool) {
+        self.settings.scenes = on;
+        self.save_settings();
+        self.view.scenes = on;
+        eprintln!("[buddy] scenes {}", if on { "on" } else { "off" });
+        self.wake();
+    }
+
     /// One wake: tick the brain, present if changed, arm the next timer.
     pub fn wake(&mut self) {
         if let Some(t) = self.timer.take() {
@@ -590,6 +632,10 @@ impl App {
         if self.last_tick_ms.replace(now) != Some(now) {
             self.view.cam[0] += show.moved_px[0];
             self.view.cam[1] += show.moved_px[1];
+        }
+        // the local hour picks a scene's timed variant (noon until a clock sample arrives)
+        if self.have_clock {
+            self.view.hour = (self.raw.local.minutes / 60).min(23) as u8;
         }
         let brain_hidden = show.visibility == Visibility::Hidden;
         if brain_hidden != self.brain_hidden {
@@ -633,7 +679,7 @@ impl App {
             mouth: show.mouth,
             effect: show.effect.clone(),
             visibility: show.visibility,
-            cam: self.view.cam,
+            view: self.view,
         };
         if self.shown.as_ref() == Some(&key) {
             return; // S1's identical-frame skip

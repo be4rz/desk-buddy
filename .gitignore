@@ -23,3 +23,6 @@ __pycache__/
 # 2build local state
 .babysit/.env
 .babysit/qa.local.yaml
+
+# env-proto render passes (re-made by run.sh)
+experiments/env-proto/raw/

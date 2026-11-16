@@ -44,7 +44,7 @@ pub fn icon(art: &Art) -> Option<Image<'static>> {
         place: None,
     };
     let mut c = art.canvas();
-    mascot_render::compose(art, &show, &View { cam: [0, 0], floor: false, vignette: false }, &mut c);
+    mascot_render::compose(art, &show, &View { cam: [0, 0], floor: false, vignette: false, ..View::default() }, &mut c);
     silhouette(c.w, c.h, |x, y| c.px[(y * c.w + x) * 4 + 3])
 }
 
@@ -98,6 +98,17 @@ pub struct TrayInit {
     pub quiet_span: String,
     /// `dnd.fullscreen`: hide (or hold still) while a fullscreen app fills the bear's display
     pub dnd_fullscreen: bool,
+    /// the room pack's floors (id, name), listed under "Floor" after Grid and None
+    pub floors: Vec<(String, String)>,
+    /// `settings.floor` as shown: `grid`, `none` or one of `floors`
+    pub floor: String,
+    /// `settings.scenes`; `None` when the room has no scenes (the item is then disabled)
+    pub scenes: Option<bool>,
+}
+
+/// The Floor submenu's title, e.g. "Floor: Tatami".
+fn floor_label(floors: &[(String, String)], id: &str) -> String {
+    format!("Floor: {}", floors.iter().find(|f| f.0 == id).map_or("Grid", |f| f.1.as_str()))
 }
 
 const SIZES: [&str; 3] = ["Small", "Medium", "Large"];
@@ -194,6 +205,16 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
     let model = Submenu::with_id(app, "model", "Model", true)?;
     fill_models(app.handle(), &model, &[]);
     let fs_hide = CheckMenuItem::with_id(app, "fs_hide", "Hide over fullscreen apps", true, t.dnd_fullscreen, None::<&str>)?;
+    // Grid and None are always there; the room pack's floors follow (ids `floor:<id>`)
+    let mut floors = vec![("grid".to_string(), "Grid".to_string()), ("none".to_string(), "None".to_string())];
+    floors.extend(t.floors.iter().cloned());
+    let mut floor_items = vec![];
+    for (id, name) in &floors {
+        floor_items.push(CheckMenuItem::with_id(app, format!("floor:{id}"), name, true, *id == t.floor, None::<&str>)?);
+    }
+    let floor_refs: Vec<&dyn IsMenuItem<Wry>> = floor_items.iter().map(|i| i as &dyn IsMenuItem<Wry>).collect();
+    let floor = Submenu::with_id_and_items(app, "floor", floor_label(&floors, &t.floor), true, &floor_refs)?;
+    let scenes = CheckMenuItem::with_id(app, "scenes", "Scenes around activities", t.scenes.is_some(), t.scenes == Some(true), None::<&str>)?;
     let ask = MenuItem::with_id(app, "ask", "Ask…", true, None::<&str>)?;
     let agent = MenuItem::with_id(app, "agent", harness::AgentState::Starting.line(), false, None::<&str>)?;
     let taint = MenuItem::with_id(app, "taint", "Reset web caution", true, None::<&str>)?;
@@ -223,7 +244,7 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
     items.extend([&sep1 as &dyn IsMenuItem<Wry>, &ask, &agent]);
     // "Reset web caution" goes in under the agent line while tainted
     let taint_at = items.len();
-    items.extend([&sep4 as &dyn IsMenuItem<Wry>, &size, &hide, &next, &sep2, &dnd, &quiet, &busy, &fs_hide, &budget, &sep5, &model, &approvals, &signin, &studio, &sep3, &quit]);
+    items.extend([&sep4 as &dyn IsMenuItem<Wry>, &size, &floor, &scenes, &hide, &next, &sep2, &dnd, &quiet, &busy, &fs_hide, &budget, &sep5, &model, &approvals, &signin, &studio, &sep3, &quit]);
     let menu = Menu::with_items(app, &items)?;
 
     let hide2 = hide.clone();
@@ -364,6 +385,19 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
                     a.set_quiet_enabled(on);
                     let _ = quiet.set_checked(on);
                 }),
+                "scenes" => with_app(|a| {
+                    let on = !a.settings.scenes;
+                    a.set_scenes(on);
+                    let _ = scenes.set_checked(on);
+                }),
+                f if f.starts_with("floor:") => {
+                    let pick = &f[6..];
+                    for (i, it) in floor_items.iter().enumerate() {
+                        let _ = it.set_checked(floors[i].0 == pick);
+                    }
+                    let _ = floor.set_text(floor_label(&floors, pick));
+                    with_app(|a| a.set_floor(pick));
+                }
                 "fs_hide" => with_app(|a| {
                     let on = !a.settings.dnd.fullscreen;
                     a.set_dnd_fullscreen(on);

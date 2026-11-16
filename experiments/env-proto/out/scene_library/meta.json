@@ -1,0 +1,29 @@
+{
+ "name": "scene_library",
+ "note": "Fireside library: a wall of books, a brick fireplace, a deep rug",
+ "W": 260,
+ "H": 234,
+ "origin": [
+  140,
+  182
+ ],
+ "ppu": 40.0719967705934,
+ "variants": {
+  "evening": {
+   "amb": -1
+  }
+ },
+ "layers": [
+  "all"
+ ],
+ "bear": {
+  "json": "anim_b/anim_b.json",
+  "set": "read",
+  "ori": "A",
+  "file": "read_A.png",
+  "at": [
+   0,
+   0
+  ]
+ }
+}

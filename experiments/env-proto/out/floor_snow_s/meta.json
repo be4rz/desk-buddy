@@ -1,0 +1,27 @@
+{
+ "name": "floor_snow_s",
+ "note": "Snow field over blue ice, with a frozen puddle",
+ "W": 208,
+ "H": 134,
+ "origin": [
+  104,
+  68
+ ],
+ "ppu": 40.0719967705934,
+ "variants": {
+  "": {
+   "amb": 0
+  }
+ },
+ "layers": [
+  "all"
+ ],
+ "bear": {
+  "clip": "idle",
+  "dir": "S",
+  "at": [
+   0,
+   0
+  ]
+ }
+}

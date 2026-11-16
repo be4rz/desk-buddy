@@ -1,0 +1,17 @@
+// Pocket scenes (rooms/starter): each activity that has a scene, at several times of day. The nook (laptop, notebook)
+// and the grove (sit_floor) follow the local hour; kitchen (snack), tea room (tea) and library (read) do not.
+// It starts at 07:45 (dawn): quiet hours end at 07:30, and the bear only naps during them.
+{"at_ms": 0, "senses": {"local": {"minutes": 465, "weekday": 2}}}
+{"at_ms": 4000, "event": {"type": "activity", "name": "laptop", "forMs": 8000}}
+{"at_ms": 24000, "senses": {"local": {"minutes": 720, "weekday": 2}}}
+{"at_ms": 24500, "event": {"type": "activity", "name": "notebook", "forMs": 8000}}
+{"at_ms": 48000, "senses": {"local": {"minutes": 1080, "weekday": 2}}}
+{"at_ms": 48500, "event": {"type": "activity", "name": "snack", "forMs": 8000}}
+{"at_ms": 72000, "event": {"type": "activity", "name": "laptop", "forMs": 8000}}
+{"at_ms": 96000, "senses": {"local": {"minutes": 1320, "weekday": 2}}}
+{"at_ms": 96500, "event": {"type": "activity", "name": "tea", "forMs": 8000}}
+{"at_ms": 120000, "event": {"type": "activity", "name": "sit_floor", "forMs": 8000}}
+{"at_ms": 140000, "event": {"type": "activity", "name": "laptop", "forMs": 8000}}
+{"at_ms": 164000, "senses": {"local": {"minutes": 720, "weekday": 2}}}
+{"at_ms": 164500, "event": {"type": "activity", "name": "sit_floor", "forMs": 8000}}
+{"at_ms": 184000, "event": {"type": "activity", "name": "read", "forMs": 8000}}
