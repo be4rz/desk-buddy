@@ -318,7 +318,7 @@
      0,
      0
     ],
-    "layer_key": "bed_c72f4e1219"
+    "layer_key": "bed_8e963af40a"
    },
    "B": {
     "file": "prop_bed_B.png",
@@ -334,7 +334,7 @@
      0,
      0
     ],
-    "layer_key": "bed_c72f4e1219"
+    "layer_key": "bed_8e963af40a"
    },
    "footprint_world": {
     "x": [

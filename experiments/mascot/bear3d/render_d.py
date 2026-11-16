@@ -5,9 +5,10 @@
 #           [--clip NAME|all] --raw RAWDIR --px PXDIR [--k 8]
 #
 # Same camera, PPU (clips.json, i.e. Stage A), supersampling and passes as Stage A/B. The rig is the Stage L rig
-# (rig_bear.py --stage l, built in scratch by run_d.sh): Stage C's rigid whole-pixel face bones plus the head bone,
-# so the seated head turn IS the Stage L whole-head turn and the face patches match. The rig file is only read; the
-# props are built in memory on every run (deterministic).
+# with hip joints (rig_bear.py --stage l --legs, built in scratch by run_d.sh): Stage C's rigid whole-pixel face
+# bones plus the head bone and the leg bones (pose legL / legR swing the seated legs), so the seated head turn IS
+# the Stage L whole-head turn and the face patches match. The rig file is only read; the props are built in memory
+# on every run (deterministic).
 # Set origin = the desk footprint centre on the floor. ori A: desk long axis along world X, the chair SW of it; the
 # bear types facing NE and talks with its body SE, head S. ori B = the mirror image (props reflected in 3D, so the
 # light stays the same) and the bear in the mirrored POSE (clips_d.mirror_pose): the bear itself is never mirrored,
@@ -36,6 +37,7 @@ PPU, PXZ = CJ['ppu'], CJ['PXZ']
 sc = bpy.context.scene; vl = bpy.context.view_layer; O = bpy.data.objects
 root = O['BearRoot']; rig = O['Rig']
 assert 'head' in rig.data.bones, 'render_d.py needs the Stage L rig (rig_bear.py --stage l)'
+assert 'leg_L' in rig.data.bones, 'render_d.py needs the hip joints (rig_bear.py --stage l --legs, as run_d.sh)'
 BEAR = [o for o in bpy.data.collections['Bear'].all_objects if o.type == 'MESH']
 BEAR_HIDDEN = {o.name for o in BEAR if o.hide_render}       # Stage C face-layer decals: never in a body render
 if rig.animation_data: rig.animation_data.action = None
@@ -71,7 +73,7 @@ def face_px(p, D, hb=0): return int(round(((D['body'] @ p).z - p.z) / PXZ)) + in
 def face_shift(p, D): return Matrix.Translation((0, 0, face_px(p, D) * PXZ))
 
 def deltas(q):
-    """identical to rig_bear.py deltas() for --stage l, plus the set placement X, Y, Z, yaw on the root bone."""
+    """identical to rig_bear.py deltas() for --stage l --legs, plus the set placement X, Y, Z, yaw on the root bone."""
     assert q['roll'] == 0 and q['lean'] == 0 and q['sz'] == 1.0 and q['blink'] == 1.0, 'Stage C rules (face patches)'
     sxy = 1 / math.sqrt(q['sz'])
     D = {}
@@ -95,6 +97,13 @@ def deltas(q):
     for n in ('face', 'eyes', 'mouth', 'hat', 'ear_L', 'ear_R'): D[n] = Rh @ D[n]
     for n in ('arm_L', 'arm_R'): D[n] = Matrix.Rotation(math.radians(q['hy'] * ARM_W), 4, 'Z') @ D[n]
     D['root'] = Matrix.Translation((q['X'], q['Y'], q['Z'])) @ rz(q['yaw']) @ rz(q['ty'])
+    for s in ('L', 'R'):                 # hip joints, as rig_bear.py deltas() with LEGS (legL / legR, deg, + = forward)
+        a = q.get('leg' + s, 0.0); hip = PIV['leg_' + s]
+        D['leg_' + s] = D['body'] @ about(hip, rx(-a))
+        # the pad rides its swung leg; a leg at rest leaves it planted on the floor as before (blend over 15 deg)
+        t = anim_clips.ease(min(abs(a) / 15.0, 1.0))
+        if t > 0:
+            D['foot_' + s] = D['foot_' + s] @ Matrix.Identity(4).lerp(rigid, t) @ about(hip, rx(-a))
     return D
 
 def apply_pose(q):

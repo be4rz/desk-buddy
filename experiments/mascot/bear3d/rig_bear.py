@@ -75,6 +75,7 @@ if STAGE not in ('a', 'c', 'l', 'k'): raise SystemExit(f'rig_bear.py: --stage mu
 STAGE_C = STAGE in ('c', 'l', 'k')   # Stage L builds on the Stage C rig, Stage K on Stage L
 STAGE_L = STAGE in ('l', 'k')
 STAGE_K = STAGE == 'k'
+LEGS = STAGE_K or '--legs' in argv   # hip joints (pose legL / legR): Stage K always, Stage L only for run_d.sh
 if STAGE_L and not arg('--out'): raise SystemExit(f'rig_bear.py: --stage {STAGE} needs --out (the rig is scratch)')
 if STAGE_K and not (arg('--clips') and arg('--clips-module')):
     raise SystemExit('rig_bear.py: --stage k needs --clips-module <module> and --clips <scratch json>')
@@ -183,6 +184,18 @@ if STAGE_L:
     ARM_W = head_w((PIV['arm_L'].z + 0.93) / 2)   # the twist at mid-arm (shoulder -> paw on the belly)
     del BIND['body']                  # skinned below, not bone-parented
     print(f'HEAD twist z {HEAD_Z0}..{HEAD_Z1}, arms follow {ARM_W:.2f}')
+    if LEGS:
+        # hip joints: the body's two leg stubs (and the pants over them) swing about the hip (pose legL / legR, deg,
+        # + = forward), the foot pad rides its leg. Weight 1 below LEG_Z0, 0 above LEG_Z1 (under the waistband
+        # stitches), split left / right across the notch. At legL = legR = 0 nothing moves (the rest-drift assert).
+        LEG_Z0, LEG_Z1, LEG_SX, HIP_Z = 0.36, 0.66, 0.08, 0.50
+        def leg_w(x, z):
+            w = anim_clips.ease(min(max((LEG_Z1 - z) / (LEG_Z1 - LEG_Z0), 0.0), 1.0))
+            sl = anim_clips.ease(min(max((x + LEG_SX) / (2 * LEG_SX), 0.0), 1.0))
+            return w * sl, w * (1.0 - sl)
+        for s_, sx_ in (('L', 1), ('R', -1)):
+            PIV['leg_' + s_] = Vector((0.34 * sx_, 0.0, HIP_Z)); PARENT['leg_' + s_] = 'root'
+        del BIND['pants']             # skinned below with the body
 
 if STAGE_K:
     # ---------------------------------------------------------------- Stage K: mouth bones, paw sockets, kit objects
@@ -260,19 +273,32 @@ err = max(max(abs(a - b) for ra, rb in zip(o.matrix_world, rest[o.name]) for a, 
 if STAGE_L:
     bo = O['body']; mw = bo.matrix_world.copy()
     bo.parent = rig; bo.parent_type = 'OBJECT'; bo.matrix_parent_inverse = rig.matrix_world.inverted(); bo.matrix_world = mw
-    vg_b, vg_h = bo.vertex_groups.new(name='body'), bo.vertex_groups.new(name='head')
-    for vx in bo.data.vertices:
-        w = head_w((mw @ vx.co).z)
-        if w < 1: vg_b.add([vx.index], 1.0 - w, 'REPLACE')
-        if w > 0: vg_h.add([vx.index], w, 'REPLACE')
-    md = bo.modifiers.new('Rig', 'ARMATURE'); md.object = rig
-    md.use_vertex_groups = True; md.use_bone_envelopes = False; md.use_deform_preserve_volume = True
+    skinned = [(bo, mw)]
+    if LEGS:
+        po = O['pants']; pmw = po.matrix_world.copy()
+        po.parent = rig; po.parent_type = 'OBJECT'; po.matrix_parent_inverse = rig.matrix_world.inverted(); po.matrix_world = pmw
+        skinned.append((po, pmw))
+    for so, smw in skinned:
+        vg_b = so.vertex_groups.new(name='body')
+        vg_h = so.vertex_groups.new(name='head')
+        vg_l = {s_: so.vertex_groups.new(name='leg_' + s_) for s_ in ('L', 'R')} if LEGS else {}
+        for vx in so.data.vertices:
+            pw = smw @ vx.co
+            w = head_w(pw.z) if so is bo else 0.0
+            wl, wr = leg_w(pw.x, pw.z) if LEGS else (0.0, 0.0)
+            if w + wl + wr < 1: vg_b.add([vx.index], 1.0 - w - wl - wr, 'REPLACE')
+            if w > 0: vg_h.add([vx.index], w, 'REPLACE')
+            if wl > 0: vg_l['L'].add([vx.index], wl, 'REPLACE')
+            if wr > 0: vg_l['R'].add([vx.index], wr, 'REPLACE')
+        md = so.modifiers.new('Rig', 'ARMATURE'); md.object = rig
+        md.use_vertex_groups = True; md.use_bone_envelopes = False; md.use_deform_preserve_volume = True
     vl.update()
-    # the skinned body at rest must be the unrigged mesh (matrix_world alone can't see the modifier)
-    ev = bo.evaluated_get(bpy.context.evaluated_depsgraph_get()); me = ev.to_mesh()
-    assert len(me.vertices) == len(bo.data.vertices)
-    err = max(err, max((ev.matrix_world @ a.co - mw @ b.co).length for a, b in zip(me.vertices, bo.data.vertices)))
-    ev.to_mesh_clear()
+    # the skinned meshes at rest must be the unrigged ones (matrix_world alone can't see the modifier)
+    for so, smw in skinned:
+        ev = so.evaluated_get(bpy.context.evaluated_depsgraph_get()); me = ev.to_mesh()
+        assert len(me.vertices) == len(so.data.vertices)
+        err = max(err, max((ev.matrix_world @ a.co - smw @ b.co).length for a, b in zip(me.vertices, so.data.vertices)))
+        ev.to_mesh_clear()
 print(f'rest pose drift after rigging: {err:.2e}'); assert err < 1e-5
 
 # ------------------------------------------------------------------ pose from parameters
@@ -315,6 +341,14 @@ def deltas(q):
         for n in ('face', 'eyes', 'mouth', 'hat', 'ear_L', 'ear_R'): D[n] = Rh @ D[n]
         for n in ('arm_L', 'arm_R'): D[n] = Matrix.Rotation(math.radians(q['hy'] * ARM_W), 4, 'Z') @ D[n]
         D['root'] = Matrix.Rotation(math.radians(q['ty']), 4, 'Z')
+        if LEGS:
+            for s in ('L', 'R'):
+                a = q.get('leg' + s, 0.0); hip = PIV['leg_' + s]
+                D['leg_' + s] = D['body'] @ about(hip, rx(-a))
+                # the pad rides its swung leg; a leg at rest leaves it planted on the floor as before (blend over 15 deg)
+                t = anim_clips.ease(min(abs(a) / 15.0, 1.0))
+                if t > 0:
+                    D['foot_' + s] = D['foot_' + s] @ Matrix.Identity(4).lerp(rigid, t) @ about(hip, rx(-a))
     if STAGE_K:
         tilt = about(PIV['head'], rx(q['hp']) @ ry(q['hr']))
         Rk = Matrix.Translation((0, 0, q['hb'] * PXZ)) @ Matrix.Rotation(math.radians(q['hy']), 4, 'Z') @ tilt

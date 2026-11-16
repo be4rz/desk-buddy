@@ -25,12 +25,15 @@ key hashed from the placed matrices, so the kit's render cache keys on what is d
   ['head', t, rx, ry, rz]           the same on the head bone (the nightcap)
   ['at', x, y, z, rx, ry, rz, s]    a set-frame placement, uniform scale s (0 = hidden: scale 1e-6)
   ['box', x, y, z, sx, sy, sz]      a set-frame placement with a per-axis scale (the quilt halves)
+  ['mound', h]                      the pulled-up quilt over the lying bear: a soft mound in the posed body bone's
+                                    frame (bear rest axes) from below the seat up to height h (the chest), with a
+                                    cream hem along its top edge; h = 0 hides it
 Derived rigids (drops, dust, the fishing line) are placed from their host's matrix (spout tip, broom head, rod tip).
 Out of Blender the key is a hash of st. verify_out.py proves the reliance: the kit's hand-off check (props + idle#0),
 exact joins and seams, and a self-test mutation that moves a prop on a hand-off frame.
 """
 import math, hashlib, json
-from anim_clips import REST_K
+from anim_clips import REST_K, SIT_LEG, SIT_BOB
 
 REST_S = dict(REST_K, X=0.0, Y=0.0, Z=0.0, yaw=0.0)
 HAND_YAW = 90.0
@@ -320,15 +323,20 @@ def _b_fishing(g):
         else: st['fish'] = ['at', HOLE[0] + fish[0], HOLE[1] + fish[1], fish[2], 0.0, fish[3], fish[4], 1.0]
         return st
     P = lambda t, tilt=0.0: ['paw', t, tilt, 0.0, 0.0]
-    SIT = dict(bob=-3 * PXZ, fL=0.34, fR=0.34, hL=0.03, hR=0.03, armL=18.0, armR=12.0)
+    # the shared plush floor sit (anim_clips.SIT_LEG / SIT_BOB): legs out in front, seat on the ice, pads on the legs
+    # fish_wait is a face 'layers' clip: its idle face patches only match a body moved by whole pixels (as clips_p.py)
+    SIT_B = round(SIT_BOB / PXZ) * PXZ
+    SIT = dict(bob=SIT_B, legL=SIT_LEG, legR=SIT_LEG, armL=18.0, armR=12.0)
+    DOWN = dict(bob=round(SIT_BOB * 0.45 / PXZ) * PXZ, legL=34.0, legR=28.0)          # half way down (or up): the legs come forward
     W = lambda st, **kw: _F(g, st, SIT, **kw)
     W0 = W(S(P(1.0), 1))
     sit = [
         _F(g, S(HOME)),
         _F(g, S(HOME), bob=-2 * PXZ, sz=0.97, armL=-6.0, armR=-6.0, earL=2, earR=2),             # a little dip
-        _F(g, S(HOME), bob=-PXZ, fL=0.20, fR=0.14, hL=0.12, hR=0.10, armL=-10.0, armR=-10.0, earL=-3, earR=-3, clX=4),
-        _F(g, S(HOME), SIT, bob=-5 * PXZ, sz=0.95, armL=12.0, earL=4, earR=4, clX=-5),           # plop: soft squash
-        _F(g, S(HOME), SIT, bob=-4 * PXZ, sz=0.97, armL=12.0, earL=-2, earR=-2, clX=3),
+        _F(g, S(HOME), DOWN, armL=-10.0, armR=-10.0, earL=-3, earR=-3, clX=4),
+        _F(g, S(HOME), SIT, bob=SIT_B - PXZ, legL=SIT_LEG - 8, legR=SIT_LEG - 8, sz=0.95, armL=12.0, earL=4, earR=4,
+           clX=-5),                                                                               # plop: soft squash
+        _F(g, S(HOME), SIT, sz=0.97, legL=SIT_LEG + 6, legR=SIT_LEG + 6, armL=12.0, earL=-2, earR=-2, clX=3),  # legs bounce
         _F(g, S(HOME), SIT, armL=-4.0, spL=30.0, roll=-8.0, hr=-6.0, earL=2, clX=4),            # reach for the rod
         _F(g, S(P(0.5)), SIT, armL=-6.0, spL=34.0, roll=-10.0, hr=-6.0, earL=3, clX=5),
         _F(g, S(P(1.0)), SIT, armL=4.0, spL=22.0, roll=-5.0, hr=-3.0, clX=-3),                  # got it
@@ -348,7 +356,8 @@ def _b_fishing(g):
         if f in (23, 24): kw = dict(earL=3, earR=3, clY=-3)
         if f in (4, 5, 6): kw = dict(hb=-1)                                                       # a slow breath
         if f in (28, 29, 30): kw = dict(hb=-1, earL=-2, earR=-2)
-        if f in (9, 10): kw = dict(fL=0.30, hL=0.08)                                              # a foot wiggle
+        if f in (8, 9, 10, 11): kw = dict(legL=SIT_LEG + [8, 16, 8, 0][f - 8],                  # a little leg swing
+                                          legR=SIT_LEG + [0, -6, 4, 0][f - 8])
         arm = 18.0 + (2.0 if bob > 0.015 else -2.0 if bob < -0.015 else 0.0)
         wait.append(W(S(P(1.0), 1, round(bob, 4), fish), armL=arm, **kw))
     wait[0] = W0
@@ -357,8 +366,9 @@ def _b_fishing(g):
              _F(g, S(P(1.0)), SIT, armL=2.0, spL=22.0, roll=-5.0, hr=-3.0, clX=-3),
              _F(g, S(P(0.5)), SIT, armL=-6.0, spL=34.0, roll=-10.0, hr=-6.0, earL=3, clX=5),      # rod down
              _F(g, S(HOME), SIT, armL=-4.0, spL=28.0, roll=-7.0, hr=-5.0, earL=2, clX=4),
-             _F(g, S(HOME), SIT, bob=-5 * PXZ, sz=0.96, armL=-14.0, armR=-14.0, earL=2, earR=2),   # mittens push
-             _F(g, S(HOME), bob=-2 * PXZ, fL=0.16, fR=0.20, hL=0.12, hR=0.12, armL=-10.0, armR=-10.0, earL=-3, earR=-3, clX=4),
+             _F(g, S(HOME), SIT, legL=SIT_LEG - 12, legR=SIT_LEG - 12, sz=0.96, armL=-14.0, armR=-14.0, earL=2,
+                earR=2),                                                                          # mittens push
+             _F(g, S(HOME), DOWN, legL=30.0, legR=36.0, armL=-10.0, armR=-10.0, earL=-3, earR=-3, clX=4),
              _F(g, S(HOME), bob=2 * PXZ, sz=1.03, armL=-4.0, armR=-4.0, hL=0.04, hR=0.04, earL=3, earR=3, clX=-4),  # pop up
              _F(g, S(HOME), sz=0.98, earL=-1, earR=-1, clX=2),
              _F(g, S(HOME), clY=-1),
@@ -367,23 +377,35 @@ def _b_fishing(g):
 
 
 # ---------------------------------------------------------------- bed_cap
-SIT_Z = Z_M - 0.03
-LIE_Z = Z_M - 0.283 - 0.03          # tumble -64: the back's lowest point (0.283 above the root) sinks 0.03 in
+SIT_Z = Z_M + 0.045                 # the shared sit (SIT_BOB): the seat's lowest point (0.197 below the root) sinks
+                                    # 0.15 into the soft mattress (as the old sit did), so the art keeps its 152x148 canvas
+LIE_Z = Z_M - 0.175                 # tumble -64, legs LEG_LIE: the back's lowest point (0.135 above the root) sinks 0.04 in
 LIE_X = -BL + 0.05 + 1.47           # the clover tip (1.47 behind the root when lying) stops short of the headboard
+LEG_LIE = 26.0                      # lying: the legs (swung 26 deg against the -64 tumble) lie along the mattress
+ARM_LIE, SP_LIE = -6.0, 0.0         # lying: the arms
 Q_HOME = {'quilt_a': ['box', 1.02, 0.0, Z_M + 0.16, 0.28, BW - 0.02, 0.05],
           'quilt_b': ['box', 1.02, 0.0, Z_M + 0.07, 0.33, BW + 0.04, 0.08]}
-Q_UP = {'quilt_a': ['box', 0.66, 0.0, Z_M + 0.36, 0.50, BW + 0.04, 0.38],      # over the tummy and legs (top z ~1.2)
-        'quilt_b': ['box', 1.10, 0.0, Z_M + 0.26, 0.28, BW + 0.04, 0.28]}      # the soft fold over the feet
+Q_UP = {'quilt_a': ['box', 0.66, 0.0, Z_M - 0.02, 0.72, BW + 0.04, 0.08],      # spread flat over the bed, sides draped
+        'quilt_b': ['box', 1.18, 0.0, Z_M + 0.02, 0.20, BW + 0.05, 0.11]}      # a thicker roll at the foot end
+# the mound (body-bone frame, bear rest axes: up +Z from the seat, forward -Y): it encloses everything of the lying
+# bear below h - 0.10 (legs, pants, tummy, arms), so the depth composite hides the covered part; the hem covers the rest
+QMOUND = dict(z0=-0.20, yc=0.0, rx=0.84, ry=0.72, e1=0.4, e2=0.8)
+MOUND_H = (0.30, 1.20)               # the top edge travels from the seat up to across the chest
+HEM = dict(dr=-0.03, dz=0.06)                    # a rolled edge, just inside the mound's rim
 CAP_HOME = (-(BL - 0.36), 0.0, Z_M + 0.52)   # the nightcap lying on the pillow (bed frame: head end at -X)
 
 
 def _quilt(t, br=0.0):
+    """t: 0 = folded at the foot (home), 1 = pulled up to the chest. The mound only shows from t 0.2 (only on
+    frames where the bear lies flat with its legs at LEG_LIE), rising from the seat to the chest."""
     out = {}
     for k in ('quilt_a', 'quilt_b'):
-        a, b = Q_HOME[k], Q_UP[k]; e = _ease(t)
+        a, b = Q_HOME[k], Q_UP[k]; e = _ease(min(1.0, t / 0.6))
         v = [round(a[i] + (b[i] - a[i]) * e, 4) for i in range(1, 7)]
         v[5] = round(v[5] * (1 + br), 4)
         out[k] = ['box'] + v
+    h = 0.0 if t < 0.2 else MOUND_H[0] + (MOUND_H[1] - MOUND_H[0]) * _ease((t - 0.2) / 0.8)
+    out['quilt_m'] = ['mound', round(h, 4)]
     return out
 
 
@@ -395,30 +417,37 @@ def _b_bed_cap(g):
         if cap is not HOME and cap < 1.0: st['nightcap'] = ['head', cap, 0.0, 0.0, 0.0]
         return st
     lerp = lambda a, b, t: a + (b - a) * t
-    SIT = dict(Z=SIT_Z, bob=-3 * PXZ, fL=0.34, fR=0.34, hL=0.03, hR=0.03, armL=10.0, armR=10.0)
+    # sitting on the mattress: the shared plush sit (legs out in front, pads on the legs), the seat sunk SIT_Z
+    SIT = dict(Z=SIT_Z, bob=SIT_BOB, legL=SIT_LEG, legR=SIT_LEG, armL=10.0, armR=10.0)
     IN = dict(SIT, X=LIE_X, Y=0.0, yaw=90.0)
-    LY = dict(IN, Z=LIE_Z, tumble=LIE, fL=0.10, fR=0.10, hL=0.0, hR=0.0, armL=-6.0, armR=-6.0, blink=0.12)
+    LY = dict(IN, Z=LIE_Z, tumble=LIE, legL=LEG_LIE, legR=LEG_LIE, armL=ARM_LIE, armR=ARM_LIE, spL=SP_LIE,
+              spR=SP_LIE, blink=0.12)
     def tl(t, **kw):                                    # between sitting in bed and lying
-        q = dict(IN, Z=lerp(SIT_Z, LIE_Z, t), tumble=LIE * t, fL=lerp(0.34, 0.10, t), fR=lerp(0.34, 0.10, t))
+        q = dict(IN, Z=lerp(SIT_Z, LIE_Z, t), tumble=LIE * t, legL=lerp(SIT_LEG, LEG_LIE, min(t, 1.0)),
+                 legR=lerp(SIT_LEG, LEG_LIE, min(t, 1.0)))
         q.update(kw); return q
     L0 = _F(g, S(1.0, 1.0), LY)
     gib = [
         _F(g, S()),
         _F(g, S(), yaw=45.0, earL=2, earR=2, clX=3),                                             # turn: back to the bed
         _F(g, S(), yaw=0.0, sz=0.96, bob=-2 * PXZ, armL=-10.0, armR=-10.0, earL=2, earR=2),     # crouch
-        _F(g, S(), yaw=0.0, Y=lerp(hy, edgeY, 0.5), Z=0.40, sz=1.03, armL=25.0, armR=25.0, hL=0.08, hR=0.08,
-           earL=-3, earR=-3, clX=-5),                                                            # hop!
-        _F(g, S(), SIT, yaw=0.0, Y=edgeY, sz=0.95, armL=10.0, armR=10.0, earL=3, earR=3, clX=6),    # plop on the edge
-        _F(g, S(), SIT, yaw=0.0, Y=edgeY, sz=1.01, clX=-3),
-        _F(g, S(), SIT, yaw=35.0, X=lerp(hx, LIE_X, 0.5), Y=lerp(edgeY, 0.0, 0.5), earL=2, clY=3),  # swing the legs in
-        _F(g, S(), SIT, yaw=70.0, X=lerp(hx, LIE_X, 0.85), Y=lerp(edgeY, 0.0, 0.85), earR=2, clY=-3),
+        _F(g, S(), yaw=0.0, Y=lerp(hy, edgeY, 0.5), Z=0.40, sz=1.03, armL=25.0, armR=25.0, legL=22.0, legR=22.0,
+           earL=-3, earR=-3, clX=-5),                                                            # hop! legs tuck a little
+        _F(g, S(), SIT, yaw=0.0, Y=edgeY, sz=0.95, legL=SIT_LEG - 15, legR=SIT_LEG - 15, armL=10.0, armR=10.0,
+           earL=3, earR=3, clX=6),                                                               # plop on the edge
+        _F(g, S(), SIT, yaw=0.0, Y=edgeY, sz=1.01, legL=SIT_LEG + 6, legR=SIT_LEG + 6, clX=-3),  # the legs bounce
+        _F(g, S(), SIT, yaw=35.0, X=lerp(hx, LIE_X, 0.5), Y=lerp(edgeY, 0.0, 0.5), legL=SIT_LEG + 8, legR=SIT_LEG - 4,
+           earL=2, clY=3),                                                                       # swing the legs in
+        _F(g, S(), SIT, yaw=70.0, X=lerp(hx, LIE_X, 0.85), Y=lerp(edgeY, 0.0, 0.85), legL=SIT_LEG - 4,
+           legR=SIT_LEG + 8, earR=2, clY=-3),
         _F(g, S(), IN, earL=3, earR=3, clY=3),                                                   # sitting in bed
-        _F(g, S(), IN, sz=1.02, earL=-1, earR=-1, clY=-2, mouth='open'),                         # happy wiggle
-        _F(g, S(quilt=0.1), tl(0.25, armL=-8.0, armR=-8.0, clX=-4)),                             # lie back
-        _F(g, S(0.4, 0.35), tl(0.55, armL=-6.0, armR=-6.0, clX=-6)),
-        _F(g, S(0.8, 0.65), tl(0.85, armL=-4.0, armR=-4.0, clX=-4)),                              # the cap pops on
-        _F(g, S(1.0, 0.9), tl(1.06, armL=-6.0, armR=-6.0, clX=3, earL=3, earR=3)),               # sink in
-        _F(g, S(1.0, 1.0), LY, blink=1.0, clX=-2, earL=1, earR=1),
+        _F(g, S(), IN, sz=1.02, legL=SIT_LEG + 12, legR=SIT_LEG - 6, earL=-1, earR=-1, clY=-2, mouth='open'),  # happy wiggle
+        _F(g, S(), tl(0.40, armL=-8.0, armR=-8.0, clX=-4)),                                      # lie back
+        _F(g, S(0.4), tl(0.80, armL=-6.0, armR=-6.0, clX=-6)),
+        _F(g, S(0.8, 0.12), tl(1.0, Z=LIE_Z - 0.02, armL=ARM_LIE, armR=ARM_LIE, spL=SP_LIE, spR=SP_LIE, clX=-4,
+                               earL=3, earR=3)),                                                 # cap pops on, sink in
+        _F(g, S(1.0, 0.45), LY, blink=1.0, clX=3, earL=1, earR=1),                               # the quilt comes up
+        _F(g, S(1.0, 0.8), LY, blink=1.0, clX=-2),
         L0,
     ]
     sleep = []
@@ -433,16 +462,20 @@ def _b_bed_cap(g):
     wake = [
         L0,
         _F(g, S(1.0, 1.0), LY, blink=1.0, earL=2, earR=2),                                       # eyes open
-        _F(g, S(1.0, 1.0), LY, blink=1.0, armL=30.0, armR=30.0, sz=1.03, mouth='wide', earL=4, earR=4),  # stretch, yawn
-        _F(g, S(1.0, 0.85), tl(0.75, armL=26.0, armR=26.0, clX=4)),                               # sit up
-        _F(g, S(0.6, 0.5), tl(0.40, armL=18.0, armR=18.0, clX=6)),                                # the cap hops off
-        _F(g, S(0.2, 0.2), tl(0.12, armL=12.0, armR=12.0, clX=-3)),
+        _F(g, S(1.0, 1.0), LY, blink=1.0, armL=30.0, armR=30.0, spL=0.0, spR=0.0, sz=1.03, mouth='wide', earL=4,
+           earR=4),                                                                              # stretch, yawn
+        _F(g, S(1.0, 0.5), LY, blink=1.0, clX=4, earL=2, earR=2),                                 # push the quilt down
+        _F(g, S(0.6, 0.1), tl(0.55, armL=18.0, armR=18.0, clX=6)),                                # sit up, the cap hops off
+        _F(g, S(0.2), tl(0.15, armL=12.0, armR=12.0, clX=-3)),
         _F(g, S(), IN, earL=2, earR=2, clY=3),
-        _F(g, S(), SIT, yaw=60.0, X=lerp(hx, LIE_X, 0.85), Y=lerp(edgeY, 0.0, 0.85), clY=-3),     # swing the legs out
-        _F(g, S(), SIT, yaw=25.0, X=lerp(hx, LIE_X, 0.5), Y=lerp(edgeY, 0.0, 0.5), earL=2),
+        _F(g, S(), SIT, yaw=60.0, X=lerp(hx, LIE_X, 0.85), Y=lerp(edgeY, 0.0, 0.85), legL=SIT_LEG + 8, legR=SIT_LEG - 4,
+           clY=-3),                                                                              # swing the legs out
+        _F(g, S(), SIT, yaw=25.0, X=lerp(hx, LIE_X, 0.5), Y=lerp(edgeY, 0.0, 0.5), legL=SIT_LEG - 4, legR=SIT_LEG + 8,
+           earL=2),
         _F(g, S(), SIT, yaw=0.0, Y=edgeY, earL=1, earR=1),
-        _F(g, S(), SIT, yaw=0.0, Y=edgeY, sz=0.97, armL=-10.0, armR=-10.0, lean=6.0),              # scoot, lean forward
-        _F(g, S(), yaw=0.0, Y=lerp(edgeY, hy, 0.55), Z=0.30, sz=1.03, armL=30.0, armR=30.0, hL=0.08, hR=0.08,
+        _F(g, S(), SIT, yaw=0.0, Y=edgeY, sz=0.97, legL=SIT_LEG - 25, legR=SIT_LEG - 25, armL=-10.0, armR=-10.0,
+           lean=6.0),                                                                            # scoot, legs down
+        _F(g, S(), yaw=0.0, Y=lerp(edgeY, hy, 0.55), Z=0.30, sz=1.03, armL=30.0, armR=30.0, legL=20.0, legR=20.0,
            earL=-3, earR=-3, clX=5),                                                              # hop off
         _F(g, S(), yaw=0.0, sz=0.95, armL=8.0, armR=8.0, earL=3, earR=3, clX=6),                  # land
         _F(g, S(), yaw=0.0, sz=1.01, clX=-3),
@@ -543,6 +576,10 @@ def build_props(s, kit, g):
         for k in ('quilt_a', 'quilt_b'):
             e = E(k, 'bed', None, 'box_bed')
             _part(kit, k, e, 'bed', 'quilt', [((0, 0, 0), (1.0, 1.0, 1.0), 0.45, 0.30)])
+        e = E('quilt_m', 'bed', None, 'mound')                    # unit shapes, scaled per frame by _apply
+        _part(kit, 'quilt_m', e, 'bed', 'quilt', [((0, 0, 0), (1.0, 1.0, 1.0), QMOUND['e1'], QMOUND['e2'])])
+        hm = kit.empty('P_quilt_hem', (0, 0, 0), W0); rig['quilt_m']['hem'] = hm
+        _part(kit, 'quilt_hem', hm, 'bed', 'mattress', [((0, 0, 0), (1.0, 1.0, 1.0), 0.5, 0.7)])
         cap = E('nightcap', 'cap', None, 'head')
         hz = 1.4
         _part(kit, 'cap', cap, 'cap', 'cap', [((0, 0.12, 2.15 - hz), (0.31, 0.30, 0.19), 0.8, 1.0),
@@ -631,6 +668,16 @@ def _apply(st):
             _, x, y, z, sx, sy, sz = sp
             m = Matrix.Translation((x, y, z)) @ Matrix.Diagonal((sx, sy, sz, 1.0))
             m = _bed() @ m
+        elif r['kind'] == 'mound':                                 # the pulled-up quilt over the lying bear
+            h = sp[1] if sp[0] == 'mound' else 0.0
+            if h <= 0:
+                m = _mat_at(0, 0, -1, s=0.0); r['hem'].matrix_basis = m.copy()
+            else:
+                Q = QMOUND; F = _follow('body', 'body', (0.0, 0.0, 0.0))
+                m = F @ Matrix.Translation((0, Q['yc'], (Q['z0'] + h) / 2)) @ Matrix.Diagonal(
+                    (Q['rx'], Q['ry'], (h - Q['z0']) / 2, 1.0))
+                r['hem'].matrix_basis = F @ Matrix.Translation((0, Q['yc'], h)) @ Matrix.Diagonal(
+                    (Q['rx'] + HEM['dr'], Q['ry'] + HEM['dr'], HEM['dz'], 1.0))
         elif r['kind'] == 'head':                                  # the nightcap: pillow -> head
             home = _bed() @ _mat_at(*CAP_HOME, 0.0, -80.0, 0.0) @ Matrix.Translation((-0.10, -0.14, -0.78))
             if sp[0] == 'home': m = home
@@ -650,6 +697,7 @@ def _apply(st):
     for l in LAYERS[_R['set']]:
         sig = [round(x, 5) for n in sorted(rig) if rig[n]['layer'] == l for row in M[n] for x in row]
         if 'shead' in rig and l == 'snow': sig += [round(x, 5) for row in rig['shead']['nose'].matrix_basis for x in row]
+        if 'quilt_m' in rig and l == 'bed': sig += [round(x, 5) for row in rig['quilt_m']['hem'].matrix_basis for x in row]
         keys[l] = f'{l}_' + hashlib.md5(json.dumps(sig).encode()).hexdigest()[:10]
     return keys
 

@@ -3,5 +3,5 @@
  "kind": "clips",
  "module": "clips_w",
  "verify": "verify_w.py",
- "note": "Stage w (edge): edge_sit, edge_dangle (loop, layers), edge_peer, edge_doze (loop), edge_stand in S SE E W SW. Frame 84x139, anchor [42,107] = the window edge line: seated, the bear's seat is on the line and only the stub feet hang below it. Base pose = edge_dangle#0: edge_sit starts on idle#0 and ends on it, edge_peer starts and ends on it, edge_doze starts on it, edge_stand starts on it and ends on idle#0 (CHAINS). Output out/bear3d/anim_w/."
+ "note": "Stage w (edge): edge_sit, edge_dangle (loop, layers), edge_peer, edge_doze (loop), edge_stand in S SE E W SW. Frame 84x139, anchor [42,107] = the window edge line: seated, the bear's seat is on the line and only the legs and their pads hang below it. Base pose = edge_dangle#0: edge_sit starts on idle#0 and ends on it, edge_peer starts and ends on it, edge_doze starts on it, edge_stand starts on it and ends on idle#0 (CHAINS). Output out/bear3d/anim_w/."
 }

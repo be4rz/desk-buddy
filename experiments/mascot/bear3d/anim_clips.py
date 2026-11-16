@@ -327,6 +327,9 @@ ORDER_L = [f'{c}_{v}' for v in LISTEN_VARIANTS for c in ('listen_in', 'listen', 
 #          about the body centre (rig_bear.py BODY_C), e.g. a 360 deg forward roll. Not for 'layers' clips.
 #   lift   whole-bear height, world units (+ = up), with tumble: keeps the lowest point on the floor (lying on the belly
 #          about -0.35, upside down about +0.61) or lifts it into a hop. Not for 'layers' clips.
+#   legL / legR  hip swing, deg (+ = the leg stub and its pad swing forward, about 75 = sitting with the legs out in
+#          front): the body's own legs move (rig_bear.py LEGS). A sitting or lying pose uses these, never a far fL / hL
+#          (a pad pushed away from its leg reads as a second, detached pair of legs).
 #   tx, ty_px  root position (world units, bear-local): tx to the bear's left (+X), ty_px forward (the facing).
 #          Never moves a bone: it is the root track (Stage A's walk method); the frames stay in place and the anim JSON's
 #          root_px moves the sprite (make_stage.py). Like Stage A, a planted foot must slide back by fL/fR in the pose.
@@ -336,10 +339,13 @@ ORDER_L = [f'{c}_{v}' for v in LISTEN_VARIANTS for c in ('listen_in', 'listen', 
 # SQUASH_MAX, |roll|, |lean| <= TILT_MAX (Stage A's body tilt at the floor, feet planted; the face rides rigidly),
 # mouth one of MOUTHS, hb whole pixels. A 'layers' clip (face patches drawn at run time) keeps roll = lean = tumble = lift = 0,
 # hp = hr = 0, mouth closed and blink 1 on every frame.
-HP_MAX, HR_MAX, EAR_MAX, SQUASH_MAX, TILT_MAX = 20.0, 15.0, 15.0, 0.06, 90.0
+HP_MAX, HR_MAX, EAR_MAX, SQUASH_MAX, TILT_MAX, LEG_MAX = 20.0, 15.0, 15.0, 0.06, 90.0, 95.0
 MOUTHS = ('closed', 'open', 'wide', 'tongue')
-REST_K = dict(REST_L, hp=0.0, hr=0.0, mouth='closed', tx=0.0, ty_px=0.0, tumble=0.0, lift=0.0)
+REST_K = dict(REST_L, hp=0.0, hr=0.0, mouth='closed', tx=0.0, ty_px=0.0, tumble=0.0, lift=0.0, legL=0.0, legR=0.0)
 PK = list(REST_K)
+# the plush floor sit every stage shares: the legs swing out in front and the lump drops until its seat is on the
+# floor (bob in world units; fitted so the lowest pixel row stays the standing one). Pads stay on their legs (fL = hL = 0).
+SIT_LEG, SIT_BOB = 75.0, -0.16
 HOLD_K = ('mouth',)            # held (not eased) between keys; vis_* too
 
 
@@ -357,6 +363,8 @@ def check_k(q, where='', face=None):
         assert abs(q[e]) <= EAR_MAX + 1e-9, f'{w}{e} {q[e]} beyond +-{EAR_MAX}'
     assert abs(q['sz'] - 1.0) <= SQUASH_MAX + 1e-9, f'{w}sz {q["sz"]}: squash/stretch beyond {SQUASH_MAX:.0%}'
     assert abs(q['roll']) <= TILT_MAX + 1e-9 and abs(q['lean']) <= TILT_MAX + 1e-9, f'{w}roll/lean beyond +-{TILT_MAX}'
+    for e in ('legL', 'legR'):
+        assert abs(q.get(e, 0.0)) <= LEG_MAX + 1e-9, f'{w}{e} {q[e]} beyond +-{LEG_MAX} (hip swing limit)'
     assert q['mouth'] in MOUTHS, f'{w}mouth {q["mouth"]!r} not one of {MOUTHS}'
     assert float(q['hb']) == int(q['hb']), f'{w}hb {q["hb"]} is not whole pixels'
     for k, v in q.items():
@@ -407,7 +415,7 @@ def clip_poses(c, rest=None):
     return expand_k(c['frames'], c['keys'], rest)
 
 
-MIRROR_PAIRS = (('armL', 'armR'), ('spL', 'spR'), ('fL', 'fR'), ('hL', 'hR'), ('earL', 'earR'))
+MIRROR_PAIRS = (('armL', 'armR'), ('spL', 'spR'), ('fL', 'fR'), ('hL', 'hR'), ('earL', 'earR'), ('legL', 'legR'))
 
 
 def mirror_k(q, st, mirror_state=None):

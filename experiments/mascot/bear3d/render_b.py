@@ -4,8 +4,8 @@
 #           [--clip NAME] --raw RAWDIR --px PXDIR [--k 8] [--save bear_b.blend]
 #
 # Same camera, PPU (clips.json, i.e. Stage A), supersampling and passes as Stage A. bear_rig.blend is only
-# read: the props are built in memory on every run (deterministic), so the Stage A rig, clips and canvas
-# are untouched.
+# read: the props and the hip joints (leg_L / leg_R, body + pants skinned as rig_bear.py --legs) are built in
+# memory on every run (deterministic), so the Stage A rig, clips and canvas are untouched.
 #
 # Sets (one fixed orientation each, plus its mirror):
 #   bed    the bed (frame, mattress, pillow, foldable quilt); origin = bed footprint centre
@@ -54,6 +54,53 @@ def wv(o, M=None):
     return co.reshape(-1, 3) @ np.array(M.to_3x3()).T + np.array(M.translation)
 REST_LOCAL = {o.name: wv(o) for o in BEAR}            # bear-local rest coordinates (root at identity)
 
+# ------------------------------------------------------------------ hip joints (as rig_bear.py LEGS), in memory
+# bear_rig.blend (Stage A) has no leg bones: add leg_L / leg_R at the hips and skin body + pants with the same
+# weights as rig_bear.py --legs (body / leg_L / leg_R; the Stage A body has no head bone). Pose legL / legR (deg,
+# + = forward); the foot pad rides its swung leg. At legL = legR = 0 the bear is the unrigged one (asserted).
+from anim_clips import ease
+LEG_Z0, LEG_Z1, LEG_SX, HIP_Z = 0.36, 0.66, 0.08, 0.50
+def leg_w(x, z):
+    w = ease(min(max((LEG_Z1 - z) / (LEG_Z1 - LEG_Z0), 0.0), 1.0))
+    sl = ease(min(max((x + LEG_SX) / (2 * LEG_SX), 0.0), 1.0))
+    return w * sl, w * (1.0 - sl)
+SKINNED = [O['body'], O['pants']]
+BODY_MW0 = O['body'].matrix_world.copy()             # body rest frame (the Zzz head point is given in it)
+REST_MW = {o.name: o.matrix_world.copy() for o in BEAR}
+vl.objects.active = rig; rig.select_set(True)
+bpy.ops.object.mode_set(mode='EDIT')
+for s_, sx_ in (('L', 1), ('R', -1)):
+    eb = rig.data.edit_bones.new('leg_' + s_); eb.head = (0.34 * sx_, 0.0, HIP_Z); eb.tail = (0.34 * sx_, 0.0, HIP_Z + 0.12)
+    eb.roll = 0; eb.parent = rig.data.edit_bones['root']; eb.use_connect = False
+bpy.ops.object.mode_set(mode='OBJECT')
+for so in SKINNED:
+    mw = so.matrix_world.copy()
+    so.parent = rig; so.parent_type = 'OBJECT'; so.matrix_parent_inverse = rig.matrix_world.inverted(); so.matrix_world = mw
+    vg_b = so.vertex_groups.new(name='body'); vg_l = {s_: so.vertex_groups.new(name='leg_' + s_) for s_ in ('L', 'R')}
+    for vx in so.data.vertices:
+        pw = mw @ vx.co; wl, wr = leg_w(pw.x, pw.z)
+        if wl + wr < 1: vg_b.add([vx.index], 1.0 - wl - wr, 'REPLACE')
+        if wl > 0: vg_l['L'].add([vx.index], wl, 'REPLACE')
+        if wr > 0: vg_l['R'].add([vx.index], wr, 'REPLACE')
+    md = so.modifiers.new('Rig', 'ARMATURE'); md.object = rig
+    md.use_vertex_groups = True; md.use_bone_envelopes = False; md.use_deform_preserve_volume = True
+for pb in rig.pose.bones: pb.matrix_basis = Matrix.Identity(4)
+vl.update()
+def posed_pts(o):
+    """world vertices as posed (the armature modifier on body / pants; matrix_world alone can't see it)."""
+    if o not in SKINNED: return wv(o)
+    oe = o.evaluated_get(bpy.context.evaluated_depsgraph_get()); me = oe.to_mesh()
+    assert len(me.vertices) == len(o.data.vertices)
+    co = np.empty(len(me.vertices) * 3, np.float32); me.vertices.foreach_get('co', co); oe.to_mesh_clear()
+    M = o.matrix_world; return co.reshape(-1, 3) @ np.array(M.to_3x3()).T + np.array(M.translation)
+_drift = max(float(np.abs(posed_pts(o) - REST_LOCAL[o.name]).max()) for o in BEAR)
+_drift = max(_drift, max(abs(a - b) for o in BEAR if o not in SKINNED for ra, rb in zip(o.matrix_world, REST_MW[o.name])
+                         for a, b in zip(ra, rb)))
+print(f'HIPS added; rest pose drift after skinning: {_drift:.2e}'); assert _drift < 1e-5
+def body_mw():
+    """the body's posed frame (as its old bone parent gave it): rig world @ body bone deform @ rest frame."""
+    pb = rig.pose.bones['body']; return rig.matrix_world @ pb.matrix @ rig.data.bones['body'].matrix_local.inverted() @ BODY_MW0
+
 def snap(x, y, z=0.0):
     """nearest set-frame floor point whose screen offset from the set origin is a whole pixel."""
     dx = round(PPU * (RIGHT.x * x + RIGHT.y * y)); dy = round(-PPU * (UP.x * x + UP.y * y + UP.z * z))
@@ -89,6 +136,13 @@ def deltas(q):
     D['eyes'] = about(PIV['eyes'], scl(1, 1, q['blink']))
     D['clover'] = about(PIV['clover'], ry(q['clY']) @ rx(q['clX']))
     D['root'] = T(q['X'], q['Y'], q['Z']) @ rz(q['yaw']) @ about(PIV_LIE, rx(-q['lie']))
+    for s in ('L', 'R'):                 # hip joints, as rig_bear.py deltas() with LEGS (legL / legR, deg, + = forward)
+        a = q.get('leg' + s, 0.0); hip = PIV['leg_' + s]
+        D['leg_' + s] = D['body'] @ about(hip, rx(-a))
+        # the pad rides its swung leg; a leg at rest leaves it planted on the floor as before (blend over 15 deg)
+        t = ease(min(abs(a) / 15.0, 1.0))
+        if t > 0:
+            D['foot_' + s] = D['foot_' + s] @ Matrix.Identity(4).lerp(rigid, t) @ about(hip, rx(-a))
     return D
 
 def apply_pose(q):
@@ -235,7 +289,7 @@ def heightfield(st):
     Mi = np.array(W0.matrix_world.inverted())
     pts = []
     for n in names:
-        p = wv(O[n]); p = p @ Mi[:3, :3].T + Mi[:3, 3]
+        p = posed_pts(O[n]); p = p @ Mi[:3, :3].T + Mi[:3, 3]
         pts.append(p[REST_LOCAL[n][:, 2] < st['cut']])
     p = np.concatenate(pts)
     hb = np.full((len(HY), len(HX)), -9.0)
@@ -362,7 +416,7 @@ if MODE == 'layout':
             set_state(q, st)
             grow(eval_pts(BEAR + [o for l in SET_LAYERS for o in LAYER_OBJS[l]]))
             if c == 'sleep' and f == 0:
-                hp = np.array(O['body'].matrix_world @ Vector((0, -0.02, 1.64)))
+                hp = np.array(body_mw() @ Vector((0, -0.02, 1.64)))
                 zzz = [float(hp @ Rn), float(hp @ Un)]
     if zzz:   # room for the Zzz effect (up to 30 px right/left and 40 px above the head)
         for sx in (-1, 1):

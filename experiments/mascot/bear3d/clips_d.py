@@ -6,6 +6,9 @@ Every frame is (q, st):
         X, Y, Z   root position in the SET frame (desk footprint centre on the floor), world units
         yaw       body facing, deg, Stage A convention (0 = SW/-Y, 45 = S, 90 = SE/+X, 180 = NE/+Y)
   st  prop state: chair = the chair's facing (same convention), scr = screen glow tone (0 / 1)
+        legL, legR  hip swing, deg (rig_bear.py --legs): seated, the real legs swing forward over the seat edge
+              (SEAT_LEG) with the pads on them (fL = fR = hL = hR = 0); dangling = a small swing about SEAT_LEG.
+              Standing and stepping frames keep legL = legR = 0 and step with fL / hL as Stage A.
 Stage C rules hold on every frame: no squash, roll or lean; bob and hb in whole pixels; the eyes stay open.
 The poses are written for ori A; render_d.py mirrors the set for ori B (a true 3D mirror, as Stage B) and gives the
 bear the mirrored POSE (mirror_pose below), so every ori B bear pixel is a real render of the real bear.
@@ -13,21 +16,25 @@ bear the mirrored POSE (mirror_pose below), so every ori B bear pixel is a real 
 Choreography (ori A). The chair's home faces SE; the hand-off spot is SE of it, the bear facing SE, back to the seat.
   desk_sit        two waddle steps backwards, crouch, hop up onto the seat, plop and a 1 px settle, then the chair
                   swivels 90 deg to the desk (NE) and the stubby paws come up onto the keys.
-  desk_type       loop: alternating paw pats on the keys, an ear twitch; the screen flickers between two tones.
+  desk_type       loop: alternating paw pats on the keys, an ear twitch, the legs dangle (a slow alternating swing);
+                  the screen flickers between two tones.
   desk_swivel_in  the chair swivels back to SE; the head adds the Stage L -45 deg whole-head turn, so it faces S
                   (face patch dir S, exactly as listen SE).
-  desk_talk       loop: seated, body SE, head S, paws low; whole-pixel nods (hb), ear and clover wiggles.
-  desk_ask        loop: as talk, one paw up and out to the side (the far, left paw: never across the face).
+  desk_talk       loop: seated, body SE, head S, paws low; whole-pixel nods (hb), ear and clover wiggles, the legs
+                  dangle.
+  desk_ask        loop: as talk, one paw up and out to the side (the far, left paw: never across the face), the
+                  legs dangle.
   desk_swivel_out the reverse of desk_swivel_in.
   desk_stand      head back, hop down forwards, two waddle steps to the hand-off spot.
 Joins (identical frames, checked by verify_d.py):
   desk_sit last = desk_type f0 = desk_swivel_in f0 = desk_swivel_out last  (TYPE0)
   desk_swivel_in last = desk_talk f0 = desk_ask f0 = desk_swivel_out f0 = desk_stand f0  (TALK0)
 """
+import math
 from anim_clips import REST_L
 
 FPS = 12
-REST_D = dict(REST_L, X=0.0, Y=0.0, Z=0.0, yaw=0.0)
+REST_D = dict(REST_L, X=0.0, Y=0.0, Z=0.0, yaw=0.0, legL=0.0, legR=0.0)
 ORDER = ['desk_sit', 'desk_type', 'desk_swivel_in', 'desk_talk', 'desk_ask', 'desk_swivel_out', 'desk_stand']
 COUNTS = dict(desk_sit=20, desk_type=16, desk_swivel_in=6, desk_talk=20, desk_ask=20, desk_swivel_out=6, desk_stand=16)
 LOOP = {'desk_type', 'desk_talk', 'desk_ask'}
@@ -36,6 +43,8 @@ PATCH_DIR = 'S'                                 # their face patch direction (bo
 HAND_YAW = 90.0                                 # hand-off facing, ori A (SE); ori B: 90 - yaw = 0 (SW)
 TYPE_YAW, TALK_YAW, TALK_HY = 180.0, 90.0, -45.0
 TYPE_ARM = 30.0                                 # forward paw raise onto the keys (the paws are short)
+SEAT_LEG = 80.0                                 # seated hip swing: the legs out over the chair's front edge
+SWING = 10.0                                    # dangle amplitude about SEAT_LEG (deg, the two legs in counter-phase)
 
 
 def lerp(a, b, t): return a + (b - a) * t
@@ -44,7 +53,7 @@ def lerp(a, b, t): return a + (b - a) * t
 def mirror_pose(q, st):
     """ori B: the 3D mirror (x, y) -> (-y, -x) of an ori A frame, as a pose of the real (unmirrored) bear."""
     m = dict(q)
-    for a, b in (('armL', 'armR'), ('spL', 'spR'), ('fL', 'fR'), ('hL', 'hR'), ('earL', 'earR')):
+    for a, b in (('armL', 'armR'), ('spL', 'spR'), ('fL', 'fR'), ('hL', 'hR'), ('earL', 'earR'), ('legL', 'legR')):
         m[a], m[b] = q[b], q[a]
     m['X'], m['Y'] = -q['Y'], -q['X']
     m['yaw'] = (90.0 - q['yaw']) % 360
@@ -57,7 +66,7 @@ def build(g):
     """g (render_d.py): hand = hand-off spot, seat = the snapped seated root (on the chair's swivel axis),
     seatZ, PXZ."""
     PXZ = g['PXZ']; hx, hy = g['hand']; sx, sy = g['seat']; Zs = g['seatZ']
-    seat = dict(X=sx, Y=sy, Z=Zs, fL=0.30, fR=0.30, hL=0.12, hR=0.12)        # plush legs dangling forward
+    seat = dict(X=sx, Y=sy, Z=Zs, legL=SEAT_LEG, legR=SEAT_LEG)          # the legs out over the seat edge
     clips = {}
 
     def F(st=None, **kw):
@@ -72,6 +81,15 @@ def build(g):
         q, s = base; s = dict(s) if scr is None else dict(s, scr=scr)
         return (dict(q, **kw), s)
 
+    def dangle(frames, period, amp=SWING):
+        # the seated legs swing a little, in counter-phase, one full cycle per period frames (frame 0 untouched,
+        # so loop seams and joins stay exact)
+        out = []
+        for i, (q, s) in enumerate(frames):
+            d = round(amp * math.sin(2 * math.pi * i / period), 1)
+            out.append((dict(q, legL=q['legL'] + d, legR=q['legR'] - d), s))
+        return out
+
     TYPE0 = C(TYPE_YAW, armL=TYPE_ARM, armR=TYPE_ARM)
     TALK0 = C(TALK_YAW, hy=TALK_HY)
 
@@ -85,73 +103,73 @@ def build(g):
         F(X=hx - 0.27, fL=-0.05, bob=PXZ, earL=-1, earR=-1),
         F(X=bx, earL=2, earR=2, clY=3),                                           # a peek at the seat
         F(X=bx, bob=-2 * PXZ, armL=-12, armR=-12, earL=3, earR=3, clX=4),          # crouch
-        F(X=lerp(bx, sx, 0.45), Z=Zs + 0.22, fL=0.12, fR=0.12, hL=0.10, hR=0.10,
-          armL=30, armR=30, earL=-4, earR=-4, clX=-6),                            # hop up, backwards
-        F(X=lerp(bx, sx, 0.85), Z=Zs + 0.12, fL=0.25, fR=0.25, hL=0.12, hR=0.12,
+        F(X=lerp(bx, sx, 0.45), Z=Zs + 0.22, legL=30, legR=30,
+          armL=30, armR=30, earL=-4, earR=-4, clX=-6),                            # hop up, backwards, legs coming up
+        F(X=lerp(bx, sx, 0.85), Z=Zs + 0.12, legL=55, legR=55,
           armL=20, armR=20, earL=-3, earR=-3, clX=-4),
-        C(HAND_YAW, bob=-PXZ, earL=4, earR=4, clX=7),                             # plop
-        C(HAND_YAW, earL=1, earR=1, clX=-2),                                      # 1 px settle
-        C(HAND_YAW, earL=-1, earR=-1, clY=3),                                     # happy wiggle
-        C(102.0, armL=4, armR=4, earL=1, earR=1, clY=-3),                         # swivel to the desk
-        C(118.0, armL=8, armR=8, earL=2, earR=2, clY=-4),
-        C(135.0, armL=12, armR=12, earL=2, earR=2, clY=-3),
-        C(152.0, armL=16, armR=16, earL=1, earR=1, clY=-1),
-        C(166.0, armL=22, armR=22, clY=2),
-        C(TYPE_YAW, armL=34, armR=34, earL=-1, earR=-1, clX=-2),                  # paws up
+        C(HAND_YAW, bob=-PXZ, legL=SEAT_LEG + 10, legR=SEAT_LEG + 10, earL=4, earR=4, clX=7),   # plop, legs bounce
+        C(HAND_YAW, legL=SEAT_LEG - 6, legR=SEAT_LEG - 6, earL=1, earR=1, clX=-2),             # 1 px settle
+        C(HAND_YAW, legL=SEAT_LEG + 8, legR=SEAT_LEG - 8, earL=-1, earR=-1, clY=3),            # happy wiggle
+        C(102.0, legL=SEAT_LEG - 4, legR=SEAT_LEG + 4, armL=4, armR=4, earL=1, earR=1, clY=-3),  # swivel to the desk
+        C(118.0, legL=SEAT_LEG - 8, legR=SEAT_LEG - 8, armL=8, armR=8, earL=2, earR=2, clY=-4),  # legs trail the turn
+        C(135.0, legL=SEAT_LEG - 8, legR=SEAT_LEG - 8, armL=12, armR=12, earL=2, earR=2, clY=-3),
+        C(152.0, legL=SEAT_LEG - 4, legR=SEAT_LEG - 4, armL=16, armR=16, earL=1, earR=1, clY=-1),
+        C(166.0, legL=SEAT_LEG + 4, legR=SEAT_LEG + 4, armL=22, armR=22, clY=2),             # and swing on past
+        C(TYPE_YAW, legL=SEAT_LEG + 3, legR=SEAT_LEG + 3, armL=34, armR=34, earL=-1, earR=-1, clX=-2),  # paws up
         C(TYPE_YAW, armL=32, armR=32, clX=1),
         TYPE0,
     ]
 
     # ------------------------------------------------------------------ desk_type (16, loop)
     L = dict(armL=TYPE_ARM + 7, armR=TYPE_ARM - 3); R = dict(armL=TYPE_ARM - 3, armR=TYPE_ARM + 7)
-    clips['desk_type'] = [
+    clips['desk_type'] = dangle([
         TYPE0,
         V(TYPE0, **L), V(TYPE0, 1, **L), V(TYPE0, 1, **R), V(TYPE0, **R),
         V(TYPE0, **L), V(TYPE0, 1, **R), V(TYPE0, 1, **L), V(TYPE0, **R),
         V(TYPE0, earL=-3, earR=1, clY=-3), V(TYPE0, 1, earL=2, earR=-1, clY=2),   # ear twitch
         V(TYPE0, 1, **L), V(TYPE0, **R), V(TYPE0, **L), V(TYPE0, 1, **R),
         V(TYPE0, clX=-1),
-    ]
+    ], 16)
 
     # ------------------------------------------------------------------ desk_swivel_in (6)
     clips['desk_swivel_in'] = [
         TYPE0,
-        C(158.0, armL=18, armR=18, earL=1, earR=1, clY=2),
-        C(130.0, armL=8, armR=8, earL=2, earR=2, clY=3),
-        C(106.0, earL=1, earR=1, clY=1),
-        C(TALK_YAW, hy=-25.0, earL=-1, earR=-1, clX=-2),
+        C(158.0, legL=SEAT_LEG + 4, legR=SEAT_LEG + 4, armL=18, armR=18, earL=1, earR=1, clY=2),   # legs trail
+        C(130.0, legL=SEAT_LEG + 6, legR=SEAT_LEG + 6, armL=8, armR=8, earL=2, earR=2, clY=3),
+        C(106.0, legL=SEAT_LEG + 2, legR=SEAT_LEG + 2, earL=1, earR=1, clY=1),
+        C(TALK_YAW, legL=SEAT_LEG - 3, legR=SEAT_LEG - 3, hy=-25.0, earL=-1, earR=-1, clX=-2),   # swing past
         TALK0,
     ]
 
     # ------------------------------------------------------------------ desk_talk (20, loop)
     nod = dict(hb=-1, earL=2, earR=2, clX=3)
     gl = dict(armL=16, spL=12, earL=-1, earR=1, clY=2)
-    clips['desk_talk'] = [
+    clips['desk_talk'] = dangle([
         TALK0, TALK0, V(TALK0, **nod), V(TALK0, **nod), TALK0, V(TALK0, earL=-2, earR=-2, clX=-2),
         V(TALK0, armL=8, spL=6), V(TALK0, **gl), V(TALK0, **gl), V(TALK0, armL=8, spL=6), TALK0,
         V(TALK0, earL=2, earR=-1, clY=3), V(TALK0, earL=-1, earR=2, clY=-3), TALK0,
         V(TALK0, **nod), V(TALK0, **nod), TALK0, V(TALK0, hb=1, earL=-2, earR=-2, clX=-3),
         V(TALK0, hb=1, earL=-1, earR=-1), TALK0,
-    ]
+    ], 20)
 
     # ------------------------------------------------------------------ desk_ask (20, loop)
     up = dict(armL=24, spL=40, earL=-3, earR=-3, clX=-2)
     up2 = dict(up, spL=46, clX=2)
-    clips['desk_ask'] = [
+    clips['desk_ask'] = dangle([
         TALK0, V(TALK0, armL=10, spL=16, earL=-1, earR=-1), V(TALK0, **up), V(TALK0, **up), V(TALK0, **up2),
         V(TALK0, **up), V(TALK0, **up2), V(TALK0, **up), V(TALK0, **dict(up, hb=1)), V(TALK0, **dict(up, hb=1)),
         V(TALK0, **up), V(TALK0, **up2), V(TALK0, **up), V(TALK0, **up2), V(TALK0, **up),
         V(TALK0, **dict(up, earL=-1, earR=-4, clY=3)), V(TALK0, **dict(up, earL=-4, earR=-1, clY=-3)),
         V(TALK0, armL=10, spL=16, earL=-1, earR=-1), TALK0, TALK0,
-    ]
+    ], 20)
 
     # ------------------------------------------------------------------ desk_swivel_out (6)
     clips['desk_swivel_out'] = [
         TALK0,
-        C(TALK_YAW, hy=-25.0, earL=-1, earR=-1, clX=-2),
-        C(106.0, earL=1, earR=1, clY=1),
-        C(130.0, armL=8, armR=8, earL=2, earR=2, clY=3),
-        C(158.0, armL=18, armR=18, earL=1, earR=1, clY=2),
+        C(TALK_YAW, legL=SEAT_LEG - 2, legR=SEAT_LEG - 2, hy=-25.0, earL=-1, earR=-1, clX=-2),
+        C(106.0, legL=SEAT_LEG - 6, legR=SEAT_LEG - 6, earL=1, earR=1, clY=1),           # legs trail
+        C(130.0, legL=SEAT_LEG - 6, legR=SEAT_LEG - 6, armL=8, armR=8, earL=2, earR=2, clY=3),
+        C(158.0, legL=SEAT_LEG + 3, legR=SEAT_LEG + 3, armL=18, armR=18, earL=1, earR=1, clY=2),  # swing past
         TYPE0,
     ]
 
@@ -160,12 +178,13 @@ def build(g):
     clips['desk_stand'] = [
         TALK0,
         C(TALK_YAW, hy=-25.0, earL=1, earR=1),
-        C(TALK_YAW, earL=2, earR=2, clY=2),                                       # head back to the body
-        C(TALK_YAW, armL=-10, armR=-10, bob=-PXZ, earL=3, earR=3, clX=4),         # get ready
-        F(X=lerp(sx, fx, 0.40), Z=Zs + 0.14, fL=0.18, fR=0.18, hL=0.10, hR=0.10,
+        C(TALK_YAW, legL=SEAT_LEG - 8, legR=SEAT_LEG - 8, earL=2, earR=2, clY=2),   # head back, legs swing back
+        C(TALK_YAW, legL=SEAT_LEG + 10, legR=SEAT_LEG + 10, armL=-10, armR=-10, bob=-PXZ,
+          earL=3, earR=3, clX=4),                                                 # get ready: legs kick up
+        F(X=lerp(sx, fx, 0.40), Z=Zs + 0.14, legL=40, legR=40,
           armL=28, armR=28, earL=-4, earR=-4, clX=-6),                            # hop down, forwards
-        F(X=lerp(sx, fx, 0.80), Z=Zs * 0.40, fL=0.06, fR=0.06, hL=0.06, hR=0.06,
-          armL=20, armR=20, earL=-3, earR=-3, clX=-4),
+        F(X=lerp(sx, fx, 0.80), Z=Zs * 0.40, legL=15, legR=15,
+          armL=20, armR=20, earL=-3, earR=-3, clX=-4),                            # legs coming down to land
         F(X=fx, bob=-2 * PXZ, armL=-8, armR=-8, earL=4, earR=4, clX=7),           # land
         F(X=fx, earL=-1, earR=-1, clX=-2),
         F(X=fx + 0.05, fL=0.12, hL=0.08, earL=1, earR=1, clX=2),                  # step (left foot)

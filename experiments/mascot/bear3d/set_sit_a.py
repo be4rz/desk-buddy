@@ -25,7 +25,8 @@ ever render without calling prop_state per frame, the held props would stay at t
 hand-off / join / seam checks would catch the jump.
 
 Choreography (ori A), every set: <x>_sit (12) two backward waddle steps from H onto the cushion, a little hop, plop
-into the plush sit (Stage p's SIT: feet out, bob -3 px; Z = the cushion top), then the paws fetch the prop;
+into the plush sit (anim_clips.SIT_LEG: the leg stubs swing out in front over the cushion, pads on the legs,
+fL = fR = hL = hR = 0; Z = the cushion top, bob SEAT_BOB_PX), then the paws fetch the prop;
 <x>_stand (12) puts it back and reverses. Joins: sit last = loop 0 = stand 0. Hand-offs: sit frame 0 and stand's
 last = props + idle#0 at H.
   tea_sip   (36, loop) the mug in both mittens on the lap, up to the mouth, a long sip with closed eyes, down, a
@@ -36,7 +37,7 @@ last = props + idle#0 at H.
                        a yarn strand to the ball; head upright, mouth closed (set_clips face layers, patch SE / SW).
 """
 import math
-from anim_clips import REST_K
+from anim_clips import REST_K, SIT_LEG, SIT_BOB
 
 REST_S = dict(REST_K, X=0.0, Y=0.0, Z=0.0, yaw=0.0)
 HAND_YAW = 90.0
@@ -96,6 +97,10 @@ CUSH_W, CUSH_H = 0.62, 0.065          # cushion half extents (x/y, z): a flat sq
 SEAT_Z = 2 * CUSH_H                   # world z of the seat (snapped to whole pixels in geometry)
 SEAT_BACK = 0.12                      # the seat spot sits a little behind the cushion centre (feet stay on it)
 HAND_GAP = 0.98                       # seat -> hand-off spot, forward
+# the seated body height on the cushion top (whole pixels: the knit loop's face patches need them). anim_clips.SIT_BOB
+# (-5.6 px) is fitted for the bare floor; on the soft cushion the seat sinks a little less, the legs' undersides rest
+# on the cushion top and the round seat sinks into the cushion (hidden by it).
+SEAT_BOB_PX = -5
 SIDE_PROP = (0.0, -0.86)              # the small prop's spot (set frame, ori A): beside the cushion, the bear's right
 PROPS = {
     'cushion': dict(layers=['cushion'], footprint=dict(x=[-CUSH_W, CUSH_W], y=[-CUSH_W, CUSH_W]),
@@ -152,7 +157,10 @@ def build(s, g):
     def F(stt=None, **kw):
         q = dict(REST_S, X=hx, Y=hy, yaw=HAND_YAW); q.update(kw); return (q, stt if stt is not None else st())
 
-    SIT = dict(X=sx, Y=sy, Z=sz_, bob=-3 * px, fL=0.30, fR=0.30, hL=0.03, hR=0.03, armL=12.0, armR=12.0)
+    # the shared plush sit (anim_clips.SIT_LEG): legs out in front over the cushion, the pads stay on their legs. Never
+    # a far fL: a pad pushed off its leg reads as a second, detached pair of legs.
+    B0 = SEAT_BOB_PX * px
+    SIT = dict(X=sx, Y=sy, Z=sz_, bob=B0, legL=SIT_LEG, legR=SIT_LEG, armL=12.0, armR=12.0)
 
     def S(stt=None, **kw):
         q = dict(REST_S, yaw=HAND_YAW, **SIT); q.update(kw); return (q, stt if stt is not None else st())
@@ -166,12 +174,14 @@ def build(s, g):
         F(X=x(0.34), earL=-1, earR=-1, clY=-2),
         F(X=x(0.52), bob=PXZ, fR=-0.06, hR=0.07, earL=1, earR=1, clX=2),              # right foot
         F(X=x(0.66), bob=-2 * px, sz=0.96, armL=-8.0, armR=-8.0, earL=-2, earR=-2),   # crouch
-        F(X=x(0.86), Z=sz_ + 4 * px, sz=1.03, armL=-14.0, armR=-14.0, earL=3, earR=3, clX=-4),   # hop up
-        S(bob=-5 * px, sz=0.95, armL=-4.0, armR=-4.0, earL=4, earR=4, clX=4),         # plop: a soft squash
-        S(bob=-4 * px, sz=0.97, earL=-2, earR=-2, clX=-2),
+        F(X=x(0.86), Z=sz_ + 4 * px, sz=1.03, legL=35.0, legR=35.0, armL=-14.0, armR=-14.0, earL=3, earR=3,
+          clX=-4),                                                                    # hop up, the legs swing out
+        S(bob=B0 - 2 * px, legL=80.0, legR=80.0, sz=0.95, armL=-4.0, armR=-4.0, earL=4, earR=4, clX=4),   # plop
+        S(bob=B0 - px, legL=72.0, legR=72.0, sz=0.97, earL=-2, earR=-2, clX=-2),
     ]
     walk_out = [
-        F(X=x(0.86), Z=sz_ + 4 * px, sz=1.03, armL=-14.0, armR=-14.0, earL=3, earR=3, clX=-3),  # hop off forward
+        F(X=x(0.86), Z=sz_ + 4 * px, sz=1.03, legL=30.0, legR=30.0, armL=-14.0, armR=-14.0, earL=3, earR=3,
+          clX=-3),                                                                    # hop off forward, legs come in
         F(X=x(0.62), bob=-2 * px, sz=0.96, armL=-6.0, armR=-6.0, earL=-3, earR=-3, clX=3),       # land
         F(X=x(0.42), bob=PXZ, fL=0.06, hL=0.07, earL=1, earR=1, clY=2),
         F(X=x(0.20), fR=0.06, hR=0.07, earL=-1, earR=-1, clY=-2),
@@ -209,8 +219,8 @@ def build(s, g):
             S(st(mug=[0.6, 'both']), spR=10.0, armR=30.0, armL=26.0, earR=1, clY=2),
             S(st(mug=[0.0, 'paw_R']), spR=44.0, armR=24.0, earL=1, earR=2, clY=3),  # puts the mug down
             S(spR=28.0, armR=16.0, earR=-1, clY=-2),
-            S(armL=-14.0, armR=-14.0, bob=-5 * px, sz=0.96, earL=2, earR=2),         # mittens push up
-            S(armL=-8.0, armR=-8.0, bob=-3 * px, earL=-1, earR=-1),
+            S(armL=-14.0, armR=-14.0, bob=B0 - 2 * px, legL=80.0, legR=80.0, sz=0.96, earL=2, earR=2),         # mittens push up
+            S(armL=-8.0, armR=-8.0, legL=58.0, legR=58.0, earL=-1, earR=-1),       # the legs start in
         ] + walk_out
     elif s == 'snack':
         HOLD = dict(armR=40.0, spR=-14.0, armL=14.0)                       # cookie in the right mitten, chest high
@@ -253,8 +263,8 @@ def build(s, g):
             S(st(cookie=[0.6, 'paw_R']), spR=20.0, armR=34.0, armL=14.0, earR=1, clY=2),
             S(st(cookie=[0.0, 'paw_R']), spR=46.0, armR=26.0, earR=2, clY=3),         # back into the jar
             S(spR=28.0, armR=18.0, earR=-1, clY=-2),
-            S(armL=-14.0, armR=-14.0, bob=-5 * px, sz=0.96, earL=2, earR=2),
-            S(armL=-8.0, armR=-8.0, bob=-3 * px, earL=-1, earR=-1),
+            S(armL=-14.0, armR=-14.0, bob=B0 - 2 * px, legL=80.0, legR=80.0, sz=0.96, earL=2, earR=2),
+            S(armL=-8.0, armR=-8.0, legL=58.0, legR=58.0, earL=-1, earR=-1),       # the legs start in
         ] + walk_out
     else:   # knit: face layers on the loop (head upright, mouth closed, eyes open; the mittens stay below the face)
         HOLD = dict(armL=20.0, armR=20.0, spL=0.0, spR=0.0)     # no inward spread: in ori B a mitten would cross the mouth patch
@@ -279,8 +289,8 @@ def build(s, g):
             S(st(needles=[0.6, 'both'], tilt=0.6 * KNIT_TILT), spR=8.0, armR=26.0, armL=22.0, earR=1, clY=2),
             S(st(needles=[0.0, 'paw_R']), spR=44.0, armR=26.0, earR=2, clY=3),        # back onto the ball
             S(spR=28.0, armR=16.0, earR=-1, clY=-2),
-            S(armL=-14.0, armR=-14.0, bob=-5 * px, sz=0.96, earL=2, earR=2),
-            S(armL=-8.0, armR=-8.0, bob=-3 * px, earL=-1, earR=-1),
+            S(armL=-14.0, armR=-14.0, bob=B0 - 2 * px, legL=80.0, legR=80.0, sz=0.96, earL=2, earR=2),
+            S(armL=-8.0, armR=-8.0, legL=58.0, legR=58.0, earL=-1, earR=-1),       # the legs start in
         ] + walk_out
     for c, n in SETS[s]['counts'].items(): assert len(out[c]) == n, (c, len(out[c]), n)
     return out

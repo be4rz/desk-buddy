@@ -31,9 +31,9 @@ attached: paw_L/paw_R/head, with the ori B mirror and paw swap), (2) hidden-obje
 Choreography (ori A):
   (notebook / laptop: the props stand on a low toy tray-table, lead decision q-183110: seated, the stub mittens
             reach z ~0.85-1.0 only, so nothing on the floor can be touched)
-  notebook  side shuffle from the hand-off spot H to the sit spot P (the bear's left), plush floor sit (Stage p's SIT),
+  notebook  side shuffle from the hand-off spot H to the sit spot P (the bear's left), the shared plush floor sit (SIT_LEG / SIT_BOB),
             the right mitten picks the crayon off the page; doodle loop: small scribbles aimed at the page, breaths,
-            ear and foot wiggles, the face upright (set_clips layers, patch SE / SW); then the crayon goes back, stand,
+            ear wiggles and small leg swings, the face upright (set_clips layers, patch SE / SW); then the crayon goes back, stand,
             shuffle back to H.
   laptop    the same approach; laptop_type: alternating mitten taps on the keys, a breath, ear wiggles (layers).
   phones    standing at H: the left mitten takes the headphones off the stand, both mittens pop them on over the beanie;
@@ -47,7 +47,7 @@ Joins (identical frames): <sit>[-1] = <loop>[0] = <stand>[0] per set; hand-offs:
 idle#0 at H facing SE (A) / SW (B).
 """
 import math, hashlib
-from anim_clips import REST_K, expand_k
+from anim_clips import REST_K, expand_k, SIT_LEG, SIT_BOB
 
 REST_S = dict(REST_K, X=0.0, Y=0.0, Z=0.0, yaw=0.0)
 HAND_YAW = 90.0
@@ -162,7 +162,14 @@ def geometry(s, ppu, pxz):
 
 
 # ------------------------------------------------------------------ poses
-SIT = dict(bob=-3, fL=0.34, fR=0.34, hL=0.03, hR=0.03, armL=12.0, armR=12.0)   # Stage p's plush floor sit (bob in px)
+# the shared plush floor sit (anim_clips SIT_LEG / SIT_BOB: the legs swung out in front, the pads riding them, the
+# seat on the floor). bob is in screen px here (_poses scales it by PXZ); build() sets it from SIT_BOB for this PXZ.
+SIT = dict(bob=None, legL=SIT_LEG, legR=SIT_LEG, armL=12.0, armR=12.0)
+DOWN_LEG = (34.0, 28.0)          # half way down to the floor sit (or up from it): the legs start to swing out
+
+
+def _sit_px(PXZ):
+    SIT['bob'] = round(SIT_BOB / PXZ)        # whole px: the face 'layers' patches only match a body moved by whole px
 
 
 def _poses(n, keys, PXZ):
@@ -193,9 +200,10 @@ def _approach(g, PXZ, sit_keys):
             (4, dict(X=x(.85), Y=y(.85), bob=1, earL=-1, earR=-1, clX=2)),
             (5, dict(X=0.0, Y=0.0, earL=1, earR=1)),
             (6, dict(X=0.0, Y=0.0, bob=-2, sz=0.97, armL=-6.0, armR=-6.0, earL=2, earR=2)),       # a little dip
-            (7, dict(X=0.0, Y=0.0, bob=-1, fL=0.20, fR=0.14, hL=0.12, hR=0.10, armL=-10.0, armR=-10.0, earL=-3, earR=-3, clX=4)),
-            (8, dict(S, bob=-5, sz=0.95, earL=4, earR=4, clX=-5)),                                   # plop
-            (9, dict(S, bob=-4, sz=0.97, earL=-2, earR=-2, clX=3))] + sit_keys
+            (7, dict(X=0.0, Y=0.0, bob=round(SIT['bob'] * 0.45), legL=DOWN_LEG[0], legR=DOWN_LEG[1], armL=-10.0, armR=-10.0,
+                     earL=-3, earR=-3, clX=4)),                                                   # legs swing out
+            (8, dict(S, bob=SIT['bob'] - 2, sz=0.95, legL=SIT_LEG - 8, legR=SIT_LEG - 8, earL=4, earR=4, clX=-5)),  # plop
+            (9, dict(S, bob=SIT['bob'] - 1, sz=0.97, legL=SIT_LEG + 6, legR=SIT_LEG + 6, earL=-2, earR=-2, clX=3))] + sit_keys
     return keys
 
 
@@ -206,8 +214,10 @@ def _leave(g, sit_keys):
     x = lambda t: hx + (0.0 - hx) * t
     S = dict(SIT, X=0.0, Y=0.0)
     return sit_keys + [
-        (2, dict(S, bob=-5, sz=0.96, armL=-14.0, armR=-14.0, earL=2, earR=2)),                     # mittens push
-        (3, dict(X=0.0, Y=0.0, bob=-2, fL=0.18, fR=0.22, hL=0.10, hR=0.12, armL=-8.0, armR=-8.0, earL=-3, earR=-3, clX=-4)),
+        (2, dict(S, bob=SIT['bob'] - 2, sz=0.96, legL=SIT_LEG - 12, legR=SIT_LEG - 12, armL=-14.0, armR=-14.0, earL=2,
+                 earR=2)),                                                                         # mittens push
+        (3, dict(X=0.0, Y=0.0, bob=round(SIT['bob'] * 0.45), legL=DOWN_LEG[1], legR=DOWN_LEG[0], armL=-8.0, armR=-8.0, earL=-3,
+                 earR=-3, clX=-4)),                                                               # legs swing in
         (4, dict(X=0.0, Y=0.0, bob=1, sz=1.03, earL=3, earR=3, clX=4)),                            # up with a little hop
         (5, dict(X=0.0, Y=0.0, earL=-1, earR=-1)),
         (6, dict(X=x(.85), Y=y(.85), earL=1, earR=1, clY=-2, fR=0.04, hR=0.07)),
@@ -229,7 +239,7 @@ def _page(u, v):
 
 
 def build(s, g):
-    PXZ = g['PXZ']; out = {}
+    PXZ = g['PXZ']; out = {}; _sit_px(PXZ)
     if s == 'notebook':
         DOODLE = dict(SIT, X=0.0, Y=0.0, armR=10.0, spR=-4.0, armL=6.0)
         sit = _yaw(_poses(12, _approach(g, PXZ, [(10, dict(SIT, X=0.0, Y=0.0, armR=16.0, spR=-6.0, earL=1, earR=1)),
@@ -247,8 +257,8 @@ def build(s, g):
                 kv = dict(DOODLE, armR=DOODLE['armR'] + ar, spR=DOODLE['spR'] + sp)
                 if b == 1 and df == 4: kv.update(earL=3, earR=-2, clY=3)
                 if b == 2 and df == 2: kv.update(hb=1, earL=-2, earR=-2)
-                if b == 2 and df == 6: kv.update(hL=0.10, clX=3)
-                if b == 3 and df == 4: kv.update(hR=0.10, earR=2, clX=-2)
+                if b == 2 and df == 6: kv.update(legL=SIT_LEG + 14, legR=SIT_LEG - 4, clX=3)       # a little leg swing
+                if b == 3 and df == 4: kv.update(legR=SIT_LEG + 14, legL=SIT_LEG - 4, earR=2, clX=-2)
                 kd.append((f, kv)); aims[f] = (u, v)
         doodle = _yaw(_poses(32, kd, PXZ)); _fix(doodle, 0, D0)
         af = sorted(aims)

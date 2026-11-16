@@ -7,6 +7,7 @@ Every frame is (q, st):
         lie       deg, lying back about the bear's back-bottom (PIV_LIE in render_b.py)
         look      face decals shifted down by whole pixels (looking down)
         spL/spR   arm spread outwards, deg (applied before the forward swing)
+        legL/legR hip swing, deg, + = forward (seated, lying and hop frames; the foot pads ride the legs)
   st  prop state: quilt (folds = arc positions of its fold bends, >= Lq = none; cut = bear rest height that
       lifts the quilt, -9 = none; arms = arms under it; br = breath px), book (cover 0 closed .. 180 open, leaf -1 hidden or 0..180 page turn), zzz phase (-1 none)
 12 fps. Transition clips start or end on the Stage A rest pose at the hand-off spot (pixel-identical there).
@@ -17,7 +18,13 @@ import math
 from anim_clips import REST, ease
 
 FPS = 12
-REST_B = dict(REST, X=0.0, Y=0.0, Z=0.0, yaw=0.0, lie=0.0, look=0, spL=0.0, spR=0.0)
+REST_B = dict(REST, X=0.0, Y=0.0, Z=0.0, yaw=0.0, lie=0.0, look=0, spL=0.0, spR=0.0, legL=0.0, legR=0.0)
+# hip swings (legL / legR, deg, + = forward; render_b.py adds the hip joints): seated, the real legs swing out
+# and the foot pads ride them (fL / hL stay 0 on every swung frame; standing frames keep the Stage A pads)
+SIT_LEG = 75.0    # sitting up in bed: legs out along the mattress
+EDGE_LEG = 70.0   # perched on the bed edge: legs out over the side
+LIE_LEG = -10.0   # lying back: legs eased down toward the mattress
+SEAT_LEG = 65.0   # on the pouf: legs out over its front edge (short of the table)
 ORDER = {'bed': ['get_in_bed', 'sleep', 'wake_up'], 'read': ['sit_down', 'read', 'stand_up']}
 LOOP = {'sleep', 'read'}
 
@@ -43,9 +50,11 @@ def build(g):
         q = dict(REST_B, X=hx, Y=hy, Z=0.0, yaw=0.0); q.update(kw)
         return (q, dict(dict(QM, cover=0, leaf=-1, zzz=-1), **(st or {})))
     def Q(base, **kw): return dict(base, **kw)
-    sit = dict(X=0.0, Y=yS, Z=zS, fL=0.30, fR=0.30, hL=0.10, hR=0.10)
-    edge = dict(sit, X=ex, Y=hy)                                 # perched on the bed edge, legs over the side
-    lie = dict(sit, Y=yL, lie=LIE, fL=0.10, fR=0.10, hL=0.0, hR=0.0)
+    def legs(a, d=0.0): return dict(legL=a + d, legR=a - d)
+    sit = dict(X=0.0, Y=yS, Z=zS, **legs(SIT_LEG))
+    edge = dict(sit, X=ex, Y=hy, **legs(EDGE_LEG))               # perched on the bed edge, legs over the side
+    lie = dict(sit, Y=yL, lie=LIE, **legs(LIE_LEG))
+    def lb(t): return dict(sit, lie=LIE * t, Y=lerp(yS, yL, t), **legs(lerp(SIT_LEG, LIE_LEG, t)))   # lying back
     def mid(a, b, t):
         return Q(a, folds=[lerp(x, y, t) for x, y in zip(a['folds'], b['folds'])], cut=max(a['cut'], b['cut']))
 
@@ -57,16 +66,16 @@ def build(g):
         B(QO, sz=szpx(-2), spR=5, earL=2, earR=2, clY=-2),                       # quilt folded to the foot half
         B(QO, yaw=45.0),                                                          # turn: back to the bed
         B(QO, yaw=90.0, sz=szpx(-3), armL=-10, armR=-10, earL=2, earR=2),        # crouch
-        B(QE, yaw=90.0, X=lerp(hx, ex, 0.5), Z=0.40, sz=szpx(2), armL=25, armR=25, hL=0.08, hR=0.08,
+        B(QE, yaw=90.0, X=lerp(hx, ex, 0.5), Z=0.40, sz=szpx(2), armL=25, armR=25, **legs(30),
           earL=-4, earR=-4, clX=-6),                                              # hop up and back
-        B(QE, yaw=90.0, **edge, sz=szpx(-3), armL=10, armR=10, earL=3, earR=3, clX=6),   # plop on the edge
-        B(QE, yaw=90.0, **edge, sz=szpx(1), clX=-3),
+        B(QE, yaw=90.0, **dict(edge, **legs(EDGE_LEG + 10)), sz=szpx(-3), armL=10, armR=10, earL=3, earR=3, clX=6),   # plop on the edge
+        B(QE, yaw=90.0, **dict(edge, **legs(EDGE_LEG - 6)), sz=szpx(1), clX=-3),
         B(QO, yaw=55.0, **dict(sit, X=lerp(ex, 0, 0.5), Y=lerp(hy, yS, 0.5))),   # swing the legs in, scoot down
         B(QO, yaw=20.0, **dict(sit, X=lerp(ex, 0, 0.85), Y=lerp(hy, yS, 0.85))),
         B(QO, yaw=0.0, **sit, earL=3, earR=3, clY=3),                            # sitting in bed, facing the foot
-        B(QO, yaw=0.0, **sit, sz=szpx(1), earL=-1, earR=-1, clY=-2),             # happy wiggle
-        B(QO, **dict(sit, lie=LIE * 0.30, Y=lerp(yS, yL, 0.3)), armL=-8, armR=-8, clX=-4),            # lie back
-        B(QO, **dict(sit, lie=LIE * 0.70, Y=lerp(yS, yL, 0.7)), armL=-4, armR=-4, clX=-6),
+        B(QO, yaw=0.0, **dict(sit, **legs(SIT_LEG, 8)), sz=szpx(1), earL=-1, earR=-1, clY=-2),   # happy wiggle
+        B(QO, **lb(0.30), armL=-8, armR=-8, clX=-4),                             # lie back
+        B(QO, **lb(0.70), armL=-4, armR=-4, clX=-6),
         B(QO, **lie, sz=szpx(-2), earL=3, earR=3, clX=5),                        # plop onto the pillow
         B(QO, **lie, sz=szpx(1), clX=-2),
         B(mid(QO, QF, 0.45), **lie, armL=25, armR=25),                           # pull the quilt up
@@ -91,8 +100,8 @@ def build(g):
         B(Q(QF, zzz=0), **slp_q),                                                # sleep frame 0 (Zzz drawn there too)
         B(QF, **dict(slp_q, blink=0.45)),                                        # eyes open
         B(QF, **dict(lie, armL=12, armR=12, earL=-4, earR=-4, clX=-4)),          # ears perk
-        B(mid(QF, QL, 0.5), **dict(sit, lie=LIE * 0.6, Y=lerp(yS, yL, 0.6)), armL=30, armR=30),   # sit up, quilt slides down
-        B(QL, **dict(sit, lie=LIE * 0.25, Y=lerp(yS, yL, 0.25)), armL=15, armR=15),
+        B(mid(QF, QL, 0.5), **lb(0.6), armL=30, armR=30),                        # sit up, quilt slides down
+        B(QL, **lb(0.25), armL=15, armR=15),
         B(QL, **sit, sz=szpx(-2), earL=3, earR=3, clX=5),                        # sitting up
         B(QL, **sit, armL=100, armR=100, spL=30, spR=30, sz=szpx(2), blink=0.12),  # big stretch
         B(QL, **sit, armL=150, armR=150, spL=55, spR=55, sz=szpx(4), blink=0.12, earL=-4, earR=-4, clX=-5),
@@ -103,8 +112,8 @@ def build(g):
         B(QO, **sit, armL=-10, armR=-10, sz=szpx(-1)),                            # push the quilt off
         B(QO, yaw=45.0, **dict(sit, X=lerp(0, ex, 0.5), Y=lerp(yS, hy, 0.5))),   # swing the legs out
         B(QE, yaw=90.0, **edge),
-        B(QE, yaw=90.0, **edge, sz=szpx(-2), armL=-10, armR=-10, lean=6),         # scoot, lean forward
-        B(QE, yaw=90.0, X=lerp(ex, hx, 0.55), Z=0.30, sz=szpx(2), armL=30, armR=30, hL=0.08, hR=0.08,
+        B(QE, yaw=90.0, **dict(edge, **legs(EDGE_LEG - 8)), sz=szpx(-2), armL=-10, armR=-10, lean=6),   # scoot, lean forward
+        B(QE, yaw=90.0, X=lerp(ex, hx, 0.55), Z=0.30, sz=szpx(2), armL=30, armR=30, **legs(40),
           earL=-4, earR=-4, clX=-6),                                              # hop off
         B(QO, yaw=90.0, sz=szpx(-3), armL=8, armR=8, earL=3, earR=3, clX=6),      # land
         B(QO, yaw=90.0, sz=szpx(1), clX=-3),
@@ -122,17 +131,17 @@ def build(g):
     def R(st=None, **kw):
         q = dict(REST_B, X=rx_, Y=ry_, Z=0.0, yaw=90.0); q.update(kw)
         return (q, dict(dict(QM, cover=0, leaf=-1, zzz=-1), **(st or {})))
-    seat = dict(X=px_, Y=py_, Z=zP, fL=0.30, fR=0.30, hL=0.12, hR=0.12)
+    seat = dict(X=px_, Y=py_, Z=zP, **legs(SEAT_LEG))
     rd = dict(seat, lean=7, armL=24, armR=24, look=1, blink=0.75)
     O = dict(cover=180)
     sdn = [
         R(),
         R(sz=szpx(-3), armL=-10, armR=-10, earL=2, earR=2),                       # crouch
-        R(Y=lerp(ry_, py_, 0.40), Z=0.36, sz=szpx(2), armL=25, armR=25, hL=0.08, hR=0.08,
+        R(Y=lerp(ry_, py_, 0.40), Z=0.36, sz=szpx(2), armL=25, armR=25, **legs(30),
           earL=-4, earR=-4, clX=-6, clY=4),                                         # hop sideways
-        R(Y=lerp(ry_, py_, 0.80), Z=zP + 0.20, armL=15, armR=15, fL=0.15, fR=0.15, hL=0.10, hR=0.10, clX=-3, clY=5),
-        R(**seat, sz=szpx(-3), earL=3, earR=3, clX=6, clY=-2),                    # plop on the pouf
-        R(**seat, sz=szpx(1), clX=-3),
+        R(Y=lerp(ry_, py_, 0.80), Z=zP + 0.20, armL=15, armR=15, **legs(50), clX=-3, clY=5),
+        R(**dict(seat, **legs(SEAT_LEG + 10)), sz=szpx(-3), earL=3, earR=3, clX=6, clY=-2),   # plop on the pouf
+        R(**dict(seat, **legs(SEAT_LEG - 5)), sz=szpx(1), clX=-3),
         R(**seat, earL=-1, earR=-1),
         R(**dict(seat, lean=5, armL=18, armR=18)),                                # reach for the book
         R(**dict(seat, lean=7, armL=22, armR=30, spR=-6)),
@@ -158,6 +167,8 @@ def build(g):
                       armL=[28, 34, 30, 24, 24, 24][k], armR=[28, 34, 30, 24, 24, 24][k],
                       earL=[3, 5, -2, 1, 0, 0][k], earR=[3, 5, -2, 1, 0, 0][k],
                       clX=[-3, -6, 5, -2, 1, 0][k], clY=[3, -4, 3, -1, 0, 0][k])
+            kick = [6, 10, 4, 0, 0, 0][k]                                         # a little leg kick
+            kw.update(legL=SEAT_LEG + kick, legR=SEAT_LEG - kick)
         read.append(R(st, **kw))
     clips['read'] = read
 
@@ -167,10 +178,10 @@ def build(g):
         R(dict(cover=50), **dict(rd, armR=42, spR=-10, blink=1.0)),
         R(**dict(seat, lean=4, armL=18, armR=20)),
         R(**seat, earL=2, earR=2),
-        R(**seat, sz=szpx(-2), armL=-10, armR=-10),                                # push off
-        R(Y=lerp(py_, ry_, 0.30), Z=zP + 0.22, sz=szpx(2), armL=25, armR=25, fL=0.12, fR=0.12, hL=0.10, hR=0.10,
+        R(**dict(seat, **legs(SEAT_LEG - 10)), sz=szpx(-2), armL=-10, armR=-10),   # push off
+        R(Y=lerp(py_, ry_, 0.30), Z=zP + 0.22, sz=szpx(2), armL=25, armR=25, **legs(50),
           earL=-4, earR=-4, clX=-6, clY=-4),
-        R(Y=lerp(py_, ry_, 0.72), Z=0.25, armL=15, armR=15, hL=0.08, hR=0.08, clX=-3, clY=-5),
+        R(Y=lerp(py_, ry_, 0.72), Z=0.25, armL=15, armR=15, **legs(30), clX=-3, clY=-5),
         R(sz=szpx(-3), armL=8, armR=8, earL=3, earR=3, clX=6, clY=2),             # land
         R(sz=szpx(1), clX=-3),
         R(),

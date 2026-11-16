@@ -191,6 +191,10 @@ and talks through speech bubbles, powered by an LLM.
   frame, only inside the masks + 1 px, only ink/fur/blush outline or shade flips, no cluster of 5+ px. Paws must never
   cross the face in S/SE/E/W/SW. walk*/run* have no face. Stage C has no roll, lean or squash (face bones shift by
   whole pixels). It prints a residual table and writes `face/residual_worst.png`. Stage A/B/props bytes never change.
+- Legs: the leg stubs are part of the body mesh; the white pads (fL/fR/hL/hR) are only for steps. Sitting, lying and
+  dangling poses swing the real legs with `legL` / `legR` (deg, + = forward, hip joints in `rig_bear.py` LEGS: always in
+  Stage K, Stage D via `--legs`, Stage B in `render_b.py`) and keep the pads at 0, never a far fL/hL (it reads as a second,
+  detached pair of legs). The shared floor sit is `anim_clips.SIT_LEG` / `SIT_BOB`.
 - Pixel rules: iso 2:1 ortho camera, 8 directions, 12 fps, ppu 40.07, alpha 0/255 only, 1px ink outline, palette =
   `bear-proto/palette-bear.json` + `scene-proto/palette.json` (+ `bear3d/palette-ext.json` for furniture).
 - Preview: `python3 -m http.server 8771 --directory experiments/mascot/out`, then open

@@ -32,7 +32,7 @@ point = ['f', [x, y, z]]                 set frame (ori A), mirrored with W0 in 
       | ['o', object, [x, y, z]]         a point in an object's local frame (where it is this frame; resolve it first)
 """
 import math, hashlib
-from anim_clips import REST_K, expand_k
+from anim_clips import REST_K, expand_k, SIT_LEG, SIT_BOB
 
 REST_S = dict(REST_K, X=0.0, Y=0.0, Z=0.0, yaw=0.0)
 HAND_YAW = 90.0
@@ -337,14 +337,24 @@ def _blocks_home():
 
 def _build_blocks(g, PXZ, sx, sy):
     base = dict(X=0.0, Y=0.0, yaw=HAND_YAW)
-    SIT = dict(yaw=SIT_YAW, bob=-3 * PXZ, fL=0.34, fR=0.34, hL=0.03, hR=0.03, armL=12.0, armR=12.0)
+    # the shared plush floor sit (anim_clips.SIT_LEG / SIT_BOB): the leg stubs swing out in front, the seat on the
+    # floor, the pads stay on their legs (fL = fR = hL = hR = 0). Never a far fL: a pad pushed off its leg reads as a
+    # second, detached pair of legs.
+    SIT = dict(yaw=SIT_YAW, bob=SIT_BOB, legL=SIT_LEG, legR=SIT_LEG, armL=12.0, armR=12.0)
+
+    def sit(**kw):
+        """SIT + kw (a forward lean rocks the whole lump about its front, the legs stay out in front on the floor)."""
+        return dict(SIT, **kw)
     home = _blocks_home()
     out = {}
-    # blocks_sit: turn toward the blocks (E), plop down to sit (Stage p's SIT pose)
+    # blocks_sit: turn toward the blocks (E), then sit down: a little crouch, the legs ease out in front as the body
+    # drops, a soft plop onto the seat and a settle
     q = poses(12, [(0, {}), (2, dict(yaw=105.0, fL=-0.04, hL=0.07, earL=2, clY=3)),
                    (4, dict(yaw=125.0, fR=-0.04, hR=0.07, earL=-1, clY=-2)), (5, dict(yaw=SIT_YAW)),
-                   (7, dict(SIT, bob=-5 * PXZ, sz=0.95, earL=4, earR=4, clX=-5, mouth='open')),
-                   (8, dict(SIT, bob=-4 * PXZ, sz=0.97, earL=-2, earR=-2, clX=3)), (11, SIT)], base)
+                   (6, dict(yaw=SIT_YAW, bob=-2 * PXZ, sz=0.97, legL=18.0, legR=18.0, armL=-6.0, armR=-6.0, earL=-1, earR=-1)),
+                   (7, dict(yaw=SIT_YAW, bob=0.55 * SIT_BOB, legL=48.0, legR=48.0, armL=-10.0, armR=-10.0, earL=2, earR=2)),
+                   (8, sit(bob=SIT_BOB - 2 * PXZ, legL=80.0, legR=80.0, sz=0.95, earL=4, earR=4, clX=-5, mouth='open')),
+                   (9, sit(bob=SIT_BOB - PXZ, legL=72.0, legR=72.0, sz=0.97, earL=-2, earR=-2, clX=3)), (11, SIT)], base)
     out['blocks_sit'] = _frames(q, [dict(home) for _ in range(12)])
     # blocks_build: pick up each block in both mittens and stack it (12 frames each), a proud wiggle, then the
     # tower wobbles and topples: the blocks tumble back to where they lay (frame 0)
@@ -354,13 +364,13 @@ def _build_blocks(g, PXZ, sx, sy):
     placed = {}
     for j in range(3):
         o = 12 * j
-        keys += [(o, SIT), (o + 2, dict(SIT, lean=24.0, armL=0.0, armR=0.0, spL=-10.0, spR=-10.0, hp=12.0, earL=2, earR=2)),
-                 (o + 4, dict(SIT, lean=24.0, armL=2.0, armR=2.0, spL=-14.0, spR=-14.0, hp=12.0)),
-                 (o + 6, dict(SIT, lean=6.0, armL=26.0 + 6 * j, armR=26.0 + 6 * j, spL=-14.0, spR=-14.0, hp=4.0 - 4 * j,
+        keys += [(o, SIT), (o + 2, sit(lean=24.0, armL=0.0, armR=0.0, spL=-10.0, spR=-10.0, hp=12.0, earL=2, earR=2)),
+                 (o + 4, sit(lean=24.0, armL=2.0, armR=2.0, spL=-14.0, spR=-14.0, hp=12.0)),
+                 (o + 6, sit(lean=6.0, armL=26.0 + 6 * j, armR=26.0 + 6 * j, spL=-14.0, spR=-14.0, hp=4.0 - 4 * j,
                               mouth='open')),
-                 (o + 8, dict(SIT, lean=10.0, armL=22.0 + 8 * j, armR=22.0 + 8 * j, spL=-14.0, spR=-14.0, hp=6.0 - 4 * j)),
-                 (o + 9, dict(SIT, lean=10.0, armL=22.0 + 8 * j, armR=22.0 + 8 * j, spL=-8.0, spR=-8.0, hp=6.0 - 4 * j)),
-                 (o + 11, dict(SIT, earL=-2, earR=-2, clY=3 if j % 2 else -3))]
+                 (o + 8, sit(lean=10.0, armL=22.0 + 8 * j, armR=22.0 + 8 * j, spL=-14.0, spR=-14.0, hp=6.0 - 4 * j)),
+                 (o + 9, sit(lean=10.0, armL=22.0 + 8 * j, armR=22.0 + 8 * j, spL=-8.0, spR=-8.0, hp=6.0 - 4 * j)),
+                 (o + 11, sit(earL=-2, earR=-2, clY=3 if j % 2 else -3))]
         for k in range(12):
             d = dict(home); d.update(placed)
             b = f'blk{j}'
@@ -371,9 +381,9 @@ def _build_blocks(g, PXZ, sx, sy):
             st.append(d)
         placed[f'blk{j}'] = P(F(*slot(j)))
     # topple (frames 36-47): wobble, tip over away from the bear, tumble home
-    keys += [(36, dict(SIT, hp=-6.0, mouth='open', earL=3, earR=3, clX=4)), (37, dict(SIT, hp=-8.0, mouth='wide', hb=1)),
-             (39, dict(SIT, hp=-6.0, mouth='wide')), (40, dict(SIT, hp=4.0, mouth='open', earL=-3, earR=-3, armL=30.0, armR=30.0)),
-             (42, dict(SIT, hp=8.0, mouth='open', earL=4, earR=4, armL=24.0, armR=24.0)), (44, dict(SIT, hp=4.0, clY=-4)),
+    keys += [(36, sit(hp=-6.0, mouth='open', earL=3, earR=3, clX=4)), (37, sit(hp=-8.0, mouth='wide', hb=1)),
+             (39, sit(hp=-6.0, mouth='wide')), (40, sit(hp=4.0, mouth='open', earL=-3, earR=-3, armL=30.0, armR=30.0)),
+             (42, sit(hp=8.0, mouth='open', earL=4, earR=4, armL=24.0, armR=24.0)), (44, sit(hp=4.0, clY=-4)),
              (46, SIT), (47, SIT)]
     tip = [0, 6, -6, 12, 30, 60, 1, 1, 1, 1, 1, 1]
     for k in range(12):
@@ -396,7 +406,11 @@ def _build_blocks(g, PXZ, sx, sy):
             if k >= 10: d[b] = home[b]
         st.append(d)
     out['blocks_build'] = _frames(poses(48, keys, base), st)
-    q = poses(12, [(0, SIT), (2, dict(SIT, bob=-5 * PXZ, sz=0.96, armL=-14.0, armR=-14.0, earL=2, earR=2)),
+    # blocks_stand: mittens push on the floor, the legs come back in under the body as it rises, a little hop up,
+    # then two steps turning back to the hand-off facing
+    q = poses(12, [(0, SIT), (2, sit(bob=SIT_BOB - 2 * PXZ, legL=80.0, legR=80.0, sz=0.96, armL=-14.0, armR=-14.0,
+                                     earL=2, earR=2)),
+                   (3, dict(yaw=SIT_YAW, bob=0.5 * SIT_BOB, legL=42.0, legR=42.0, armL=-16.0, armR=-16.0, earL=-1, earR=-1)),
                    (4, dict(yaw=SIT_YAW, bob=PXZ, sz=1.03, earL=-3, earR=-3, clY=4)), (6, dict(yaw=SIT_YAW, clY=-2)),
                    (8, dict(yaw=115.0, fL=0.04, hL=0.07)), (10, dict(yaw=95.0, fR=0.04, hR=0.07, earL=1)), (11, {})], base)
     out['blocks_stand'] = _frames(q, [dict(home) for _ in range(12)])

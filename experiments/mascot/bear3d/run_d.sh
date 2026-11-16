@@ -1,9 +1,9 @@
 #!/bin/sh
 # Stage D: the desk station (low toy desk, chunky computer + keyboard, swivel chair) and the desk clips (desk_sit,
 # desk_type, desk_swivel_in, desk_talk, desk_ask, desk_swivel_out, desk_stand) in both orientations (A, B = 3D mirror)
-# on the Stage L rig (built here in scratch: rig_bear.py --stage l, the committed clips_l.json is not touched), with
-# Stage B's set/props method (render_d.py -> pixelize_d.py -> make_d.py). Then the face pass (face_d.py: face.json
-# set_clips, additive) and the checks. Needs bear.blend (run.sh), anim/ (run_anim.sh), face/ (run_face.sh + face_l.py).
+# on the Stage L rig with hip joints (built here in scratch: rig_bear.py --stage l --legs; the committed clips_l.json
+# is not touched), with Stage B's set/props method (render_d.py -> pixelize_d.py -> make_d.py). Then the face pass
+# (face_d.py: face.json set_clips, additive) and the checks. Needs bear.blend (run.sh), anim/ (run_anim.sh), face/ (run_face.sh + face_l.py).
 # Stage A/B/C/L, props and the existing face files are not touched. ~2 min.
 # anim_d/, props_d/ and face.json are replaced only if make_d.py's hand-off check, face_d.py, verify_d.py and
 # verify_face.py all pass (a failed run restores the previous ones).
@@ -17,9 +17,9 @@ OUT=../out/bear3d/anim_d; POUT=../out/bear3d/props_d
 if [ -e "$WK" ] && [ ! -f "$WK/.bear3d_d_work" ]; then echo "refusing to clear $WK: not a run_d.sh work dir"; exit 1; fi
 rm -rf "$WK"; mkdir -p "$WK/raw" "$WK/px"; touch "$WK/.bear3d_d_work"
 # Blender exits 0 on a Python error: a missing output is the failure signal
-$B -b bear.blend -P rig_bear.py -- --stage l --out "$WK/bear_rig_l.blend" --clips "$WK/clips_l_scratch.json" \
+$B -b bear.blend -P rig_bear.py -- --stage l --legs --out "$WK/bear_rig_l.blend" --clips "$WK/clips_l_scratch.json" \
   | grep -E "HEAD|drift|SAVED|Error|Traceback" || true
-[ -f "$WK/bear_rig_l.blend" ] || { echo "rig failed (rig_bear.py --stage l)"; exit 1; }
+[ -f "$WK/bear_rig_l.blend" ] || { echo "rig failed (rig_bear.py --stage l --legs)"; exit 1; }
 for o in A B; do
   A="--ori $o --raw $WK/raw --px $WK/px"
   for m in layout props clip; do
