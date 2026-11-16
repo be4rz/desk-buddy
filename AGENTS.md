@@ -78,10 +78,17 @@ and talks through speech bubbles, powered by an LLM.
   also the `buddy-studio` binary; `--json` everywhere, exit 0 ok / 1 findings or error / 2 usage;
   `audit --pack <dir> [--minutes 10] [--seed N | --seeds 1,2,3] [--start 2026-11-16T10:00] [--temperament energy=1.0,…]`
   exits 1 when a run breaks the pack's `variety` rules or targets: the bear's gate is `--minutes 10` and `30` on seeds
-  1,2,3) + `src/studio/` (window
-  `studio`, page `web/studio/index.html?mock=1|lint-error|empty`, only it may call `studio_*`). Tray **Studio…**, or
-  `cargo run -p buddy-app -- --studio [<pack-dir>]` (only the studio window: no lock, settings, host.json or sidecar).
-  It only shows and checks art; comments go to `<pack>/review/comments.jsonl`. Human desktop checks: `docs/handover.md`.
+  1,2,3; `package check <dir>` / `package bundle --pack <dir> --out <dir>/<id>`: the package standard,
+  `mascots/README.md`) + `src/studio/` (window `studio`, page `web/studio/index.html?mock=<state>`: `1 lint-error
+  customized library new customize delete restore edit edit-clips edit-behaviors edit-intents edit-idle edit-package
+  edit-advanced edit-error`; only it may call `studio_*`, and the page never sends a path). Tray **Studio…**, or
+  `cargo run -p buddy-app -- --studio [<pack-dir>]` (only the studio window: no lock, host.json or sidecar; no pack =
+  the library view). The studio is the mascot library (`BUDDY_HOME/packs/<id>/`, searched before the built-ins by the
+  app too): create (from `.aseprite` or a copy), edit (details, clips, behaviors, intents, idle pool, raw pack.json;
+  every save is staged and loaded first, a breaking one is refused and writes nothing), delete (yours only), Customize
+  / Restore original for built-ins (the shipped folder is never written), "Put on desktop" (settings `pack`, next
+  launch; a settings pack found nowhere runs the bear). Comments go to `<pack>/review/comments.jsonl`. Human desktop
+  checks: `docs/handover.md`.
   A bad pack or art dir exits 1 with `[buddy] cannot load mascot …`. Art comes
   from `experiments/mascot/out/bear3d/` via `mascots/bear/pack.json`, so re-rendering changes it.
   Always `export CARGO_TARGET_DIR=/Users/chantran/orca/desk-buddy/target` (one shared target;

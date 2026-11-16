@@ -713,11 +713,19 @@ pub fn load(dir: &Path) -> Result<PackMeta, PackError> {
 /// `load`, except that `body` problems are kept in `body_issues` (their entries dropped)
 /// instead of failing: for the studio (lint reports them; render, audit and the window still show the art).
 pub fn load_report(dir: &Path) -> Result<PackMeta, PackError> {
-    Loader { dir: dir.to_path_buf() }.load()
+    Loader { dir: dir.to_path_buf(), text: None }.load()
+}
+
+/// `load_report` with `text` standing in for `dir/pack.json` (the file on disk is not read): the
+/// studio checks an edit before it writes it.
+pub fn load_report_text(dir: &Path, text: &str) -> Result<PackMeta, PackError> {
+    Loader { dir: dir.to_path_buf(), text: Some(text.to_string()) }.load()
 }
 
 struct Loader {
     dir: PathBuf,
+    /// pack.json's text when it doesn't come from the file.
+    text: Option<String>,
 }
 
 impl Loader {
@@ -756,7 +764,10 @@ impl Loader {
 
     fn load(&self) -> Result<PackMeta, PackError> {
         let rel = Path::new("pack.json");
-        let text = self.read(rel)?;
+        let text = match &self.text {
+            Some(t) => t.clone(),
+            None => self.read(rel)?,
+        };
         // Syntax first (line/col), then the version, then the schema.
         let raw: serde_json::Value = self.json(rel, &text)?;
         let version = match raw.get("pack_version").and_then(|v| v.as_u64()) {

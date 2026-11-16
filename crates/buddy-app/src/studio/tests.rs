@@ -221,6 +221,187 @@ fn the_simulator_takes_frozen_event_shapes_and_never_the_live_agent() {
     assert!(crate::harness::get().is_none());
 }
 
+/// sha256 of every file under `d`.
+fn hashes(d: &Path) -> Vec<(PathBuf, String)> {
+    let mut out = vec![];
+    let mut stack = vec![d.to_path_buf()];
+    while let Some(p) = stack.pop() {
+        for e in std::fs::read_dir(&p).unwrap().flatten() {
+            if e.path().is_dir() {
+                stack.push(e.path());
+            } else {
+                out.push((e.path(), ::studio::sha256_hex(&std::fs::read(e.path()).unwrap())));
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+type Calls = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
+
+/// A studio with a library `d/packs` and one built-in, `d/builtin/blob`.
+fn library_desk(d: &Path) -> (Desk, PathBuf, PathBuf, Calls) {
+    let builtin = blob_pack(&d.join("builtin"), "blob");
+    let lib = d.join("packs");
+    let calls: Calls = Default::default();
+    let c = calls.clone();
+    let desktop = super::Desktop { current: "blob".into(), set: Box::new(move |id| {
+        c.lock().unwrap().push(id.to_string());
+        Ok(())
+    }) };
+    let desk = Desk::with(None, super::Roots { library: Some(lib.clone()), builtin: vec![d.join("builtin")] }, desktop);
+    (desk, lib, builtin, calls)
+}
+
+fn blob_b64() -> String {
+    ::studio::base64(&std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../studio/tests/fixtures/blob.aseprite")).unwrap())
+}
+
+fn kinds(desk: &mut Desk) -> Vec<(String, String)> {
+    let l = desk.handle("studio_library", &Value::Null).unwrap();
+    l["packs"].as_array().unwrap().iter().map(|p| (p["id"].as_str().unwrap().to_string(), p["kind"].as_str().unwrap().to_string())).collect()
+}
+
+#[test]
+fn built_ins_are_customized_through_a_copy_and_restored_never_written() {
+    let d = tmp("builtin");
+    let (mut desk, lib, builtin, _) = library_desk(&d);
+    let before = hashes(&builtin);
+    assert_eq!(kinds(&mut desk), vec![("blob".into(), "builtin".into())]);
+    let l = desk.handle("studio_library", &Value::Null).unwrap();
+    let can = &l["packs"][0]["can"];
+    assert_eq!((can["delete"].as_bool(), can["customize"].as_bool(), can["edit"].as_bool()), (Some(false), Some(true), Some(false)), "{l}");
+    assert_eq!(l["packs"][0]["desktop"], true);
+    // the backend refuses what no control offers
+    assert!(desk.handle("studio_delete", &json!({ "id": "blob" })).unwrap_err().contains("can't be deleted"));
+    assert!(desk.handle("studio_restore", &json!({ "id": "blob" })).is_err());
+    let s = desk.handle("studio_open", &json!({ "id": "blob" })).unwrap();
+    assert_eq!((s["pack"]["kind"].as_str(), s["pack"]["writable"].as_bool()), (Some("builtin"), Some(false)));
+    let e = desk.handle("studio_edit", &Value::Null).unwrap();
+    assert_eq!(e["writable"], false);
+    let ops = json!([{ "op": "set", "path": ["name"], "json": "\"Mine\"" }]);
+    assert!(desk.handle("studio_save", &json!({ "sha": e["sha"], "ops": ops })).unwrap_err().contains("built-in"));
+    assert!(desk.handle("studio_import", &json!({ "name": "extra", "bytes": blob_b64() })).unwrap_err().contains("built-in"));
+    assert!(desk.handle("studio_remove_group", &json!({ "group": "blob" })).is_err());
+    // make my copy: same id, in the library, shadows the built-in
+    let s = desk.handle("studio_customize", &json!({ "id": "blob" })).unwrap();
+    assert_eq!(s["pack"]["kind"], "customized");
+    assert_eq!(s["pack"]["dir"], lib.join("blob").display().to_string());
+    assert!(desk.handle("studio_customize", &json!({ "id": "blob" })).is_err(), "already a copy");
+    assert_eq!(kinds(&mut desk), vec![("blob".into(), "customized".into())]);
+    let e = desk.handle("studio_edit", &Value::Null).unwrap();
+    assert_eq!(e["findings"], json!([]), "the copy is a standard package");
+    let e = desk.handle("studio_save", &json!({ "sha": e["sha"], "ops": ops })).unwrap();
+    assert!(e["text"].as_str().unwrap().contains("\"name\": \"Mine\""));
+    assert_eq!(desk.handle("studio_state", &Value::Null).unwrap()["pack"]["name"], "Mine");
+    assert!(desk.handle("studio_delete", &json!({ "id": "blob" })).unwrap_err().contains("Restore original"));
+    // restore: the copy goes, the shipped one is back as it was
+    let s = desk.handle("studio_restore", &json!({ "id": "blob" })).unwrap();
+    assert_eq!((s["pack"]["kind"].as_str(), s["pack"]["name"].as_str()), (Some("builtin"), Some("blob")));
+    assert!(!lib.join("blob").exists());
+    assert_eq!(hashes(&builtin), before, "the built-in's files never changed");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn create_edit_and_delete_a_user_mascot() {
+    let d = tmp("library");
+    let (mut desk, lib, _, calls) = library_desk(&d);
+    let s = desk.handle("studio_create", &json!({ "from": "aseprite", "name": "Wobble Bot", "file_name": "/Users/x/wobble.aseprite", "bytes": blob_b64() })).unwrap();
+    assert_eq!((s["pack"]["id"].as_str(), s["pack"]["kind"].as_str(), s["pack"]["name"].as_str()), (Some("wobble-bot"), Some("yours"), Some("Wobble Bot")));
+    assert!(lib.join("wobble-bot/art/wobble_bot/anim.json").is_file());
+    assert!(desk.handle("studio_create", &json!({ "from": "aseprite", "name": "Wobble Bot", "bytes": blob_b64() })).unwrap_err().contains("already exists"));
+    let s = desk.handle("studio_create", &json!({ "from": "copy", "source": "blob", "name": "Blob two" })).unwrap();
+    assert_eq!((s["pack"]["id"].as_str(), s["pack"]["kind"].as_str()), (Some("blob-two"), Some("yours")));
+    for bad in [
+        json!({ "from": "copy", "source": "../x", "name": "y" }),
+        json!({ "from": "copy", "source": "blob", "name": "z", "id": "../evil" }),
+        json!({ "from": "aseprite", "name": "q", "id": "Q Q", "bytes": blob_b64() }),
+        json!({ "from": "aseprite", "name": "q", "bytes": "%%%" }),
+        json!({ "from": "aseprite", "name": "q", "bytes": ::studio::base64(b"junk") }),
+        json!({ "from": "aseprite", "name": "  ", "bytes": blob_b64() }),
+        json!({ "from": "path", "name": "q", "path": "/etc" }),
+    ] {
+        assert!(desk.handle("studio_create", &bad).is_err(), "{bad}");
+    }
+    assert!(!d.join("evil").exists());
+    assert_eq!(kinds(&mut desk).len(), 3);
+    // edit the open one (blob-two): a refused save writes nothing
+    let e = desk.handle("studio_edit", &Value::Null).unwrap();
+    let pj = lib.join("blob-two/pack.json");
+    let text = std::fs::read_to_string(&pj).unwrap();
+    assert!(desk.handle("studio_save", &json!({ "sha": "stale", "raw": text })).unwrap_err().contains("changed since"));
+    let err = desk.handle("studio_save", &json!({ "sha": e["sha"], "ops": [{ "op": "remove", "path": ["behaviors", "rest"] }] })).unwrap_err();
+    assert!(err.contains("stop the mascot loading"), "{err}");
+    assert!(desk.handle("studio_save", &json!({ "sha": e["sha"], "raw": "{" })).is_err());
+    assert_eq!(std::fs::read_to_string(&pj).unwrap(), text, "nothing written");
+    let dry = desk.handle("studio_save", &json!({ "sha": e["sha"], "dry": true, "ops": [{ "op": "set", "path": ["author"], "json": "\"me\"" }] })).unwrap();
+    assert_eq!(dry["ok"], true);
+    assert_eq!(std::fs::read_to_string(&pj).unwrap(), text, "a dry run writes nothing");
+    // clips: add a group, remove it again
+    let e = desk.handle("studio_import", &json!({ "name": "extra", "file_name": "extra.aseprite", "bytes": blob_b64() })).unwrap();
+    assert_eq!(e["imported"], json!(["extra_walk"]));
+    assert!(desk.handle("studio_state", &Value::Null).unwrap()["pack"]["clips"].as_array().unwrap().iter().any(|c| c["name"] == "extra_walk"), "reloaded at once");
+    let e = desk.handle("studio_remove_group", &json!({ "group": "extra" })).unwrap();
+    assert!(e["groups"].as_array().unwrap().iter().all(|g| g["name"] != "extra"));
+    assert!(desk.handle("studio_remove_group", &json!({ "group": "blob" })).unwrap_err().contains("used by"));
+    assert!(desk.handle("studio_import", &json!({ "name": "big", "bytes": "A".repeat(50 << 20) })).unwrap_err().contains("too big"));
+    // thumbnails, Finder
+    assert!(desk.handle("studio_thumb", &json!({ "id": "wobble-bot" })).unwrap()["png"].as_str().unwrap().starts_with("data:image/png;base64,"));
+    assert!(desk.handle("studio_thumb", &json!({ "id": "../x" })).is_err());
+    desk.handle("studio_reveal", &json!({ "id": "blob" })).unwrap();
+    // on the desktop, then deleted: the desktop goes back to the bear
+    desk.handle("studio_use", &json!({ "id": "wobble-bot" })).unwrap();
+    desk.handle("studio_open", &json!({ "id": "wobble-bot" })).unwrap();
+    let s = desk.handle("studio_delete", &json!({ "id": "wobble-bot" })).unwrap();
+    assert!(s["pack"].is_null(), "the open mascot was deleted: back to the library");
+    assert!(!lib.join("wobble-bot").exists());
+    assert_eq!(*calls.lock().unwrap(), vec!["wobble-bot".to_string(), "bear".to_string()]);
+    assert!(desk.handle("studio_delete", &json!({ "id": "wobble-bot" })).is_err());
+    assert_eq!(kinds(&mut desk), vec![("blob-two".into(), "yours".into()), ("blob".into(), "builtin".into())]);
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn a_library_folder_whose_name_is_not_an_id_is_read_only() {
+    let d = tmp("badname");
+    let (mut desk, lib, _, calls) = library_desk(&d);
+    let p = blob_pack(&lib, "My Copy");
+    let before = hashes(&p);
+    assert_eq!(kinds(&mut desk), vec![("My Copy".into(), "folder".into()), ("blob".into(), "builtin".into())]);
+    let l = desk.handle("studio_library", &Value::Null).unwrap();
+    let can = &l["packs"][0]["can"];
+    assert_eq!((can["edit"].as_bool(), can["delete"].as_bool(), can["use"].as_bool()), (Some(false), Some(false), Some(false)), "{l}");
+    let s = desk.handle("studio_open", &json!({ "id": "My Copy" })).unwrap();
+    assert_eq!((s["pack"]["kind"].as_str(), s["pack"]["writable"].as_bool()), (Some("folder"), Some(false)));
+    let e = desk.handle("studio_edit", &Value::Null).unwrap();
+    assert!(desk.handle("studio_save", &json!({ "sha": e["sha"], "raw": e["text"] })).is_err());
+    assert!(desk.handle("studio_delete", &json!({ "id": "My Copy" })).is_err());
+    assert!(desk.handle("studio_use", &json!({ "id": "My Copy" })).is_err());
+    assert!(calls.lock().unwrap().is_empty());
+    assert_eq!(hashes(&p), before);
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn a_studio_without_a_library_writes_nothing() {
+    let d = tmp("nolib");
+    let p = blob_pack(&d, "p");
+    let mut desk = Desk::new(Some(p.clone()), vec![p.clone()]);
+    let s = desk.handle("studio_state", &Value::Null).unwrap();
+    assert_eq!((s["pack"]["kind"].as_str(), s["library"].as_bool()), (Some("folder"), Some(false)));
+    let e = desk.handle("studio_edit", &Value::Null).unwrap();
+    assert!(desk.handle("studio_save", &json!({ "sha": e["sha"], "raw": e["text"] })).unwrap_err().contains("folder"));
+    for cmd in ["studio_customize", "studio_create"] {
+        assert!(desk.handle(cmd, &json!({ "id": "blob", "name": "x", "from": "copy", "source": "blob" })).unwrap_err().contains("library"), "{cmd}");
+    }
+    assert!(desk.handle("studio_delete", &json!({ "id": "blob" })).is_err());
+    assert!(desk.handle("studio_use", &json!({ "id": "blob" })).is_err(), "a folder pack can't go on the desktop");
+    assert_eq!(std::fs::read_dir(&d).unwrap().count(), 1);
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 #[cfg(test)]
 mod acl {
     use tauri::ipc::{CallbackFn, InvokeBody};

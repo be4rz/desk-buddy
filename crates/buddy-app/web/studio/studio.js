@@ -1,7 +1,8 @@
 // The studio window (design `## studio`). It only shows and checks the art: every command goes
 // through the `studio_*` Tauri commands, which render with the app's own renderer. Paths never go
 // from here to Rust: packs are opened by id, comments carry only clip/dir/frame/time/region/text.
-// The poll (500 ms) and the preview loop live only as long as this window.
+// The poll (500 ms) and the preview loop live only as long as this window. This file is Review
+// (#studio); the library, Edit and the dialogs are manage.js, through `window.__studio`.
 "use strict";
 (function () {
   const T = window.__TAURI__;
@@ -34,24 +35,41 @@
   // ---------- state ----------
   async function loadState() {
     s.st = await call("studio_state");
+    s.view = s.st.pack ? "review" : "library";
     render();
     if (s.st.pack) {
       await Promise.all([loadFrames(), loadLint(), loadComments(), simOp({ op: "tick", dt_ms: 0 })]);
     }
   }
 
+  // The three screens: the library (home), Review (the pack's preview and tools) and Edit
+  // (manage.js). Review and Edit need an open pack.
+  const KIND = { builtin: ["Built-in", "grey"], customized: ["Built-in · customized", ""], yours: ["Yours", "teal"], folder: ["From a folder", "grey"] };
+  function show(view) {
+    const open = !!(s.st && s.st.pack);
+    if (!open) view = "library";
+    s.view = view;
+    $("studio-library").hidden = view !== "library";
+    $("studio").hidden = view !== "review";
+    $("studio-edit").hidden = view !== "edit";
+    if (view !== "review") { play(false); simRun(false); }
+    else if (s.anim) play(true);
+    hooks.view(view);
+  }
+
   function render() {
     const st = s.st;
     banner(st && st.error);
-    const open = !!(st && st.pack);
-    $("studio").hidden = !open;
-    $("studio-empty").hidden = open;
-    if (!open) return renderEmpty();
+    show(s.view);
+    if (!(st && st.pack)) return;
     const p = st.pack;
-    $("title").textContent = "Studio — " + p.id + "  ·  " + p.dir;
-    // pack picker
-    const ps = $("pack");
-    ps.replaceChildren(...(st.packs || [p.id]).map((id) => { const o = el("option", "", id); o.value = id; o.selected = id === p.id; return o; }));
+    $("title").textContent = p.name || p.id;
+    const [label, tone] = KIND[p.kind] || KIND.folder;
+    $("kind-pill").textContent = label;
+    $("kind-pill").className = "pill " + tone;
+    $("path").textContent = p.dir;
+    $("path").title = p.dir;
+    renderNotice(p, st.library);
     // clip picker
     const names = p.clips.map((c) => c.name);
     if (!names.includes(s.clip)) s.clip = names.includes("idle") ? "idle" : names[0];
@@ -113,36 +131,59 @@
     return t;
   }
 
-  function renderEmpty() {
-    const st = s.st || {};
-    const list = $("pack-list");
-    const packs = st.packs || [];
-    list.replaceChildren(...packs.map((id, i) => {
-      const b = el("button", "btn" + (i === 0 ? " primary" : ""), "Open " + id);
-      b.addEventListener("click", () => openPack(id));
-      return b;
-    }));
-    if (!packs.length) list.append(el("span", "hint", "No pack folders found next to the app."));
-    $("empty-error").textContent = st.error ? "Couldn't open the pack: " + st.error : "";
+  // #studio-readonly: a pack the studio may not write says so, with the way to change it.
+  function renderNotice(p, library) {
+    const n = $("studio-readonly");
+    const t = $("notice-text");
+    const b = $("notice-btn");
+    let text = null, btn = null, act = null;
+    if (p.kind === "builtin") {
+      text = ["This is the built-in " + (p.name || p.id) + ", shown as shipped.", library ? " To change it, make it yours: you get your own copy, and the original stays safe." : " This studio has no mascot library, so it can't be changed here."];
+      if (library) { btn = "Customize…"; act = "customize"; }
+    } else if (p.kind === "customized") {
+      text = ["Your version of the built-in " + (p.name || p.id) + ".", " The original is kept; you can go back to it at any time."];
+      btn = "Restore original…"; act = "restore";
+    } else if (p.kind === "folder") {
+      text = ["Opened from a folder, read-only.", library ? " Duplicate it into your mascots to change it." : ""];
+      if (library) { btn = "Duplicate…"; act = "duplicate"; }
+    }
+    n.hidden = !text;
+    $("studio").classList.toggle("has-notice", !!text);
+    if (!text) return;
+    t.replaceChildren(el("b", "", text[0]), document.createTextNode(text[1]));
+    b.hidden = !btn;
+    b.textContent = btn || "";
+    b.className = "btn small" + (act === "customize" ? " primary" : "");
+    b.onclick = () => hooks.go(act);
   }
 
-  async function openPack(id) {
-    try {
-      s.st = await call("studio_open", { id });
-      clearCache();
-      $("temper").replaceChildren();
-      render();
-      await Promise.all([loadFrames(), loadLint(), loadComments(), simOp({ op: "reset", seed: 1 })]);
-    } catch (e) {
-      banner("Couldn't open " + id + ": " + e);
-    }
+  // Opens a pack by id (never by path) and shows it in `view`.
+  async function openPack(id, view) {
+    s.st = await call("studio_open", { id });
+    clearCache();
+    s.anim = null;
+    $("temper").replaceChildren();
+    s.view = view || "review";
+    render();
+    await Promise.all([loadFrames(), loadLint(), loadComments(), simOp({ op: "reset", seed: 1 })]);
+  }
+
+  // After a write (save, import, create…): the state the backend now has, in `view`.
+  async function refresh(st, view) {
+    s.st = st || (await call("studio_state"));
+    clearCache();
+    s.anim = null;
+    $("temper").replaceChildren();
+    if (view) s.view = view;
+    render();
+    if (s.st.pack) await Promise.all([loadFrames(), loadLint(), loadComments(), simOp({ op: "reset", seed: 1 })]);
   }
 
   function banner(err) {
     const b = $("studio-lint-error");
     b.hidden = !err;
     document.body.classList.toggle("has-error", !!err);
-    if (err) b.textContent = "Reload failed: " + err + (s.st && s.st.pack ? ". Showing the last good pack." : "");
+    if (err) b.textContent = s.st && s.st.pack ? "Reload failed: " + err + ". Showing the last good pack." : "Couldn't open that mascot: " + err;
   }
 
   // ---------- frames and preview ----------
@@ -245,7 +286,7 @@
   });
   $("play").addEventListener("click", () => play(!s.playing));
   addEventListener("keydown", (e) => {
-    if (e.target.closest("textarea,input,select") || !s.anim) return;
+    if (e.target.closest("textarea,input,select") || !s.anim || s.view !== "review") return;
     const n = s.anim.imgs.length;
     if (e.key === " ") { e.preventDefault(); play(!s.playing); }
     else if (e.key === "ArrowRight") { play(false); s.frame = (s.frame + 1) % n; draw(); }
@@ -558,7 +599,6 @@
 
   // ---------- pickers ----------
   $("clip").addEventListener("change", (e) => { s.clip = e.target.value; s.draft = null; renderDirs(); loadFrames(); renderComments(); });
-  $("pack").addEventListener("change", (e) => openPack(e.target.value));
 
   // ---------- hot reload ----------
   let busy = false;
@@ -577,6 +617,7 @@
           p.textContent = "reloaded " + new Date().toTimeString().slice(0, 8);
           p.hidden = false;
           await Promise.all([loadFrames(), loadLint(), loadComments(), simOp({ op: "tick", dt_ms: 0 })]);
+          hooks.reloaded();
         } else {
           banner(r.error);
         }
@@ -588,10 +629,20 @@
     }
   }
 
+  // manage.js (library, Edit, dialogs) plugs in here; it loads after this file.
+  const hooks = { view() {}, reloaded() {}, go() {} };
+  window.__studio = {
+    call, el, $, hooks, openPack, refresh, show,
+    state: () => s.st,
+    view: () => s.view,
+    reloadFrames: () => { clearCache(); return loadFrames(); },
+  };
+
   function start() {
     loadState().catch((e) => { s.st = { pack: null, packs: [], error: String(e) }; render(); });
     setInterval(poll, POLL_MS);
   }
-  if (document.readyState === "loading") addEventListener("DOMContentLoaded", start);
-  else start();
+  // after DOMContentLoaded, so manage.js (deferred after this file) has set its hooks
+  if (document.readyState === "complete") start();
+  else addEventListener("DOMContentLoaded", start);
 })();

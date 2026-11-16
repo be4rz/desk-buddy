@@ -3,8 +3,8 @@
 //! thread (`driver.rs`), drawn by `mascot-render`.
 //!
 //! Env: `BUDDY_HOME` (default `~/.desk-buddy`), `BUDDY_PACK=<dir>` (a pack dir; else
-//! settings `pack` under `$BUDDY_PACKS`, the repo's `mascots/` in debug builds, then
-//! `BUDDY_HOME/packs`), `BUDDY_ZOOM=1|2|3`, `BUDDY_STATS=1`, `BUDDY_DUMP=<dir>`
+//! settings `pack` under `BUDDY_HOME/packs` (the studio's library), `$BUDDY_PACKS`, then the
+//! repo's `mascots/` in debug builds; a settings pack found nowhere runs the bear), `BUDDY_ZOOM=1|2|3`, `BUDDY_STATS=1`, `BUDDY_DUMP=<dir>`
 //! (+ `BUDDY_DUMP_EVERY=<n>`), `BUDDY_EVENTS=<file.jsonl>`, `BUDDY_SCREEN=<n>`,
 //! `BUDDY_VERBOSE=1`, `BUDDY_SENSES=0` (sensors off; also off under `BUDDY_EVENTS` unless
 //! `BUDDY_SENSES=1`), `BUDDY_SENSES_LOG=1` (sense changes to stderr).
@@ -22,8 +22,9 @@
 //! and `BUDDY_FAKE_OAUTH=1` (a scripted `fake-oauth` provider; see `harness.rs`).
 //!
 //! Studio (p6): the tray's Studio… opens `studio/` (page `web/studio/`) on the running pack.
-//! `buddy-app --studio [<pack-dir>]` runs the studio alone: no bear, agent, lock or settings
-//! write, so it can run next to the app on the same `BUDDY_HOME`; closing its window quits.
+//! `buddy-app --studio [<pack-dir>]` runs the studio alone: no bear, agent, lock or host.json,
+//! so it can run next to the app on the same `BUDDY_HOME`; it writes only the mascot library
+//! (`BUDDY_HOME/packs`) and, on "Use on my desktop", settings `pack`; closing its window quits.
 
 mod bubble;
 mod caller;
@@ -53,18 +54,29 @@ use objc2::MainThreadMarker;
 use objc2_foundation::{NSRunLoop, NSRunLoopCommonModes, NSTimer};
 use tauri::RunEvent;
 
-/// The folders packs live in, in search order (design §3.2): `BUDDY_PACKS`, the repo's
-/// `mascots/` (debug builds), `BUDDY_HOME/packs`.
-fn pack_roots(home: &Path) -> Vec<PathBuf> {
+/// The folders built-in packs live in: `BUDDY_PACKS`, the repo's `mascots/` (debug builds).
+fn builtin_roots() -> Vec<PathBuf> {
     let mut v = vec![];
-    if let Some(p) = std::env::var_os("BUDDY_PACKS") {
+    if let Some(p) = std::env::var_os("BUDDY_PACKS").filter(|p| !p.is_empty()) {
         v.push(PathBuf::from(p));
     }
     if cfg!(debug_assertions) {
         v.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../mascots"));
     }
-    v.push(home.join("packs"));
     v
+}
+
+/// The folders packs live in, in search order: the library `BUDDY_HOME/packs` first (a
+/// customized built-in there shadows the shipped one), then the built-in roots.
+fn pack_roots(home: &Path) -> Vec<PathBuf> {
+    let mut v = vec![home.join("packs")];
+    v.extend(builtin_roots());
+    v
+}
+
+/// The studio's view of the same folders.
+fn studio_roots(home: &Path) -> studio::Roots {
+    studio::Roots { library: Some(home.join("packs")), builtin: builtin_roots() }
 }
 
 /// Candidate pack dirs for a pack id, in search order.
@@ -72,12 +84,61 @@ fn pack_candidates(id: &str, home: &Path) -> Vec<PathBuf> {
     pack_roots(home).into_iter().map(|r| r.join(id)).collect()
 }
 
+/// The pack to run: `BUDDY_PACK` (a broken one stops the launch), else settings `pack` in
+/// `pack_roots`; a settings pack that is nowhere (deleted in the studio, or a bad id) runs the
+/// bear and says so. A library pack that doesn't load (edited by hand) is skipped the same way,
+/// so a broken customized bear falls back to the shipped one.
 fn pack_dir(id: &str, home: &Path) -> PathBuf {
     if let Some(p) = std::env::var_os("BUDDY_PACK") {
         return PathBuf::from(p);
     }
-    let c = pack_candidates(id, home);
-    c.iter().find(|d| d.join("pack.json").is_file()).cloned().unwrap_or_else(|| c[0].clone())
+    let lib = home.join("packs");
+    let found = |id: &str| {
+        pack_candidates(id, home).into_iter().find(|d| {
+            if !d.join("pack.json").is_file() {
+                return false;
+            }
+            if !d.starts_with(&lib) {
+                return true;
+            }
+            match mascot_core::pack::load(d) {
+                Ok(_) => true,
+                Err(e) => {
+                    eprintln!("[buddy] mascot \"{id}\" in {} doesn't load ({e}); skipping it", lib.display());
+                    false
+                }
+            }
+        })
+    };
+    if let Some(d) = Some(id).filter(|i| ::studio::package::valid_id(i)).and_then(found) {
+        return d;
+    }
+    if id != "bear" {
+        eprintln!("[buddy] mascot \"{id}\" not found; running the bear");
+    }
+    found("bear").unwrap_or_else(|| pack_candidates("bear", home).pop().unwrap_or_else(|| home.join("packs/bear")))
+}
+
+/// Sets settings `pack` from the studio: through the driver in the app (its settings are the
+/// ones it saves), straight into settings.json in `--studio` mode.
+fn desktop_setter(home: PathBuf, in_app: bool) -> Box<dyn Fn(&str) -> Result<(), String> + Send> {
+    Box::new(move |id: &str| {
+        let id = id.to_string();
+        if in_app {
+            driver::post(driver::Inbox::Call(Box::new(move |a| {
+                a.settings.pack = id;
+                a.save_settings();
+            })));
+            Ok(())
+        } else {
+            // the running app owns settings.json (it rewrites it from memory): only write it
+            // while no app runs, holding the app lock so none starts meanwhile
+            let _lock = instance::claim(&home).map_err(|_| "the desk-buddy app is running: choose the mascot in its own Studio (tray ▸ Studio…), or quit it first".to_string())?;
+            let (mut s, _) = settings::load(&home);
+            s.pack = id;
+            s.save(&home).map_err(|e| format!("settings: {e}"))
+        }
+    })
 }
 
 /// The room pack's folder (floors and pocket scenes): `BUDDY_ROOM`, else `<id>` under the repo's
@@ -195,7 +256,7 @@ fn main() {
     };
     let brain = Brain::new(pack.clone(), BrainConfig { seed: seed(), temperament: None, dnd_action }, 0);
 
-    studio::configure(Some(dir.clone()), studio::allowed_packs(Some(&dir), &pack_roots(&home)));
+    studio::configure(Some(dir.clone()), studio_roots(&home), studio::Desktop { current: settings.pack.clone(), set: desktop_setter(home.clone(), true) });
     let mut boot = Some((pack, art, settings, home, brain, items, warning, icon));
     let app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -231,6 +292,18 @@ fn main() {
             studio::studio_comment_add,
             studio::studio_comment_status,
             studio::studio_sim,
+            studio::studio_library,
+            studio::studio_thumb,
+            studio::studio_edit,
+            studio::studio_save,
+            studio::studio_import,
+            studio::studio_remove_group,
+            studio::studio_create,
+            studio::studio_customize,
+            studio::studio_restore,
+            studio::studio_delete,
+            studio::studio_use,
+            studio::studio_reveal,
         ])
         .setup(move |app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
@@ -309,10 +382,11 @@ fn main() {
 }
 
 /// `--studio [<pack-dir>]`: the studio window alone, on `<pack-dir>` or `BUDDY_PACK` (else the
-/// empty state, listing the packs in `pack_roots`). It reads no
-/// settings (it only lists `BUDDY_HOME/packs`) and writes nothing to `BUDDY_HOME` (no lock, host.json or
-/// settings), starts no sidecar and shows no bear; closing the window quits. Its handler list
-/// is the studio's ten commands, checked against build.rs by the `widgets` ACL test.
+/// library, listing the packs in `pack_roots`). It takes no lock and writes no host.json; it
+/// writes the library (`BUDDY_HOME/packs`) and, on "Use on my desktop" or deleting the desktop's
+/// mascot, settings `pack` (read, changed, saved). It starts no sidecar and shows no bear;
+/// closing the window quits. Its handler list is the studio's commands, checked against
+/// build.rs by the `widgets` ACL test.
 fn studio_main(dir: Option<PathBuf>) {
     let home = settings::home();
     let start = dir.or_else(|| std::env::var_os("BUDDY_PACK").map(PathBuf::from)).map(|d| if d.is_relative() { std::env::current_dir().map(|c| c.join(&d)).unwrap_or(d) } else { d });
@@ -320,7 +394,9 @@ fn studio_main(dir: Option<PathBuf>) {
         Some(d) => eprintln!("[buddy] studio: pack {}", d.display()),
         None => eprintln!("[buddy] studio: no pack given (the window offers the packs it finds)"),
     }
-    studio::configure(start.clone(), studio::allowed_packs(start.as_deref(), &pack_roots(&home)));
+    // read only: a bad settings.json is left for the app to report (and set aside)
+    let current = settings::read(&home).ok().flatten().unwrap_or_default().pack;
+    studio::configure(start.clone(), studio_roots(&home), studio::Desktop { current, set: desktop_setter(home.clone(), false) });
     let app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             studio::studio_state,
@@ -332,7 +408,19 @@ fn studio_main(dir: Option<PathBuf>) {
             studio::studio_comments,
             studio::studio_comment_add,
             studio::studio_comment_status,
-            studio::studio_sim
+            studio::studio_sim,
+            studio::studio_library,
+            studio::studio_thumb,
+            studio::studio_edit,
+            studio::studio_save,
+            studio::studio_import,
+            studio::studio_remove_group,
+            studio::studio_create,
+            studio::studio_customize,
+            studio::studio_restore,
+            studio::studio_delete,
+            studio::studio_use,
+            studio::studio_reveal
         ])
         .setup(|app| {
             app.set_activation_policy(tauri::ActivationPolicy::Regular);

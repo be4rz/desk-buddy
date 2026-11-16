@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "studio",
-  "description": "The studio window (design ## studio, §4.10): call the studio_* commands from the app's own page only. Each command also checks its caller's window label (src/caller.rs); the page names packs by id and never gives a path.",
+  "description": "The studio window (design ## studio, §4.10): call the studio_* commands from the app's own page only. Each command also checks its caller's window label (src/caller.rs); the page names packs by id and never gives a path (art arrives as file bytes); which mascots may be changed or deleted is decided in Rust from the folder they live in.",
   "windows": [
     "studio"
   ],
@@ -15,6 +15,18 @@
     "allow-studio-comments",
     "allow-studio-comment-add",
     "allow-studio-comment-status",
-    "allow-studio-sim"
+    "allow-studio-sim",
+    "allow-studio-library",
+    "allow-studio-thumb",
+    "allow-studio-edit",
+    "allow-studio-save",
+    "allow-studio-import",
+    "allow-studio-remove-group",
+    "allow-studio-create",
+    "allow-studio-customize",
+    "allow-studio-restore",
+    "allow-studio-delete",
+    "allow-studio-use",
+    "allow-studio-reveal"
   ]
 }

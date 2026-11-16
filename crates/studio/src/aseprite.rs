@@ -376,7 +376,7 @@ pub struct ClipPlan {
     pub dirs: BTreeMap<Dir, (usize, usize)>,
 }
 
-fn valid_name(s: &str) -> bool {
+pub(crate) fn valid_name(s: &str) -> bool {
     !s.is_empty() && s.len() <= 48 && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_') && s.as_bytes()[0].is_ascii_lowercase()
 }
 
@@ -439,9 +439,16 @@ const INTENTS: [&str; 20] = ["idle", "think", "work", "talk", "ask", "oops", "ha
 /// falls back to rest). Nothing is written unless everything parsed and checked.
 pub fn import(file: &Path, pack_dir: &Path, prefix: &str) -> Result<Imported> {
     let fname = file.display().to_string();
-    let ctx = |e: Error| Error(format!("{fname}: {}; nothing written", e.0));
     let bytes = std::fs::read(file).map_err(|e| Error(format!("{fname}: {e}; nothing written")))?;
-    let sprite = parse(&bytes).map_err(ctx)?;
+    import_bytes(&bytes, &fname, pack_dir, prefix)
+}
+
+/// `import` from the file's bytes (the studio window sends them; it never names a path).
+/// `label` names the file in messages and in `anim.json`'s note.
+pub fn import_bytes(bytes: &[u8], label: &str, pack_dir: &Path, prefix: &str) -> Result<Imported> {
+    let fname = label.to_string();
+    let ctx = |e: Error| Error(format!("{fname}: {}; nothing written", e.0));
+    let sprite = parse(bytes).map_err(ctx)?;
     let clips = plan(&sprite, prefix).map_err(ctx)?;
     let existing = pack_dir.join("pack.json").is_file();
     let out_dir = pack_dir.join("art").join(prefix);
@@ -490,7 +497,7 @@ pub fn import(file: &Path, pack_dir: &Path, prefix: &str) -> Result<Imported> {
         );
     }
     let fps = anims.values().next().and_then(|a| a["fps"].as_u64()).unwrap_or(12);
-    let anim_json = serde_json::to_string_pretty(&serde_json::json!({ "note": format!("imported from {} by buddy studio import-aseprite (pixels unchanged)", file.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default()), "fps": fps, "ppu": 40.0, "directions": {}, "anims": anims })).expect("json") + "\n";
+    let anim_json = serde_json::to_string_pretty(&serde_json::json!({ "note": format!("imported from {} by buddy studio import-aseprite (pixels unchanged)", Path::new(label).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default()), "fps": fps, "ppu": 40.0, "directions": {}, "anims": anims })).expect("json") + "\n";
     // stage
     std::fs::create_dir_all(pack_dir).map_err(|e| ctx(Error(format!("{}: {e}", pack_dir.display()))))?;
     let stage = pack_dir.join(format!(".import-{prefix}-{}", std::process::id()));
@@ -521,8 +528,8 @@ pub fn import(file: &Path, pack_dir: &Path, prefix: &str) -> Result<Imported> {
         let first = &clips[0].name;
         let intents: serde_json::Map<_, _> = INTENTS.iter().map(|i| (i.to_string(), serde_json::json!(["rest"]))).collect();
         let pf = serde_json::json!({
-            "pack_version": 1, "id": prefix, "name": prefix, "art_root": ".", "palettes": [],
-            "sources": [{ "kind": "stage_a", "path": format!("art/{prefix}/anim.json") }],
+            "pack_version": 1, "id": prefix, "name": prefix, "art_root": "art", "palettes": [],
+            "sources": [{ "kind": "stage_a", "path": format!("{prefix}/anim.json") }],
             "behaviors": { "rest": { "seq": [{ "clip": first, "loops": [1, 3] }] }, "hold": { "seq": [{ "clip": first, "loops": "hold" }] } },
             "intents": intents,
             "idle_pool": [{ "behavior": "rest", "weight": 1, "cooldown_s": 0 }],

@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use studio::{aseprite, audit, comments, diff, frames, lint, session, Bg, Error, RenderOpts};
+use studio::{aseprite, audit, comments, diff, frames, lint, package, session, Bg, Error, RenderOpts};
 
 const USAGE: &str = "usage: buddy studio <cmd> …
   render --pack <dir> --clip <c> --dir <D|A|B> [--frame N] [--zoom K] [--eyes open|closed] [--mouth closed|open|wide] --out <png>
@@ -18,6 +18,8 @@ const USAGE: &str = "usage: buddy studio <cmd> …
          [--temperament energy=0.5,…] [--chart <png>] [--out <dir>] [--timeline t.json --out <dir>]
   comments --pack <dir> [--open]
   import-aseprite <file.aseprite> --pack <dir> --name <clip-prefix>
+  package check <dir>                      the package standard (mascots/README.md); exit 1 = findings
+  package bundle --pack <dir> --out <dir>/<id> [--id <id>] [--name <name>]
 every command takes --json";
 
 /// Parsed argv: positionals, `--key value` options, `--flag`s.
@@ -291,6 +293,33 @@ fn run(cmd: &str, rest: &[String]) -> Result<Out, Fail> {
             let r = aseprite::import(Path::new(file), Path::new(pack), name)?;
             let line = format!("ok {} clips {} ({} files{})", r.pack, r.clips.join(","), r.files.len(), if r.created_pack { ", new pack" } else { "" });
             Ok(Out::Ok(line, serde_json::to_value(&r).expect("json")))
+        }
+        "package" => {
+            let Some((sub, rest)) = rest.split_first() else { return usage("package check|bundle") };
+            let a = parse_args(rest, &["pack", "out", "id", "name"]).map_err(Fail::Usage)?;
+            match sub.as_str() {
+                "check" => {
+                    let [dir] = a.pos.as_slice() else { return usage("package check takes one folder") };
+                    let f = package::check(Path::new(dir));
+                    let mut line: String = f.iter().map(|f| format!("{}: {}\n", if f.path.is_empty() { "." } else { &f.path }, f.problem)).collect();
+                    let j = serde_json::json!({ "dir": dir, "standard": f.is_empty(), "findings": f });
+                    if f.is_empty() {
+                        Ok(Out::Ok(format!("ok {dir} is a standard package"), j))
+                    } else {
+                        line += &format!("package: {} problems", f.len());
+                        Ok(Out::Findings(line, j))
+                    }
+                }
+                "bundle" => {
+                    if !a.pos.is_empty() {
+                        return usage("package bundle takes --pack and --out");
+                    }
+                    let (src, out) = (a.req("pack").map_err(Fail::Usage)?, a.req("out").map_err(Fail::Usage)?);
+                    let r = package::bundle(Path::new(src), Path::new(out), a.opt("id"), a.opt("name"))?;
+                    Ok(Out::Ok(format!("ok {} ({} files, {} bytes)", r.dir, r.files, r.bytes), serde_json::to_value(&r).expect("json")))
+                }
+                other => usage(format!("unknown package command “{other}”")),
+            }
         }
         _ => usage(format!("unknown command “{cmd}”")),
     }

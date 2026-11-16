@@ -8,23 +8,33 @@
 <!-- mock.js only acts in a plain browser with ?mock=<state> (design parity checks) -->
 <script src="mock.js"></script>
 <script src="studio.js" defer></script>
+<script src="manage.js" defer></script>
 </head>
 <body>
 <div id="studio-lint-error" class="errbanner" role="alert" hidden></div>
 
-<section id="studio-empty" class="empty" hidden>
-  <b>No pack open</b>
-  <span>Pick a pack folder that has a <code>pack.json</code>. Packs come from <code>mascots/</code> and the folder given to <code>--studio</code>.</span>
-  <div class="row center" id="pack-list"></div>
-  <p class="hint" id="empty-error"></p>
-</section>
+<!-- the studio's home: every mascot, one package each -->
+<main id="studio-library" class="screen library" hidden>
+  <div class="tb2"><span>Mascots</span><span class="sp hint" id="lib-where"></span></div>
+  <div class="lib">
+    <h2>Mascots</h2>
+    <p class="sub">Each mascot is one folder, a <b>mascot package</b>. Built-in mascots can't be deleted; changing one makes your own copy and leaves the original untouched.</p>
+    <p class="err" id="lib-error" role="alert" hidden></p>
+    <div id="lib-groups"></div>
+  </div>
+</main>
 
 <main id="studio" class="studio" hidden>
-  <div class="tb2"><span id="title">Studio</span><span class="pill teal" id="reloaded" hidden></span></div>
+  <div class="tb2">
+    <span class="back" role="button" tabindex="0" data-go="library">‹ Mascots</span>
+    <span id="title">Studio</span><span class="pill" id="kind-pill"></span>
+    <span class="path" id="path"></span>
+    <span class="pill teal" id="reloaded" hidden></span>
+    <span class="sp mode" role="group" aria-label="mode"><span class="on">Review</span><span role="button" data-go="edit">Edit</span></span>
+  </div>
+  <div class="notice" id="studio-readonly" hidden><span id="notice-text"></span><button class="btn small primary" id="notice-btn"></button></div>
 
   <aside class="pane" aria-label="pickers">
-    <h4>Pack</h4>
-    <select id="pack" aria-label="pack"></select>
     <h4>Clip</h4>
     <select id="clip" aria-label="clip"></select>
     <h4>Direction</h4>
@@ -54,7 +64,7 @@
     <div class="term" id="studio-cli" aria-label="the same view from the command line"></div>
   </section>
 
-  <aside class="pane" aria-label="tools">
+  <aside class="pane r" aria-label="tools">
     <div class="tabs" role="tablist">
       <span role="tab" data-tab="comments" class="on">Comments</span>
       <span role="tab" data-tab="sim">Simulator</span>
@@ -100,5 +110,144 @@
     </div>
   </aside>
 </main>
+
+<!-- edit an owned mascot: nothing is written until Save, and Save refuses an edit that doesn't load -->
+<main id="studio-edit" class="studio edit" hidden>
+  <div class="tb2">
+    <span class="back" role="button" tabindex="0" data-go="library">‹ Mascots</span>
+    <span id="ed-name"></span><span class="pill teal" id="ed-pill"></span>
+    <span class="path" id="ed-path"></span>
+    <span class="sp mode" role="group" aria-label="mode"><span role="button" data-go="review">Review</span><span class="on">Edit</span></span>
+  </div>
+  <aside class="pane nav" id="ed-nav" aria-label="sections">
+    <h4>Mascot</h4>
+    <a data-sec="details">Details</a>
+    <a data-sec="clips">Clips <span class="pill grey">art</span></a>
+    <h4>Behavior</h4>
+    <a data-sec="behaviors">Behaviors</a>
+    <a data-sec="intents">Reactions to events</a>
+    <a data-sec="idle">Idle life</a>
+    <h4>Package</h4>
+    <a data-sec="package">Folder &amp; check <span class="pill teal" id="nav-check">ok</span></a>
+    <a data-sec="advanced">Advanced (pack.json)</a>
+    <div id="nav-danger">
+      <h4 class="danger-h">Danger</h4>
+      <a id="nav-delete" class="danger" data-go="delete">Delete this mascot…</a>
+      <a id="nav-restore" class="danger" data-go="restore">Restore original…</a>
+    </div>
+  </aside>
+
+  <section class="ed" aria-label="editor">
+    <div class="scroll">
+      <p class="lock" id="ed-lock" hidden></p>
+
+      <fieldset class="sec" id="sec-details">
+        <h2>Details</h2><p class="sub">Who this mascot is, and how it behaves by default.</p>
+        <div class="field"><label for="f-name">Name</label><input class="txt" id="f-name" maxlength="80"></div>
+        <div class="field"><label>Id</label><span class="mono"><span id="f-id"></span> <small>· the folder name, fixed once made</small></span></div>
+        <div class="field"><label for="f-description">Description</label><input class="txt" id="f-description" maxlength="200" placeholder="One line about this mascot"></div>
+        <div class="field"><label for="f-author">Author</label><input class="txt" id="f-author" maxlength="80" placeholder="Your name (optional)"></div>
+        <h4>Temperament</h4>
+        <div id="f-temper" class="narrow"></div>
+        <h4>Blinking and talking</h4>
+        <div class="field"><label for="f-blink">Blink every</label><span><input class="num" id="f-blink" type="number" min="200" step="100"> ms <small>±</small> <input class="num" id="f-jitter" type="number" min="0" max="1" step="0.05"> <small>jitter · needs face layers</small></span></div>
+        <div class="field"><label for="f-mouth">Mouth frame</label><span><input class="num" id="f-mouth" type="number" min="20" step="10"> ms</span></div>
+      </fieldset>
+
+      <fieldset class="sec" id="sec-clips">
+        <h2>Clips</h2><p class="sub">The art. Each row is one group of clips (a folder under <code>art/</code>). Draw in Aseprite, then add the file here; tags become clips, a trailing <code>_S</code>, <code>_SE</code>… is the direction.</p>
+        <div class="box drop" id="studio-import">
+          <b>Drop an .aseprite file here</b> or <button class="btn small" id="imp-choose" type="button">Choose file…</button>
+          <input type="file" id="imp-file" accept=".aseprite,.ase" hidden>
+          <div id="imp-picked" hidden>
+            <div class="row center"><span class="mono" id="imp-label"></span>
+              <label class="hint">clip names start with <input class="txt mono inline" id="imp-prefix" maxlength="40"></label>
+              <button class="btn small primary" id="imp-go" type="button">Add clips</button></div>
+          </div>
+          <div class="hint" id="imp-msg">Pixels are copied unchanged. Nothing is written unless the whole file checks out.</div>
+        </div>
+        <table class="t" id="groups"></table>
+        <p class="hint">To retouch frames, open the folder and edit the PNG strips in your pixel editor: the studio reloads as you save. <button class="btn small quiet" type="button" data-go="reveal">Show in Finder</button></p>
+      </fieldset>
+
+      <fieldset class="sec" id="sec-behaviors">
+        <h2>Behaviors</h2><p class="sub">A behavior is a short sequence of clips. Reactions and idle life pick behaviors by name.</p>
+        <div class="split">
+          <div>
+            <div class="blist"><table class="t" id="b-list"></table></div>
+            <div class="row start"><input class="txt mono inline" id="b-new-name" placeholder="new_behavior" maxlength="48"><button class="btn small" id="b-new" type="button">+ New behavior</button></div>
+            <p class="err" id="b-new-err"></p>
+          </div>
+          <div class="box" id="b-edit"></div>
+        </div>
+      </fieldset>
+
+      <fieldset class="sec" id="sec-intents">
+        <h2>Reactions to events</h2><p class="sub">What the mascot does when something happens. Each row is tried left to right; the first behavior whose clips exist plays.</p>
+        <table class="t" id="i-table"></table>
+      </fieldset>
+
+      <fieldset class="sec" id="sec-idle">
+        <h2>Idle life</h2><p class="sub">What it does on its own. A higher weight plays more often; the cooldown keeps one from repeating. Run <b>Review › Audit</b> to see a simulated half hour.</p>
+        <table class="t" id="idle-table"></table>
+        <div class="row start"><button class="btn small" id="idle-add" type="button">+ Add</button><span class="hint">Timing rules, time-of-day and seasonal entries: Advanced.</span></div>
+      </fieldset>
+
+      <fieldset class="sec" id="sec-package">
+        <h2>Folder &amp; check</h2><p class="sub">This mascot is one folder you can copy, back up or share. The check below is the same as <code>buddy studio package check</code>.</p>
+        <div class="box" id="pkg-check"></div>
+        <div class="tree" id="pkg-tree"></div>
+      </fieldset>
+
+      <fieldset class="sec" id="sec-advanced">
+        <h2>Advanced</h2><p class="sub">The whole manifest. Everything the forms don't cover (stations, body activities, contexts, variety rules) is edited here. It is checked before it is saved.</p>
+        <textarea class="sel mono raw" id="raw" spellcheck="false" aria-label="pack.json"></textarea>
+      </fieldset>
+    </div>
+    <div class="savebar" id="savebar" hidden><span class="state" id="save-state">Unsaved changes</span><button class="btn small quiet" id="discard" type="button">Discard</button><button class="btn small primary" id="save" type="button">Save</button></div>
+  </section>
+
+  <aside class="pane r mini" aria-label="live preview">
+    <h4>Live preview <small>(last saved)</small></h4>
+    <div class="canvas"><canvas id="ed-view" aria-label="preview"></canvas></div>
+    <div class="row start"><select id="ed-clip" aria-label="preview clip"></select></div>
+    <div class="seg" id="ed-dirs" role="group" aria-label="preview direction"></div>
+    <h4>Check</h4>
+    <div id="ed-check"></div>
+  </aside>
+</main>
+
+<!-- dialogs -->
+<div class="veil" id="studio-new" hidden><div class="dlg wide" role="dialog" aria-modal="true" aria-labelledby="new-h">
+  <h2 id="new-h">New mascot</h2><p>It is saved to your mascots as its own package.</p>
+  <div class="opt on" data-opt="aseprite" role="radio" tabindex="0"><span class="dot"></span><span><b>From an .aseprite file</b><span class="hint">Tags become clips. You can add more files later.</span></span></div>
+  <div class="opt" data-opt="copy" role="radio" tabindex="0"><span class="dot"></span><span><b>As a copy of a mascot</b><span class="hint">All of its art and behavior, under a new name, yours to change.</span></span></div>
+  <div id="new-ase"><div class="box drop slim"><span id="new-file">No file chosen</span> <button class="btn small quiet" id="new-choose" type="button">Choose file…</button><input type="file" id="new-file-in" accept=".aseprite,.ase" hidden></div></div>
+  <div id="new-copy" hidden><div class="field"><label for="new-source">Copy of</label><select id="new-source"></select></div></div>
+  <div class="field"><label for="new-name">Name</label><input class="txt" id="new-name" maxlength="80"></div>
+  <div class="field"><label>Id</label><span><span class="mono" id="new-id">—</span> <span class="err" id="new-err"></span></span></div>
+  <div class="row"><span class="hint" id="new-busy"></span><button class="btn small quiet" data-close type="button">Cancel</button><button class="btn small primary" id="new-ok" type="button" disabled>Create</button></div>
+</div></div>
+
+<div class="veil" id="studio-customize" hidden><div class="dlg" role="dialog" aria-modal="true" aria-labelledby="cus-h">
+  <h2 id="cus-h">Make it yours?</h2>
+  <p id="cus-text"></p>
+  <p>The original is never changed. <b>Restore original</b> removes your copy and brings it back.</p>
+  <div class="row"><span class="hint" id="cus-busy"></span><button class="btn small quiet" data-close type="button">Cancel</button><button class="btn small primary" id="cus-ok" type="button">Make my copy</button></div>
+</div></div>
+
+<div class="veil" id="studio-delete" hidden><div class="dlg" role="dialog" aria-modal="true" aria-labelledby="del-h">
+  <h2 id="del-h">Delete?</h2>
+  <p id="del-text"></p>
+  <p class="hint" id="del-desk"></p>
+  <div class="row"><span class="err" id="del-err"></span><button class="btn small quiet" data-close type="button">Cancel</button><button class="btn small danger" id="del-ok" type="button">Delete mascot</button></div>
+</div></div>
+
+<div class="veil" id="studio-restore" hidden><div class="dlg" role="dialog" aria-modal="true" aria-labelledby="res-h">
+  <h2 id="res-h">Restore the original?</h2>
+  <p id="res-text"></p>
+  <p class="hint">Want to keep your changes? Duplicate your version first; the copy stays in Yours.</p>
+  <div class="row"><span class="err" id="res-err"></span><button class="btn small quiet" data-close type="button">Cancel</button><button class="btn small danger" id="res-ok" type="button">Restore original</button></div>
+</div></div>
 </body>
 </html>

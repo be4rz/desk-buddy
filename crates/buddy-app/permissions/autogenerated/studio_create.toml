@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-studio-create"
+description = "Enables the studio_create command without any pre-configured scope."
+commands.allow = ["studio_create"]
+
+[[permission]]
+identifier = "deny-studio-create"
+description = "Denies the studio_create command without any pre-configured scope."
+commands.deny = ["studio_create"]

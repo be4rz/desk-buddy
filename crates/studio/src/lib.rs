@@ -9,7 +9,9 @@ pub mod audit;
 pub mod comments;
 pub mod diff;
 pub mod frames;
+pub mod jsonedit;
 pub mod lint;
+pub mod package;
 pub mod session;
 pub mod sim;
 
@@ -89,6 +91,34 @@ pub fn base64(bytes: &[u8]) -> String {
     s
 }
 
+/// Standard base64 (padding optional, no whitespace) back to bytes; `None` when it isn't base64.
+pub fn unbase64(s: &str) -> Option<Vec<u8>> {
+    let s = s.trim_end_matches('=');
+    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    let (mut acc, mut bits) = (0u32, 0);
+    for c in s.bytes() {
+        let v = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        } as u32;
+        acc = acc << 6 | v;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+            acc &= (1 << bits) - 1;
+        }
+    }
+    if bits >= 6 {
+        return None;
+    }
+    Some(out)
+}
+
 /// `secs` since the Unix epoch as RFC 3339 UTC (`2026-11-10T12:00:00Z`).
 pub fn rfc3339(secs: u64) -> String {
     let (days, rem) = ((secs / 86_400) as i64, secs % 86_400);
@@ -116,6 +146,11 @@ mod tests {
         assert_eq!(base64(b"fo"), "Zm8=");
         assert_eq!(base64(b"foo"), "Zm9v");
         assert_eq!(base64(b"foobar"), "Zm9vYmFy");
+        for b in [&b""[..], b"f", b"fo", b"foo", b"foobar", &[0, 255, 128, 7, 9]] {
+            assert_eq!(unbase64(&base64(b)).unwrap(), b);
+        }
+        assert_eq!(unbase64("Zm9v YmFy"), None);
+        assert_eq!(unbase64("Z"), None);
         assert_eq!(rfc3339(0), "1970-01-01T00:00:00Z");
         assert_eq!(rfc3339(1_794_312_000), "2026-11-10T12:00:00Z");
         assert_eq!(rfc3339(951_782_400), "2000-02-29T00:00:00Z");

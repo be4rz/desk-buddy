@@ -503,8 +503,8 @@ mod acl {
         assert_eq!(build, granted, "build.rs vs capabilities");
         assert_eq!(build, lists[0], "build.rs vs main.rs generate_handler!");
         let studio: std::collections::BTreeSet<String> = build.iter().filter(|c| c.starts_with("studio_")).cloned().collect();
-        assert_eq!(studio.len(), 10);
+        assert_eq!(studio.len(), 22);
         assert_eq!(studio, lists[1], "`--studio` registers exactly the studio commands");
-        assert_eq!(build.len(), 32);
+        assert_eq!(build.len(), 44);
     }
 }

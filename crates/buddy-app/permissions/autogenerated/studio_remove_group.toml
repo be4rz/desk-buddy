@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-studio-remove-group"
+description = "Enables the studio_remove_group command without any pre-configured scope."
+commands.allow = ["studio_remove_group"]
+
+[[permission]]
+identifier = "deny-studio-remove-group"
+description = "Denies the studio_remove_group command without any pre-configured scope."
+commands.deny = ["studio_remove_group"]

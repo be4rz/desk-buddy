@@ -191,28 +191,32 @@ pub enum LoadNote {
 /// file), defaults, and a note for the tray.
 pub fn load(home: &Path) -> (Settings, Option<LoadNote>) {
     let p = path(home);
-    let why = match std::fs::read_to_string(&p) {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (Settings::default(), None),
-        Err(e) => e.to_string(),
-        Ok(text) => match serde_json::from_str::<Settings>(&text) {
-            Ok(mut s) => match s.validate() {
-                Ok(()) => {
-                    // v1 wrote `dnd.fullscreen: true` as its default, so the file can't tell a choice from
-                    // the old default: v2 starts everyone at "stay visible" (the tray toggle turns it back on)
-                    if s.settings_version < 2 {
-                        s.dnd.fullscreen = false;
-                        s.settings_version = VERSION;
-                    }
-                    return (s, None);
-                }
-                Err(why) => why,
-            },
-            Err(e) => e.to_string(),
-        },
+    let why = match read(home) {
+        Ok(s) => return (s.unwrap_or_default(), None),
+        Err(why) => why,
     };
     let bad = home.join("settings.json.bad");
     let _ = std::fs::rename(&p, &bad);
     (Settings::default(), Some(LoadNote::Reset { bad, why }))
+}
+
+/// `load` without its side effect: the settings (`None` when there is no file yet), or why the
+/// file is bad; nothing is renamed (the studio reads the desktop's mascot with it).
+pub fn read(home: &Path) -> Result<Option<Settings>, String> {
+    let text = match std::fs::read_to_string(path(home)) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e.to_string()),
+        Ok(t) => t,
+    };
+    let mut s = serde_json::from_str::<Settings>(&text).map_err(|e| e.to_string())?;
+    s.validate()?;
+    // v1 wrote `dnd.fullscreen: true` as its default, so the file can't tell a choice from
+    // the old default: v2 starts everyone at "stay visible" (the tray toggle turns it back on)
+    if s.settings_version < 2 {
+        s.dnd.fullscreen = false;
+        s.settings_version = VERSION;
+    }
+    Ok(Some(s))
 }
 
 impl Settings {

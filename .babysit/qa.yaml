@@ -52,9 +52,11 @@ services:
     cwd: .
     # studio crate + `buddy-studio`/`buddy studio` CLI (render/sheet/gif/diff/lint/audit/comments/import-aseprite) and the
     # studio window (p6). Golden render hash, lint fixture (exactly off_palette + partial_alpha, exit 1), corrupt .aseprite
-    # writes nothing, hot-reload error keeps the last good pack, studio ACL (only the `studio` window may call studio_*)
+    # writes nothing, hot-reload error keeps the last good pack, studio ACL (only the `studio` window may call studio_*),
+    # package check/bundle (the bear bundles to a package with the same pixels), library create/edit/delete/customize/restore
     check: cargo test -p studio -p buddy-app -p host -p widgets
-    # opens only the studio window; writes nothing under BUDDY_HOME (no host.json, settings.json, app.lock), no sidecar
+    # opens only the studio window (no pack: the library view); no host.json, app.lock or sidecar; writes BUDDY_HOME/packs
+    # and settings `pack` only on an explicit action (create, save, delete, customize, restore, Put on desktop)
     start: BUDDY_HOME=<tmp> cargo run -p buddy-app -- --studio mascots/bear
   agent-sidecar:
     cwd: agent
@@ -102,7 +104,13 @@ flows: >-
   twice gives identical bytes (sha256 printed, the golden in crates/studio/tests/studio.rs); `buddy studio lint --pack mascots/bear` exits 0 (warnings only);
   `buddy studio audit --pack mascots/bear --minutes 30 --seed 3 --out <tmp>` writes audit.json + audit.png and is byte-identical on a rerun;
   `buddy studio import-aseprite crates/studio/tests/fixtures/blob.aseprite --pack <tmp>/p --name blob` imports pixel-identical frames;
-  parity: web/studio/index.html?mock=1|lint-error|empty against #studio, #studio-comment, #studio-cli, #studio-lint-error, #studio-empty;
+  parity: web/studio/index.html?mock=1|lint-error|customized|library|new|customize|delete|restore|edit|edit-clips|edit-behaviors|edit-intents|edit-idle|edit-package|edit-advanced|edit-error
+  against the ticket prototype's #studio, #studio-comment, #studio-cli, #studio-lint-error, #studio-library, #studio-new, #studio-customize,
+  #studio-delete, #studio-restore, #studio-edit, #studio-import, #studio-edit-error;
+  package: `buddy studio package bundle --pack mascots/bear --out <tmp>/bear` then `package check <tmp>/bear` exits 0 and a render of both is byte-identical;
+  `package check` on a folder with a `..` source path, a link out, or id ≠ folder name exits 1 naming each;
+  library error: a save naming a missing clip, broken raw JSON, removing a clip group in use → refused with the reason, pack.json bytes unchanged;
+  studio_delete / studio_save aimed at a built-in → refused, the shipped folder's bytes unchanged;
   studio error: a truncated or garbage .aseprite → "…; nothing written", exit 1, the pack unchanged; a second import of the same name refuses;
   a broken pack.json while the studio is open → banner #studio-lint-error, the last good pack keeps playing; bad CLI args exit 2;
   human checks on the real desktop: docs/handover.md;

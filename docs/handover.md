@@ -159,10 +159,28 @@ The agent checked the studio page with mocks in a browser, and every studio comm
 need eyes on the real window.
 
 - [ ] Run `cargo run -p buddy-app -- --studio mascots/bear`.
-  **Expect:** one "desk-buddy studio" window with the pack and clip pickers on the left, the preview
-  with its scrub bar and the matching `buddy studio …` commands in the middle, and the Comments,
-  Simulator, Lint and Audit tabs on the right. Closing the window quits it. The normal app can run at
-  the same time, and `--studio` leaves `~/.desk-buddy` alone.
+  **Expect:** one "desk-buddy studio" window. Its title bar shows "‹ Mascots", the name, a Built-in
+  pill and a Review | Edit switch, with a green notice that offers **Customize…**. Below are the clip
+  picker on the left, the preview with its scrub bar and the matching `buddy studio …` commands in the
+  middle, and the Comments, Simulator, Lint and Audit tabs on the right. Closing the window quits it.
+  The normal app can run at the same time. `--studio` writes nothing under `~/.desk-buddy` until you
+  create, save, delete, customize, restore or put a mascot on the desktop.
+- [ ] **Library.** Use a scratch home: `BUDDY_HOME=/tmp/bh cargo run -p buddy-app -- --studio`.
+  **Expect:** the Mascots page with Built-in (the polar bear, with a thumbnail) and Yours (only the
+  dashed "New mascot" card). **New mascot ▸ From an .aseprite file**: drop or choose
+  `crates/studio/tests/fixtures/blob.aseprite` and name it "Blob". It opens in Edit, and walks in
+  Review. Back in the library, the Blob card offers Delete…, and the polar bear's card doesn't.
+- [ ] **Edit.** On Blob: change the name and save (⌘S). The title changes. In Advanced, rename a
+  clip in a behavior to one that doesn't exist. **Expect:** a red "This edit doesn't load" with the
+  reason, Save is refused, and `/tmp/bh/packs/blob/pack.json` is unchanged. Discard brings the last
+  saved text back.
+- [ ] **Customize and restore.** Open the polar bear, press **Customize…** and confirm (copying ~36 MB
+  takes a few seconds). **Expect:** a Customized pill, and the edit sections unlocked. Change the
+  blink timer and save. Then **Restore original…**: the pill goes back to Built-in and
+  `mascots/bear/pack.json` was never touched (`git status mascots/` is clean).
+- [ ] **Delete.** Delete Blob after its confirmation. **Expect:** the folder is gone from
+  `/tmp/bh/packs`. If Blob was on the desktop ("Put on desktop"), settings go back to the bear.
+  Remove `/tmp/bh` afterwards.
 - [ ] **Hot reload.** With the studio open, edit `mascots/bear/pack.json` to break it (for example,
   delete a `"` character), then save.
   **Expect:** within a second, a pink "Reload failed: …" banner, while the last good pack keeps
@@ -242,12 +260,15 @@ small follow-ups.
 - Lint on the bear: 0 errors, no stray or off-palette pixels, and 26 `non_integer_root` warnings
   (walk and run move a fractional number of pixels per frame). They are warnings, not errors; judge
   whether the root motion should be whole pixels.
-- The studio's empty state lists the packs it found by id, instead of the prototype's "Open folder…"
-  button: no path ever comes from the window. To open another folder, start it with
-  `buddy-app --studio <dir>`.
+- The studio's library lists the packs it found (yours, built-in, and the start folder), with no
+  "Open folder…" button: no path ever comes from the window. To open another folder, start it with
+  `buddy-app --studio <dir>`; it opens read-only, and **Duplicate** copies it into your library.
+- "Put on desktop" applies at the bear's next launch; the running bear doesn't swap.
+- There is no pixel editor (plan §5). Art comes in as `.aseprite` clip groups; retouch PNG strips
+  outside the studio via "Show in Finder".
 - `audit.png` has no text labels (no font in the renderer). The studio's Audit tab and `audit.json`
   carry the names.
-- `--studio` with a folder that isn't a pack opens the studio's empty state with the error, and
+- `--studio` with a folder that isn't a pack opens the studio's library with the error, and
   doesn't exit 1. The normal app still exits 1 on a bad pack.
 - Studio follow-ups from the p6 review (small): a file rewritten during the ~1 s reload can be missed
   until the next change; if the start pack failed to load, fixing it doesn't refresh the window (pick

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-studio-library"
+description = "Enables the studio_library command without any pre-configured scope."
+commands.allow = ["studio_library"]
+
+[[permission]]
+identifier = "deny-studio-library"
+description = "Denies the studio_library command without any pre-configured scope."
+commands.deny = ["studio_library"]

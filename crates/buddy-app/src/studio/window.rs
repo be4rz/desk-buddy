@@ -25,7 +25,7 @@ pub fn open(quit_on_close: bool) {
             let _ = w.set_focus();
             return;
         }
-        match WebviewWindowBuilder::new(&h2, LABEL, WebviewUrl::App("studio/index.html".into())).title("desk-buddy studio").inner_size(1180.0, 760.0).min_inner_size(900.0, 560.0).resizable(true).build() {
+        match WebviewWindowBuilder::new(&h2, LABEL, WebviewUrl::App("studio/index.html".into())).title("desk-buddy studio").inner_size(1180.0, 760.0).min_inner_size(900.0, 560.0).resizable(true).disable_drag_drop_handler().build() {
             Ok(w) => {
                 let h3 = h2.clone();
                 w.on_window_event(move |e| {
