@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>2poke · a tiny bear for your Mac desktop</title>
+<meta name="description" content="2poke is a little pixel bear that lives on your Mac desktop. It sits on your windows, reacts when you poke it, and gets things done for you with AI, asking before it acts.">
+<link rel="canonical" href="https://2poke.app/">
+<meta name="theme-color" content="#f1eff4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#16141b" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="2poke">
+<meta property="og:title" content="2poke · Go ahead, poke the bear.">
+<meta property="og:description" content="A tiny pixel bear that lives on your Mac desktop, sits on your windows and gets things done with AI.">
+<meta property="og:url" content="https://2poke.app/">
+<meta property="og:image" content="https://2poke.app/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The 2poke bear sitting on the edge of a window on a desktop">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="assets/favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="preload" href="assets/fonts/nunito.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="assets/fonts/figtree.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="assets/bear.json" as="fetch" crossorigin>
+<link rel="stylesheet" href="css/site.css">
+<!-- The waitlist form posts {email} here as JSON (functions/api/waitlist.js). Empty = preview mode. -->
+<meta name="waitlist-endpoint" content="/api/waitlist">
+<script type="module" src="js/main.js"></script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"2poke","operatingSystem":"macOS","applicationCategory":"UtilitiesApplication","url":"https://2poke.app/","description":"A tiny pixel bear that lives on your Mac desktop, sits on your windows, reacts when you poke it and gets things done for you with AI."}
+</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav" id="nav">
+  <div class="wrap nav-in">
+    <a class="logo" href="#top" aria-label="2poke, back to top">
+      <img src="assets/icon-head.png" alt="" width="34" height="34">
+      <span>2poke</span>
+    </a>
+    <nav aria-label="Sections">
+      <ul class="nav-links">
+        <li><a href="#day">Meet it</a></li>
+        <li><a href="#talk">Talk</a></li>
+        <li><a href="#rooms">Rooms</a></li>
+        <li><a href="#privacy">Privacy</a></li>
+        <li><a href="#studio">Studio</a></li>
+        <li><a href="#faq">FAQ</a></li>
+      </ul>
+    </nav>
+    <a class="btn btn-primary btn-sm" href="#join">Join the waitlist</a>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- ============ hero ============ -->
+<section class="hero" id="top">
+  <div class="wrap hero-grid">
+    <div class="hero-copy">
+      <p class="eyebrow"><span class="px-dot" aria-hidden="true"></span>Coming soon for macOS</p>
+      <h1>Go ahead, <span class="sticker">poke</span> the&nbsp;bear.</h1>
+      <p class="lede">2poke is a tiny bear that lives on your desktop. It sits on your windows, keeps you company through the day, and when you ask, it gets things done for you with AI.</p>
+      <form class="waitlist" data-waitlist="hero" novalidate>
+        <label class="sr-only" for="email-hero">Email address</label>
+        <div class="field">
+          <input id="email-hero" type="email" name="email" autocomplete="email" inputmode="email" placeholder="you@example.com" required maxlength="254">
+          <button class="btn btn-primary" type="submit">Join the waitlist</button>
+        </div>
+        <div class="hp" aria-hidden="true"><label>Company <input type="text" name="company" tabindex="-1" autocomplete="off"></label></div>
+        <p class="form-msg" role="status" aria-live="polite"></p>
+      </form>
+      <p class="fine">One email when it’s ready. Nothing else.</p>
+    </div>
+
+    <div class="hero-desk">
+      <div class="desk" id="desk" data-time="day">
+        <div class="desk-sky" aria-hidden="true"><span class="sun"></span><span class="cloud c1"></span><span class="cloud c2"></span><span class="cloud c3"></span><span class="stars"></span><span class="hill h1"></span><span class="hill h2"></span></div>
+        <div class="menubar">
+          <span class="mb-left" aria-hidden="true"><span class="mb-mark"></span><b>Desktop</b><span>File</span><span>Edit</span><span class="mb-hide-s">View</span></span>
+          <span class="mb-right">
+            <button class="tray-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="tray-menu" aria-label="Open the 2poke menu">
+              <img src="assets/icon-head.png" alt="" width="20" height="20">
+            </button>
+            <span class="mb-clock" data-clock></span>
+          </span>
+        </div>
+        <div class="tray-menu" id="tray-menu" role="menu" aria-label="2poke" hidden>
+          <p class="tm-status" role="none"><span class="dot-ok" aria-hidden="true"></span>Ready · Claude</p>
+          <button role="menuitem" type="button" data-tm="ask">Ask…</button>
+          <p class="tm-dim" role="none">Check-ins: 1 of 4 this hour</p>
+          <hr>
+          <button role="menuitemcheckbox" type="button" aria-checked="false" data-tm="dnd">Do not disturb</button>
+          <button role="menuitemcheckbox" type="button" aria-checked="true" data-tm="quiet">Quiet hours 22:30–07:30</button>
+          <button role="menuitem" type="button" data-tm="approvals">Approvals: ask when unsure <span aria-hidden="true">▸</span></button>
+          <button role="menuitem" type="button" data-tm="model">Model: Claude <span aria-hidden="true">▸</span></button>
+          <hr>
+          <button role="menuitem" type="button" data-tm="floor">Floor: Parquet <span aria-hidden="true">▸</span></button>
+          <button role="menuitemcheckbox" type="button" aria-checked="true" data-tm="scenes">Scenes around activities</button>
+          <button role="menuitemcheckbox" type="button" aria-checked="false" data-tm="fullscreen">Hide over fullscreen apps</button>
+          <hr>
+          <button role="menuitem" type="button" data-tm="studio">Studio…</button>
+          <button role="menuitem" type="button" data-tm="hide">Hide bear</button>
+          <button role="menuitem" type="button" data-tm="quit">Quit 2poke</button>
+        </div>
+
+        <section class="win win-dl" data-perch aria-label="A Downloads window">
+          <header class="win-bar"><span class="win-title">Downloads</span><span class="win-meta">23 items</span></header>
+          <ul class="files">
+            <li><span class="fi fi-img" aria-hidden="true"></span><span class="fn">IMG_2041.png</span><span class="fs">2.4 MB</span></li>
+            <li><span class="fi fi-doc" aria-hidden="true"></span><span class="fn">invoice-october.pdf</span><span class="fs">180 KB</span></li>
+            <li><span class="fi fi-pkg" aria-hidden="true"></span><span class="fn">Installer.dmg</span><span class="fs">96 MB</span></li>
+            <li><span class="fi fi-img" aria-hidden="true"></span><span class="fn">screenshot (3).png</span><span class="fs">1.1 MB</span></li>
+            <li><span class="fi fi-doc" aria-hidden="true"></span><span class="fn">notes-final-v2.txt</span><span class="fs">4 KB</span></li>
+            <li class="mb-hide-s"><span class="fi fi-img" aria-hidden="true"></span><span class="fn">cat.jpg</span><span class="fs">820 KB</span></li>
+          </ul>
+        </section>
+
+        <section class="win win-np" data-perch aria-label="A music window">
+          <header class="win-bar"><span class="win-title">Now playing</span><span class="eq" aria-hidden="true"><i></i><i></i><i></i></span></header>
+          <div class="np">
+            <span class="np-art" aria-hidden="true"></span>
+            <span class="np-meta"><b>Rain on a tin roof</b><span>Lo-fi for focus</span><span class="np-bar"><span></span></span></span>
+            <button class="np-play" type="button" aria-pressed="false" aria-label="Play music"><span class="i-play" aria-hidden="true"></span></button>
+          </div>
+        </section>
+
+        <canvas class="bear-canvas" aria-hidden="true"></canvas>
+        <div class="bear-hit" aria-hidden="true"></div>
+        <div class="bubble hero-bubble" hidden><p class="bubble-text"></p></div>
+      </div>
+      <div class="desk-bar">
+        <p>Tap the bear. Drag it onto a window.</p>
+        <span class="desk-bar-r">
+          <span class="poke-count" data-pokes>0 pokes</span>
+          <button class="btn btn-sm" type="button" data-poke>Poke it</button>
+        </span>
+      </div>
+      <p id="hero-live" class="sr-only" aria-live="polite"></p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ things it does ============ -->
+<section class="strip" aria-labelledby="strip-h">
+  <div class="wrap strip-head">
+    <h2 id="strip-h">It’s never just standing there.</h2>
+    <p>Tea, knitting, a yoyo, a snowman. When you’re busy it finds something to do, and the AI can ask it for any of them with one line.</p>
+  </div>
+  <div class="strip-viewport">
+    <div class="strip-track"></div>
+  </div>
+  <div class="wrap">
+    <dl class="stats">
+      <div><dt>animations</dt><dd data-count="183">183</dd></div>
+      <div><dt>pixel-art frames</dt><dd data-count="14326">14,326</dd></div>
+      <div><dt>things to do</dt><dd data-count="27">27</dd></div>
+      <div><dt>emotes and reactions</dt><dd data-count="65">65</dd></div>
+    </dl>
+  </div>
+</section>
+
+<!-- ============ a day ============ -->
+<section class="day" id="day" data-phase="day" aria-labelledby="day-h">
+  <div class="wrap">
+    <header class="sec-head">
+      <p class="eyebrow"><span class="px-dot" aria-hidden="true"></span>A day with 2poke</p>
+      <h2 id="day-h">It keeps its own little routine.</h2>
+      <p>Between your questions, the bear lives its life. It picks what to do by the time of day, and some activities come with a little room of their own.</p>
+    </header>
+    <div class="day-grid">
+      <div class="day-stage stage-frame">
+        <canvas role="img" aria-label="The bear in its room, doing what it does at this time of day"></canvas>
+      </div>
+      <div class="day-side">
+        <div class="day-times" role="tablist" aria-label="Time of day"></div>
+        <div class="day-card" aria-live="polite"></div>
+        <div class="day-progress" aria-hidden="true"><span></span></div>
+        <p class="day-now"></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ talk ============ -->
+<section class="talk" id="talk" aria-labelledby="talk-h">
+  <div class="wrap talk-grid">
+    <div class="talk-copy">
+      <p class="eyebrow"><span class="px-dot" aria-hidden="true"></span>Talk</p>
+      <h2 id="talk-h">Ask in plain words. It asks before it acts.</h2>
+      <p>Click the bear on your desktop and type. The answer streams into its speech bubble while it talks. It can also work on your Mac: run commands, sort files, play music and set reminders.</p>
+      <div class="prompts" role="group" aria-label="Try asking">
+        <button type="button" class="prompt" data-prompt="tidy" data-say="Tidy my Downloads folder" aria-pressed="false">Tidy my Downloads folder</button>
+        <button type="button" class="prompt" data-prompt="music" data-say="Play something calm" aria-pressed="false">Play something calm</button>
+        <button type="button" class="prompt" data-prompt="remind" data-say="Remind me to stretch at 3" aria-pressed="false">Remind me to stretch at 3</button>
+      </div>
+      <form class="ask-form" autocomplete="off">
+        <label class="sr-only" for="ask-input">Ask the bear something else</label>
+        <input id="ask-input" type="text" maxlength="80" placeholder="Or ask it anything…">
+        <button class="btn btn-sm" type="submit">Ask</button>
+      </form>
+      <fieldset class="modes">
+        <legend>Approvals</legend>
+        <div class="seg">
+          <label><input type="radio" name="mode" value="ask"><span>Ask every time</span></label>
+          <label><input type="radio" name="mode" value="allowlist" checked><span>Ask when unsure</span></label>
+          <label><input type="radio" name="mode" value="full"><span>Full access</span></label>
+        </div>
+        <p class="mode-note" aria-live="polite"></p>
+      </fieldset>
+    </div>
+    <div class="talk-side">
+      <div class="talk-stage stage-frame">
+        <canvas role="img" aria-label="The bear at its desk"></canvas>
+        <div class="bubble stage-bubble" hidden><div class="bubble-body"></div></div>
+        <div class="np-widget" hidden>
+          <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="np-w-meta"><b>Rain on a tin roof</b><span>Now playing</span></span>
+          <button class="np-close" type="button" aria-label="Close the player">×</button>
+        </div>
+        <div class="time-skip" hidden></div>
+      </div>
+      <p class="stage-caption">Runs on Claude by default. Sign in with another AI provider and switch models from the menu bar.</p>
+    </div>
+  </div>
+  <template id="approval-tpl">
+    <div class="approve" role="group" aria-label="The bear asks for your OK">
+      <p class="approve-title">Run a shell command</p>
+      <code class="approve-cmd">mkdir -p Images Docs Installers &amp;&amp; mv *.png *.jpg Images/ &amp;&amp; mv *.pdf *.txt Docs/ &amp;&amp; mv *.dmg Installers/</code>
+      <p class="approve-detail">It wants to sort 23 files in Downloads into folders.</p>
+      <div class="approve-actions">
+        <button type="button" class="btn-s" data-a="deny">Deny</button>
+        <button type="button" class="btn-s primary" data-a="once">Allow once</button>
+        <button type="button" class="btn-s" data-a="always">Always allow</button>
+      </div>
+    </div>
+  </template>
+</section>
+
+<!-- ============ senses ============ -->
+<section class="senses" id="senses" aria-labelledby="senses-h">
+  <div class="wrap">
+    <header class="sec-head">
+      <p class="eyebrow"><span class="px-dot" aria-hidden="true"></span>Senses</p>
+      <h2 id="senses-h">It notices what’s going on.</h2>
+      <p>The bear reacts to your desktop the way a pet reacts to a room, without reading what’s on your screen.</p>
+    </header>
+    <ul class="sense-grid">
+      <li class="sense" data-sense="music"><div class="sense-art"><canvas aria-hidden="true"></canvas></div><h3>Music</h3><p>When Music or Spotify is playing, it bobs its head along.</p></li>
+      <li class="sense" data-sense="edge"><div class="sense-art"><span class="edge-prop" aria-hidden="true"></span><canvas aria-hidden="true"></canvas></div><h3>Window edges</h3><p>Drop it on top of a window and it sits on the edge with its legs dangling.</p></li>
+      <li class="sense" data-sense="cursor"><div class="sense-art"><canvas aria-hidden="true"></canvas></div><h3>Your cursor</h3><p>It watches your cursor, flinches if you swoop at it, and giggles if you wiggle over it.</p></li>
+      <li class="sense" data-sense="drag"><div class="sense-art"><canvas aria-hidden="true"></canvas></div><h3>Being picked up</h3><p>Pick it up and it dangles. Swing it around for too long and it gets dizzy.</p></li>
+      <li class="sense" data-sense="away"><div class="sense-art"><canvas aria-hidden="true"></canvas></div><h3>When you step away</h3><p>It taps on the glass to see where you went, then curls up for a nap.</p></li>
+      <li class="sense" data-sense="wait"><div class="sense-art"><canvas aria-hidden="true"></canvas></div><h3>Waiting on you</h3><p>When it needs your OK, it taps its foot and checks its tiny watch.</p></li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ rooms / playground ============ -->
+<section class="rooms" id="rooms" aria-labelledby="rooms-h">
+  <div class="wrap">
+    <header class="sec-head">
+      <p class="eyebrow"><span class="px-dot" aria-hidden="true"></span>Rooms</p>
+      <h2 id="rooms-h">Make it feel at home.</h2>
+      <p>Pick a floor for it to stand on, then give it something to do. Some activities bring a little room along: a window nook for the laptop, a tea room for tea, a fireside library for reading.</p>
+    </header>
+    <div class="play-grid">
+      <div class="play-side-stage">
+        <div class="play-stage stage-frame">
+          <canvas role="img" aria-label="The bear on its floor. Drag across it to turn it around."></canvas>
+        </div>
+        <div class="turn-bar">
+          <button class="btn btn-sm btn-icon" type="button" data-turn="left" aria-label="Turn left">←</button>
+          <p>Drag the bear to turn it · facing <b data-dir>SE</b></p>
+          <button class="btn btn-sm btn-icon" type="button" data-turn="right" aria-label="Turn right">→</button>
+        </div>
+      </div>
+      <div class="play-controls">
+        <div class="ctl">
+          <p class="ctl-label" id="lbl-floor">Floor</p>
+          <div class="chips" data-floors role="group" aria-labelledby="lbl-floor"></div>
+        </div>
+        <label class="switch"><input type="checkbox" data-scenes checked><span class="sw" aria-hidden="true"></span>Scenes around activities</label>
+        <div class="ctl">
+          <p class="ctl-label" id="lbl-acts">Things to do</p>
+          <div class="chips" data-acts role="group" aria-labelledby="lbl-acts"></div>
+        </div>
+        <div class="ctl">
+          <p class="ctl-label" id="lbl-emotes">Emotes</p>
+          <div class="chips" data-emotes role="group" aria-labelledby="lbl-emotes"></div>
+        </div>
+        <div class="term" aria-live="polite"><span class="term-p" aria-hidden="true">$</span><span data-cmd>buddy mascot list</span></div>
+        <p class="ctl-note">That’s the line the AI runs to move the bear. You can run it yourself, too.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ privacy ============ -->
+<section class="privacy" id="privacy" aria-labelledby="privacy-h">
+  <div class="wrap">
+    <header class="sec-head">
+      <p class="eyebrow"><span class="px-dot" aria-hidden="true"></span>Privacy and manners</p>
+      <h2 id="privacy-h">Friendly, never nosy.</h2>
+      <p>A desk buddy should feel like company. 2poke follows these rules out of the box.</p>
+    </header>
+    <ul class="rules">
+      <li><span class="rule-n" aria-hidden="true">01</span><h3>It asks first.</h3><p>Commands and file changes can wait for your OK. Choose how often: every time, only when unsure, or full access, where deny rules still deny and risky commands still ask.</p></li>
+      <li><span class="rule-n" aria-hidden="true">02</span><h3>Keys stay in your Keychain.</h3><p>Your AI account keys and sign-in tokens live in the macOS Keychain. They’re never written to a file or handed to a command.</p></li>
+      <li><span class="rule-n" aria-hidden="true">03</span><h3>Your cursor stays between you two.</h3><p>It uses where your cursor is to react in the moment. That position is never logged, stored or sent to the AI.</p></li>
+      <li><span class="rule-n" aria-hidden="true">04</span><h3>It only sees window edges.</h3><p>To sit on a window it reads where windows are. It never reads their names or what’s inside them.</p></li>
+      <li><span class="rule-n" aria-hidden="true">05</span><h3>Four check-ins an hour, at most.</h3><p>It speaks up on its own only a few times an hour, and never during quiet hours or Do not disturb. It can hide over fullscreen apps, too.</p></li>
+      <li><span class="rule-n" aria-hidden="true">06</span><h3>Light as a feather.</h3><p>The bear is a native Mac panel drawn in Rust. At rest it uses about 0.3% of your CPU.</p></li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ studio ============ -->
+<section class="studio" id="studio" aria-labelledby="studio-h">
+  <div class="wrap studio-grid">
+    <div class="studio-copy">
+      <p class="eyebrow"><span class="px-dot" aria-hidden="true"></span>Studio</p>
+      <h2 id="studio-h">Bring your own character.</h2>
+      <p>The bear is the first mascot, and you can make more. Draw yours in Aseprite, import it, and set up its clips, behaviors and idle moves in the built-in studio.</p>
+      <ul class="ticks">
+        <li>Start from an <code>.aseprite</code> file or a copy of the bear</li>
+        <li>Customize the bear and restore the original any time</li>
+        <li>Every save is checked and loaded first, so a broken mascot never reaches your desktop</li>
+        <li>Happy with it? Put it on your desktop</li>
+      </ul>
+    </div>
+    <div class="studio-win" aria-label="A preview of the studio window" role="img">
+      <div class="sw-bar"><span class="sw-title">Studio</span><span class="sw-tab is-on">Bear</span><span class="sw-tab">Library</span></div>
+      <div class="sw-body">
+        <aside class="sw-lib">
+          <p class="sw-h">Mascots</p>
+          <p class="sw-item is-on"><img src="assets/icon-head.png" alt="" width="20" height="20">Bear <span>built-in</span></p>
+          <p class="sw-item"><span class="sw-blank"></span>Your mascot <span>new</span></p>
+          <p class="sw-h">Edit</p>
+          <p class="sw-item sw-sub">Clips</p><p class="sw-item sw-sub">Behaviors</p><p class="sw-item sw-sub">Idle moves</p><p class="sw-item sw-sub">Package</p>
+        </aside>
+        <div class="sw-view">
+          <div class="turntable"><canvas aria-hidden="true"></canvas></div>
+          <p class="sw-clip" data-clip>idle · S · 30 frames</p>
+        </div>
+        <aside class="sw-checks">
+          <p class="sw-h">Checks</p>
+          <p class="ck"><b>Lint</b>0 errors</p>
+          <p class="ck"><b>Audit</b>10 min, 3 seeds</p>
+          <p class="ck"><b>Joins</b>all frames match</p>
+          <p class="ck"><b>Palette</b>1 px ink outline</p>
+          <span class="btn btn-primary btn-sm is-static">Put on desktop</span>
+        </aside>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ faq ============ -->
+<section class="faq" id="faq" aria-labelledby="faq-h">
+  <div class="wrap faq-grid">
+    <header class="sec-head">
+      <p class="eyebrow"><span class="px-dot" aria-hidden="true"></span>FAQ</p>
+      <h2 id="faq-h">Questions, answered.</h2>
+      <p>Something else on your mind? Poke the bear. It won’t mind.</p>
+    </header>
+    <div class="faq-list">
+      <details><summary>When can I get 2poke?</summary><p>Soon. We’re finishing the last pieces now. Join the waitlist and we’ll send you one email when it’s ready to download.</p></details>
+      <details><summary>Does it work on Windows?</summary><p>2poke is made for macOS first. Windows is planned for later.</p></details>
+      <details id="faq-ai"><summary>Which AI does it use?</summary><p>Claude by default. You can sign in with another provider’s account or API key and switch models any time from the menu bar.</p></details>
+      <details><summary>Will it slow down my Mac?</summary><p>It shouldn’t. The bear is a small native panel, and at rest it uses about 0.3% of the CPU. You can also hide it over fullscreen apps.</p></details>
+      <details><summary>Can it really do things on my computer?</summary><p>Yes, if you let it. It can run commands, read and edit files, control Music or Spotify, and open a small browser window. You choose how often it asks first. Even with full access, risky commands and sensitive files still ask.</p></details>
+      <details><summary>Will it interrupt me?</summary><p>Rarely. It speaks up on its own at most four times an hour and stays quiet during quiet hours and Do not disturb.</p></details>
+      <details><summary>Where does it live on my Mac?</summary><p>In the menu bar, with no Dock icon. The bear floats above your windows, and you can move it to another display from its menu.</p></details>
+      <details><summary>Can I make my own mascot?</summary><p>Yes. The built-in studio imports Aseprite files, lets you edit clips, behaviors and idle moves, and checks everything before it goes on your desktop.</p></details>
+    </div>
+  </div>
+</section>
+
+<!-- ============ join ============ -->
+<section class="join" id="join" aria-labelledby="join-h">
+  <span class="join-stars" aria-hidden="true"></span>
+  <div class="wrap join-grid">
+    <div class="join-copy">
+      <p class="eyebrow"><span class="px-dot" aria-hidden="true"></span>Waitlist</p>
+      <h2 id="join-h">It’s napping until launch.</h2>
+      <p>Leave your email and we’ll wake it up. You’ll get one email when 2poke is ready, and that’s it.</p>
+      <form class="waitlist" data-waitlist="final" novalidate>
+        <label class="sr-only" for="email-final">Email address</label>
+        <div class="field">
+          <input id="email-final" type="email" name="email" autocomplete="email" inputmode="email" placeholder="you@example.com" required maxlength="254">
+          <button class="btn btn-primary" type="submit">Wake it up</button>
+        </div>
+        <div class="hp" aria-hidden="true"><label>Company <input type="text" name="company" tabindex="-1" autocomplete="off"></label></div>
+        <p class="form-msg" role="status" aria-live="polite"></p>
+      </form>
+    </div>
+    <div class="night-stage stage-frame">
+      <canvas role="img" aria-label="The bear asleep in bed in a nightcap"></canvas>
+      <div class="bubble stage-bubble" hidden><div class="bubble-body"></div></div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <a class="logo" href="#top" aria-label="2poke, back to top"><img src="assets/icon-head.png" alt="" width="30" height="30"><span>2poke</span></a>
+    <p class="foot-tag">A tiny bear for your Mac desktop.</p>
+    <nav aria-label="Footer"><ul class="foot-links">
+      <li><a href="#day">Meet it</a></li><li><a href="#talk">Talk</a></li><li><a href="#rooms">Rooms</a></li>
+      <li><a href="#privacy">Privacy</a></li><li><a href="#studio">Studio</a></li><li><a href="#faq">FAQ</a></li>
+    </ul></nav>
+    <p class="foot-fine">© <span data-year>2026</span> 2poke. Made with Blender, Rust and a lot of pokes.</p>
+  </div>
+</footer>
+</body>
+</html>

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>2poke social image</title>
+<!-- The 1200x630 share image (assets/og.png). Open this page at exactly 1200x630 and capture it,
+     e.g. agent-browser set viewport 1200 630, open http://127.0.0.1:8780/tools/og.html,
+     wait for html.ready, screenshot. The bear and room come from the pipeline sheets, as on the page. -->
+<link rel="stylesheet" href="../css/site.css">
+<style>
+  html, body { width: 1200px; height: 630px; overflow: hidden; }
+  body { position: relative; }
+  .og { position: absolute; inset: 0; display: grid; grid-template-columns: 520px 1fr; align-items: center; padding: 0 36px 0 64px; gap: 0; }
+  .og .logo { font-size: 34px; margin-bottom: 34px; }
+  .og .logo img { width: 46px; height: 46px; }
+  .og h1 { font-size: 88px; line-height: 0.95; letter-spacing: -0.035em; margin-bottom: 28px; }
+  .og .sub { font-size: 26px; line-height: 1.35; color: var(--text-2); max-width: 19em; }
+  .og .tag { display: inline-block; margin-top: 30px; padding: 10px 14px; border-radius: 10px; background: var(--ink); color: var(--sun-l); font: 400 16px/1 var(--font-px); text-transform: uppercase; letter-spacing: 0.04em; }
+  .card { position: relative; justify-self: end; width: 580px; height: 586px; margin-top: -8px; display: grid; place-items: end center; padding-bottom: 14px;
+    border: 3px solid var(--ink); border-radius: 26px; box-shadow: 0 9px 0 var(--ink); overflow: hidden;
+    background: linear-gradient(180deg, #d7efe8, #fbfaf8 72%); }
+  .card canvas { image-rendering: pixelated; }
+  .card .bubble { position: absolute; left: 60%; top: 92px; translate: -50% 0; animation: none; font-size: 19px; padding: 12px 18px; white-space: nowrap; max-width: none; }
+</style>
+</head>
+<body>
+<div class="og">
+  <div>
+    <div class="logo"><img src="../assets/icon-head.png" alt="" class="pixel"><span>2poke</span></div>
+    <h1>Go ahead, <span class="sticker">poke</span> the&nbsp;bear.</h1>
+    <p class="sub">A tiny pixel bear that lives on your Mac desktop and gets things done with AI.</p>
+    <span class="tag">Coming soon for macOS</span>
+  </div>
+  <div class="card">
+    <div class="bubble">Psst. You can poke me.</div>
+    <canvas></canvas>
+  </div>
+</div>
+<script type="module">
+  import * as S from '../js/sprites.js';
+  await S.load(new URL('../assets/bear.json', import.meta.url).href);
+  const floor = S.floorById('parquet');
+  const scene = S.sceneById('nook');
+  const v = S.sceneVariant(scene, 11);
+  await Promise.all([S.preload(['laptop_type']), S.image(floor.file), S.image(v.back)]);
+  const b = await S.roomBounds([floor, { file: v.back, origin: scene.origin }], [4, 4, 4, 4]);
+  const canvas = document.querySelector('canvas');
+  const ctx = S.pixelCanvas(canvas, b.w, b.h);
+  const z = 2; // whole pixels only
+  canvas.style.width = `${b.w * z}px`;
+  canvas.style.height = `${b.h * z}px`;
+  const a = new S.Actor({ dir: 'SE' });
+  a.pose('laptop_type', 6, 'A');
+  S.drawRoom(ctx, b.ax, b.ay, { floor, scene, hour: 11, actor: a });
+  document.documentElement.classList.add('ready');
+</script>
+</body>
+</html>
