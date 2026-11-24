@@ -1,8 +1,8 @@
 # AGENTS.md
 
-**desk-buddy**: an animated desktop assistant character (inspired by the
+**desk-buddy** (product name **2poke**): an animated desktop assistant character (inspired by the
 classic Office Assistant era) that floats over other apps, reacts to events,
-and talks through speech bubbles, powered by an LLM.
+and talks through speech bubbles, powered by an LLM. The repo is public and open source.
 
 ## Ground rules
 
@@ -14,6 +14,10 @@ and talks through speech bubbles, powered by an LLM.
 - Use an **original character and art**. Do not copy Clippy or any other
   Microsoft Office Assistant characters, art, sounds or names.
 - Never commit secrets (`.env`, API keys); use example placeholders only.
+- Licenses: code is MIT (`LICENSE`), the bear and every image or `.blend`/`.aseprite` file is
+  CC BY-NC 4.0 (`ARTWORK.md`). Add third-party code, fonts or images only under a compatible license,
+  with its license file beside it (e.g. `site/assets/fonts/OFL.txt`). Everything committed is public,
+  history included: no personal paths, names or private notes.
 
 ## Project map
 
@@ -91,7 +95,7 @@ and talks through speech bubbles, powered by an LLM.
   checks: `docs/handover.md`.
   A bad pack or art dir exits 1 with `[buddy] cannot load mascot …`. Art comes
   from `experiments/mascot/out/bear3d/` via `mascots/bear/pack.json`, so re-rendering changes it.
-  Always `export CARGO_TARGET_DIR=/Users/chantran/orca/desk-buddy/target` (one shared target;
+  Always `export CARGO_TARGET_DIR="$(git rev-parse --path-format=absolute --git-common-dir)/../target"` (one shared target;
   a Tauri build needs ~3 GB and the disk is tight).
 - **Spike S2 (agent harness):** `agent/` is the Bun-compiled pi-durable 1.5 sidecar
   (`bun run typecheck && bun test`; `bun run build` → `agent/dist/buddy-agent`, ~68 MB).

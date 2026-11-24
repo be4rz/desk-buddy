@@ -6,7 +6,7 @@ version: 1
 # verify through the checks below, BUDDY_STATS stderr and BUDDY_DUMP canvas PNGs
 # (our own buffer, never a desktop screenshot).
 # Every cargo command uses the one shared target dir (design §6.1):
-#   export CARGO_TARGET_DIR=/Users/chantran/orca/desk-buddy/target
+#   export CARGO_TARGET_DIR="$(git rev-parse --path-format=absolute --git-common-dir)/../target"
 # and Tauri builds first check `df -k /` for >= 3 GB free.
 target: native macOS app (crates/buddy-app), no HTTP endpoint
 cwd: .

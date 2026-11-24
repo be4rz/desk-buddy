@@ -2,6 +2,7 @@
   "name": "@desk-buddy/agent",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "The desk-buddy agent sidecar: pi-durable with desk-buddy's extensions, compiled with Bun into one binary that the Rust host starts.",
   "type": "module",
   "scripts": {

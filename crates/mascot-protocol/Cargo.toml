@@ -4,6 +4,8 @@ description = "MascotEvent: what the harness tells the mascot brain (plan §3)"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 serde.workspace = true
