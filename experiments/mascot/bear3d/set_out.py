@@ -25,9 +25,13 @@ key hashed from the placed matrices, so the kit's render cache keys on what is d
   ['head', t, rx, ry, rz]           the same on the head bone (the nightcap)
   ['at', x, y, z, rx, ry, rz, s]    a set-frame placement, uniform scale s (0 = hidden: scale 1e-6)
   ['box', x, y, z, sx, sy, sz]      a set-frame placement with a per-axis scale (the quilt halves)
-  ['mound', h]                      the pulled-up quilt over the lying bear: a soft mound in the posed body bone's
-                                    frame (bear rest axes) from below the seat up to height h (the chest), with a
-                                    cream hem along its top edge; h = 0 hides it
+  ['hide']                          not drawn (the folded quilt halves while the quilt is pulled up)
+  ['drape', h, out]                 the pulled-up quilt laid over the lying bear: a cloth surface rebuilt every
+                                    frame from the POSED bear (_drape: it rests on the tummy, arms and feet, tents
+                                    between them and hangs over the mattress sides), covering the bear up to height
+                                    h along the posed body bone (0 = the seat, 1.2 = the chest), with a cream
+                                    turned-down hem along that edge; h = 0 hides it; out = 1: the arms are out,
+                                    over the quilt
 Derived rigids (drops, dust, the fishing line) are placed from their host's matrix (spout tip, broom head, rod tip).
 Out of Blender the key is a hash of st. verify_out.py proves the reliance: the kit's hand-off check (props + idle#0),
 exact joins and seams, and a self-test mutation that moves a prop on a hand-off frame.
@@ -97,7 +101,9 @@ for _i, (_n, _r, _x, _mg, _th, _extra) in enumerate([
         ('mattress', 'fabric_cream', (2, 3, 4), 'cream', (0.46, 0.70), {}),
         ('quilt', 'fabric_quilt', (1, 2, 3), 'quilt', (0.46, 0.70), {}),
         ('cap', 'fabric_rose', (1, 2, 3), 'rose', (0.44, 0.70), {}),
-        ('cap_trim', 'fabric_cream', (2, 3, 4), 'cream', (0.46, 0.70), {})]):
+        ('cap_trim', 'fabric_cream', (2, 3, 4), 'cream', (0.46, 0.70), {}),
+        ('quilt_hem', 'fabric_cream', (2, 3, 4), 'cream', (0.46, 0.70), {}),
+        ('quilt_lip', 'fabric_cream', (2, 3, 4), 'sheet', (0.46, 0.70), dict(thin=0.30, prio=5))]):
     PARTS[_n] = dict(pid=50 + _i, ramp=_r, idx=_x, mg=_mg, thresh=_th, **_extra)
 
 # layers (= props) per set; the static ones (pot, ice, bed frame) never move (verify_out.py checks it)
@@ -385,35 +391,45 @@ LEG_LIE = 26.0                      # lying: the legs (swung 26 deg against the 
 ARM_LIE, SP_LIE = -6.0, 0.0         # lying: the arms
 Q_HOME = {'quilt_a': ['box', 1.02, 0.0, Z_M + 0.16, 0.28, BW - 0.02, 0.05],
           'quilt_b': ['box', 1.02, 0.0, Z_M + 0.07, 0.33, BW + 0.04, 0.08]}
-Q_UP = {'quilt_a': ['box', 0.66, 0.0, Z_M - 0.02, 0.72, BW + 0.04, 0.08],      # spread flat over the bed, sides draped
-        'quilt_b': ['box', 1.18, 0.0, Z_M + 0.02, 0.20, BW + 0.05, 0.11]}      # a thicker roll at the foot end
-# the mound (body-bone frame, bear rest axes: up +Z from the seat, forward -Y): it encloses everything of the lying
-# bear below h - 0.10 (legs, pants, tummy, arms), so the depth composite hides the covered part; the hem covers the rest
-QMOUND = dict(z0=-0.20, yc=0.0, rx=0.84, ry=0.72, e1=0.4, e2=0.8)
-MOUND_H = (0.30, 1.20)               # the top edge travels from the seat up to across the chest
-HEM = dict(dr=-0.03, dz=0.06)                    # a rolled edge, just inside the mound's rim
+Q_UP = {'quilt_a': ['box', 0.66, 0.0, Z_M - 0.02, 0.72, BW + 0.04, 0.08],      # where the folded halves head as the
+        'quilt_b': ['box', 1.18, 0.0, Z_M + 0.02, 0.20, BW + 0.05, 0.11]}      # bear takes hold (they loosen a little)
+Q_PULL = 0.2                         # from here on the folded halves are gone and the quilt is the drape
+DRAPE_H = (0.30, 1.20)               # its turned-down edge travels from the seat up to across the chest
+# the drape (bed frame, see _drape): a height field over the foot part of the bed. cell = grid step; gap = how far
+# it lies off the bear, all round (>= the bear's 1 px outline; gap_min: never less); thick = its thickness on the bare
+# mattress; soft = the radius of the ball that cannot get under it (it tents between the bumps and meets the mattress
+# in a fillet of that radius; a plain slope limit instead makes it a pitched tent); puff = blur passes that take the
+# creases out of it; over / skirt = it hangs `over` past the mattress side, down to z = skirt; round = the radius of
+# that edge; voxel / relax = the even remesh of the cloth (face size, smoothing passes); hem = the width of the cream
+# turned-down band, lift = how far it lies above the quilt, lip = the sheet edge showing beyond it where it lies on
+# the bear (within lip_r of the bear; the pixel step inks the lip along the band: the line between the hem and the
+# bear)
+DRAPE = dict(x0=-0.62, cell=0.0125, gap=0.06, gap_min=0.04, thick=0.05, soft=0.26, over=0.06, skirt=0.30,
+             puff=50, round=0.05, voxel=0.02, relax=3, hem=0.13, lift=0.02, lip=0.04, lip_r=0.10)
 CAP_HOME = (-(BL - 0.36), 0.0, Z_M + 0.52)   # the nightcap lying on the pillow (bed frame: head end at -X)
 
 
-def _quilt(t, br=0.0):
-    """t: 0 = folded at the foot (home), 1 = pulled up to the chest. The mound only shows from t 0.2 (only on
-    frames where the bear lies flat with its legs at LEG_LIE), rising from the seat to the chest."""
-    out = {}
+def _quilt(t, br=0.0, out=0):
+    """t: 0 = folded at the foot (home), 1 = pulled up to the chest. Below Q_PULL the folded halves only loosen;
+    from Q_PULL on (only on frames where the bear lies flat) they are hidden and the quilt is the drape laid over
+    the bear, its edge rising from the seat to the chest (out = 1: the arms come out over it)."""
+    res = {}
     for k in ('quilt_a', 'quilt_b'):
+        if t >= Q_PULL: res[k] = ['hide']; continue
         a, b = Q_HOME[k], Q_UP[k]; e = _ease(min(1.0, t / 0.6))
         v = [round(a[i] + (b[i] - a[i]) * e, 4) for i in range(1, 7)]
         v[5] = round(v[5] * (1 + br), 4)
-        out[k] = ['box'] + v
-    h = 0.0 if t < 0.2 else MOUND_H[0] + (MOUND_H[1] - MOUND_H[0]) * _ease((t - 0.2) / 0.8)
-    out['quilt_m'] = ['mound', round(h, 4)]
-    return out
+        res[k] = ['box'] + v
+    h = 0.0 if t < Q_PULL else DRAPE_H[0] + (DRAPE_H[1] - DRAPE_H[0]) * _ease((t - Q_PULL) / (1 - Q_PULL))
+    res['quilt_m'] = ['drape', round(h, 4), int(out)]
+    return res
 
 
 def _b_bed_cap(g):
     PXZ = g['PXZ']; hx, hy = g['hand']
     edgeY = -BW + 0.30
-    def S(cap=HOME, quilt=0.0, br=0.0, nod=0.0):
-        st = dict(_quilt(quilt, br)); st['nightcap'] = cap if cap is HOME else ['head', cap, 0.0, round(nod, 3), 0.0]
+    def S(cap=HOME, quilt=0.0, br=0.0, nod=0.0, out=0):
+        st = dict(_quilt(quilt, br, out)); st['nightcap'] = cap if cap is HOME else ['head', cap, 0.0, round(nod, 3), 0.0]
         if cap is not HOME and cap < 1.0: st['nightcap'] = ['head', cap, 0.0, 0.0, 0.0]
         return st
     lerp = lambda a, b, t: a + (b - a) * t
@@ -462,7 +478,7 @@ def _b_bed_cap(g):
     wake = [
         L0,
         _F(g, S(1.0, 1.0), LY, blink=1.0, earL=2, earR=2),                                       # eyes open
-        _F(g, S(1.0, 1.0), LY, blink=1.0, armL=30.0, armR=30.0, spL=0.0, spR=0.0, sz=1.03, mouth='wide', earL=4,
+        _F(g, S(1.0, 1.0, out=1), LY, blink=1.0, armL=30.0, armR=30.0, spL=0.0, spR=0.0, sz=1.03, mouth='wide', earL=4,
            earR=4),                                                                              # stretch, yawn
         _F(g, S(1.0, 0.5), LY, blink=1.0, clX=4, earL=2, earR=2),                                 # push the quilt down
         _F(g, S(0.6, 0.1), tl(0.55, armL=18.0, armR=18.0, clX=6)),                                # sit up, the cap hops off
@@ -576,10 +592,15 @@ def build_props(s, kit, g):
         for k in ('quilt_a', 'quilt_b'):
             e = E(k, 'bed', None, 'box_bed')
             _part(kit, k, e, 'bed', 'quilt', [((0, 0, 0), (1.0, 1.0, 1.0), 0.45, 0.30)])
-        e = E('quilt_m', 'bed', None, 'mound')                    # unit shapes, scaled per frame by _apply
-        _part(kit, 'quilt_m', e, 'bed', 'quilt', [((0, 0, 0), (1.0, 1.0, 1.0), QMOUND['e1'], QMOUND['e2'])])
-        hm = kit.empty('P_quilt_hem', (0, 0, 0), W0); rig['quilt_m']['hem'] = hm
-        _part(kit, 'quilt_hem', hm, 'bed', 'mattress', [((0, 0, 0), (1.0, 1.0, 1.0), 0.5, 0.7)])
+        e = E('quilt_m', 'bed', None, 'drape')                    # empty meshes, rebuilt per frame by _drape
+        for k, part in (('mesh', 'quilt'), ('hem', 'quilt_hem'), ('lip', 'quilt_lip')):
+            ob = _part(kit, 'quilt_' + k, e, 'bed', part, [((0, 0, 0), (1.0, 1.0, 1.0), 1.0, 1.0, dict(segs=4, rings=3))])
+            ob.data.clear_geometry(); rig['quilt_m'][k] = ob
+        import bpy
+        src = bpy.data.objects.new('quilt_src', bpy.data.meshes.new('quilt_src'))    # the cloth before remeshing:
+        bpy.context.scene.collection.objects.link(src); src.hide_render = True       # never rendered, no layer
+        md = src.modifiers.new('even', 'REMESH'); md.mode = 'VOXEL'; md.voxel_size = DRAPE['voxel']; md.adaptivity = 0.0
+        rig['quilt_m'].update(src=src, sig=[0.0])
         cap = E('nightcap', 'cap', None, 'head')
         hz = 1.4
         _part(kit, 'cap', cap, 'cap', 'cap', [((0, 0.12, 2.15 - hz), (0.31, 0.30, 0.19), 0.8, 1.0),
@@ -665,24 +686,19 @@ def _apply(st):
                 m = Matrix.Translation(a) @ q.to_matrix().to_4x4() @ Matrix.Diagonal((1, 1, max(d.length, 1e-3), 1))
             else: m = _mat_at(0, 0, -1, s=0.0)
         elif r['kind'] == 'box_bed':                               # a quilt half: set-frame box
-            _, x, y, z, sx, sy, sz = sp
-            m = Matrix.Translation((x, y, z)) @ Matrix.Diagonal((sx, sy, sz, 1.0))
-            m = _bed() @ m
-        elif r['kind'] == 'mound':                                 # the pulled-up quilt over the lying bear
-            h = sp[1] if sp[0] == 'mound' else 0.0
-            if h <= 0:
-                m = _mat_at(0, 0, -1, s=0.0); r['hem'].matrix_basis = m.copy()
+            if sp[0] == 'hide': m = _mat_at(0, 0, -1, s=0.0)
             else:
-                Q = QMOUND; F = _follow('body', 'body', (0.0, 0.0, 0.0))
-                m = F @ Matrix.Translation((0, Q['yc'], (Q['z0'] + h) / 2)) @ Matrix.Diagonal(
-                    (Q['rx'], Q['ry'], (h - Q['z0']) / 2, 1.0))
-                r['hem'].matrix_basis = F @ Matrix.Translation((0, Q['yc'], h)) @ Matrix.Diagonal(
-                    (Q['rx'] + HEM['dr'], Q['ry'] + HEM['dr'], HEM['dz'], 1.0))
+                _, x, y, z, sx, sy, sz = sp
+                m = _bed() @ Matrix.Translation((x, y, z)) @ Matrix.Diagonal((sx, sy, sz, 1.0))
+        elif r['kind'] == 'drape':                                 # the pulled-up quilt laid over the lying bear
+            m = Matrix.Identity(4)
+            r['sig'] = _drape(r, sp[1], bool(sp[2])) if sp[0] == 'drape' else _drape(r, 0.0)
         elif r['kind'] == 'head':                                  # the nightcap: pillow -> head
             home = _bed() @ _mat_at(*CAP_HOME, 0.0, -80.0, 0.0) @ Matrix.Translation((-0.10, -0.14, -0.78))
             if sp[0] == 'home': m = home
             else:
                 m = _blend(home, _follow('head', 'head', sp[2:5]), sp[1])
+        elif sp[0] == 'hide': m = _mat_at(0, 0, -1, s=0.0)
         elif sp[0] == 'home': m = _home(r)
         elif sp[0] == 'paw': m = _blend(_home(r), _follow('paw_L', 'paw_R', sp[2:5]) @ _grip(n), sp[1])
         elif sp[0] == 'at':
@@ -697,9 +713,120 @@ def _apply(st):
     for l in LAYERS[_R['set']]:
         sig = [round(x, 5) for n in sorted(rig) if rig[n]['layer'] == l for row in M[n] for x in row]
         if 'shead' in rig and l == 'snow': sig += [round(x, 5) for row in rig['shead']['nose'].matrix_basis for x in row]
-        if 'quilt_m' in rig and l == 'bed': sig += [round(x, 5) for row in rig['quilt_m']['hem'].matrix_basis for x in row]
+        if 'quilt_m' in rig and l == 'bed': sig += rig['quilt_m']['sig']
         keys[l] = f'{l}_' + hashlib.md5(json.dumps(sig).encode()).hexdigest()[:10]
     return keys
+
+
+def _drape(r, h, arms_out=False):
+    """rebuild the pulled-up quilt for this frame (the rig is already posed) and return its render signature.
+    The cloth is a height field z(x, y) in the set frame over the foot part of the bed: it lies `gap` off
+    everything of the bear below the edge plane (the plane across the posed body bone at height h), falls from
+    there like cloth (a ball of radius `soft` cannot get under it), lies `thick` on the bare mattress and hangs over
+    the mattress sides and foot.
+    arms_out: the arms are not covered (they come out over the quilt: the stretch). Cut by the edge plane it gives
+    three meshes: the quilt, the cream hem band along the cut (lifted off the quilt)
+    and the sheet lip just beyond it. Because the cloth covers the bear from above with room to spare, the depth
+    composite hides every covered bear pixel, in any pose."""
+    import bpy, bmesh
+    import numpy as np
+    from mathutils import Vector
+    from mathutils.bvhtree import BVHTree
+    obs = [r['mesh'], r['hem'], r['lip']]
+    for ob in obs: ob.data.clear_geometry()
+    if h <= 0: return [0.0]
+    D = DRAPE; cs = D['cell']
+    F = _follow('body', 'body', (0.0, 0.0, 0.0))
+    n = Vector(F.col[2][:3]).normalized(); c = F @ Vector((0.0, 0.0, h))
+    Wi = np.array(_R['W0'].matrix_world.inverted()); dg = bpy.context.evaluated_depsgraph_get()
+    vs, ts, nv = [], [], 0
+    for o in bpy.data.collections['Bear'].all_objects:                 # the posed bear, in the set frame
+        if o.type != 'MESH' or (arms_out and o.name.startswith('arm_')): continue
+        oe = o.evaluated_get(dg); me = oe.to_mesh(); me.calc_loop_triangles()
+        co = np.empty(len(me.vertices) * 3, np.float32); me.vertices.foreach_get('co', co)
+        tr = np.empty(len(me.loop_triangles) * 3, np.int32); me.loop_triangles.foreach_get('vertices', tr)
+        oe.to_mesh_clear()
+        M = Wi @ np.array(o.matrix_world)
+        vs.append(co.reshape(-1, 3).astype(np.float64) @ M[:3, :3].T + M[:3, 3]); ts.append(tr.reshape(-1, 3) + nv)
+        nv += len(vs[-1])
+    tree = BVHTree.FromPolygons(np.concatenate(vs).tolist(), np.concatenate(ts).tolist(), all_triangles=True)
+    yw = BW + D['over']; x0 = D['x0']; x1 = BL
+    nx = int(round((x1 - x0) / cs)); ny = int(round(2 * yw / cs))
+    gx = x0 + cs * np.arange(nx + 1); gy = -yw + cs * np.arange(ny + 1)
+    # T: per grid point the top of what the quilt covers there = the bear's column below the edge plane
+    T = np.full((nx + 1, ny + 1), -1e9); under = np.zeros(T.shape, bool); up, dn = Vector((0.0, 0.0, 1.0)), Vector((0.0, 0.0, -1.0))
+    for i in range(nx + 1):
+        zp = c.z - (gx[i] - c.x) * n.x / n.z                         # the edge plane's height over this row
+        for j in range(ny + 1):
+            top = tree.ray_cast(Vector((gx[i], gy[j], 9.0)), dn)[0]
+            if top is None: continue
+            under[i, j] = True
+            bot = tree.ray_cast(Vector((gx[i], gy[j], -9.0)), up)[0]
+            if bot.z <= zp: T[i, j] = min(top.z, zp)
+
+    def ball(rad):                                                   # grid offsets within rad + the ball's height there
+        m = int(rad / cs)
+        return [(u, v, math.sqrt(max(rad * rad - (u * u + v * v) * cs * cs, 0.0)))
+                for u in range(-m, m + 1) for v in range(-m, m + 1) if (u * u + v * v) * cs * cs <= rad * rad]
+    def roll_on(a, rad, sg):                                         # sg +1: a ball rolled over a (grow), -1: under it
+        p = np.pad(a, int(rad / cs), constant_values=-sg * 1e9); m = int(rad / cs)
+        st = [p[m + u:m + u + a.shape[0], m + v:m + v + a.shape[1]] + sg * hgt for u, v, hgt in ball(rad)]
+        return np.maximum.reduce(st) if sg > 0 else np.minimum.reduce(st)
+    floor = Z_M + D['thick']
+    low = np.maximum(roll_on(T, D['gap_min'], 1), floor)             # never below this: the bear + gap_min all round
+    Z = np.maximum(roll_on(T, D['gap'], 1), floor)                   # the bear + gap all round, on the mattress
+    Z = roll_on(roll_on(Z, D['soft'], 1), D['soft'], -1)             # cloth: a ball of radius soft cannot get under it
+    for k in range(D['puff']):                                       # padded cloth: no sharp creases between the bumps
+        p = np.pad(Z, 1, mode='edge')                                # (each pass is a 3x3 binomial blur)
+        Z = (4 * Z + 2 * (p[2:, 1:-1] + p[:-2, 1:-1] + p[1:-1, 2:] + p[1:-1, :-2]) +
+             p[2:, 2:] + p[2:, :-2] + p[:-2, 2:] + p[:-2, :-2]) / 16.0
+    Z = np.maximum(Z, low)
+    rc = D['round']                                                  # round the edges it hangs from
+    def roll(d): t = np.clip(rc - d, 0.0, rc); return rc - np.sqrt(rc * rc - t * t)
+    Z = np.maximum(Z - roll(yw - np.abs(gy))[None, :] - roll(x1 - gx)[:, None], np.where(T > -1e8, low, Z_M))
+
+    # the cloth as a closed solid: the height field, walls straight down to z = skirt all round, a flat bottom.
+    # A height field cannot hold its steep sides evenly (they would shade in streaks), so the solid is remeshed
+    # into even voxel-size faces and relaxed; the cuts below open it again.
+    eps = 0.004; I = np.arange(-1, nx + 2); J = np.arange(-1, ny + 2)
+    X = gx[np.clip(I, 0, nx)] + eps * ((I > nx) * 1.0 - (I < 0) * 1.0)
+    Y = gy[np.clip(J, 0, ny)] + eps * ((J > ny) * 1.0 - (J < 0) * 1.0)
+    ZZ = np.full((nx + 3, ny + 3), D['skirt']); ZZ[1:nx + 2, 1:ny + 2] = Z
+    V = np.stack([np.repeat(X[:, None], ny + 3, 1), np.repeat(Y[None, :], nx + 3, 0), ZZ], -1).reshape(-1, 3)
+    vid = np.arange((nx + 3) * (ny + 3)).reshape(nx + 3, ny + 3)
+    Fq = np.stack([vid[:-1, :-1], vid[1:, :-1], vid[1:, 1:], vid[:-1, 1:]], -1).reshape(-1, 4)
+    src = r['src']; me = src.data; me.clear_geometry(); me.from_pydata(V.tolist(), [], Fq.tolist())
+    bm = bmesh.new(); bm.from_mesh(me)
+    bmesh.ops.holes_fill(bm, edges=[e for e in bm.edges if e.is_boundary], sides=0)
+    bm.to_mesh(me); bm.free(); me.update(); src.update_tag()
+    bpy.context.view_layer.update()
+    ev = bpy.data.meshes.new_from_object(src.evaluated_get(bpy.context.evaluated_depsgraph_get()))
+    bm = bmesh.new(); bm.from_mesh(ev); bpy.data.meshes.remove(ev); me.clear_geometry()
+    for k in range(D['relax']):
+        bmesh.ops.smooth_vert(bm, verts=bm.verts[:], factor=0.5, use_axis_x=True, use_axis_y=True, use_axis_z=True)
+    bm.normal_update()
+    sig = [hashlib.md5(np.round(Z, 4).tobytes()).hexdigest()[:12], round(h, 4)] + [round(v, 5) for v in (*c, *n)]
+
+    near = roll_on(np.where(under, 0.0, -1e9), D['lip_r'], 1) > -1e8  # the bear is under here, or close by
+    def cut(lift, lo, hi, on_bear=False):                            # the cloth with lo <= s <= hi (s: past the edge plane)
+        b = bm.copy()
+        if on_bear:                                                  # the lip: only where the hem lies on the bear
+            def off(f):
+                m = f.calc_center_median()
+                return not near[min(max(int(round((m.x - x0) / cs)), 0), nx), min(max(int(round((m.y + yw) / cs)), 0), ny)]
+            bmesh.ops.delete(b, geom=[f for f in b.faces if off(f)], context='FACES')
+        if lift:
+            for v in b.verts: v.co += v.normal * lift
+        for s0, sg in ((hi, 1.0), (lo, -1.0)):
+            if s0 is None: continue
+            bmesh.ops.bisect_plane(b, geom=b.verts[:] + b.edges[:] + b.faces[:], dist=1e-7, plane_co=c + n * s0,
+                                   plane_no=n * sg, clear_outer=True)
+        return b
+    for ob, b in zip(obs, (cut(0.0, None, 0.0), cut(D['lift'], -D['hem'], 0.0), cut(0.0, 0.0, D['lip'], True))):
+        me = ob.data; me.clear_geometry(); b.to_mesh(me); b.free(); me.update()
+        for p in me.polygons: p.use_smooth = True
+    bm.free()
+    return sig
 
 
 def _bed():

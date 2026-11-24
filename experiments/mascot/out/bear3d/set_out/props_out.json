@@ -27,7 +27,9 @@
   "mattress": 72,
   "quilt": 73,
   "cap": 74,
-  "cap_trim": 75
+  "cap_trim": 75,
+  "quilt_hem": 76,
+  "quilt_lip": 77
  },
  "props": {
   "can": {
@@ -318,7 +320,7 @@
      0,
      0
     ],
-    "layer_key": "bed_8e963af40a"
+    "layer_key": "bed_9e768cd8d4"
    },
    "B": {
     "file": "prop_bed_B.png",
@@ -334,7 +336,7 @@
      0,
      0
     ],
-    "layer_key": "bed_8e963af40a"
+    "layer_key": "bed_9e768cd8d4"
    },
    "footprint_world": {
     "x": [
