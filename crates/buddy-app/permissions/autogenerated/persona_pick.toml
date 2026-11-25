@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-persona-pick"
+description = "Enables the persona_pick command without any pre-configured scope."
+commands.allow = ["persona_pick"]
+
+[[permission]]
+identifier = "deny-persona-pick"
+description = "Denies the persona_pick command without any pre-configured scope."
+commands.deny = ["persona_pick"]

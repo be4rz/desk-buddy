@@ -125,6 +125,7 @@ fn main() -> ExitCode {
         providers,
         settings: json!({}),
         body: None,
+        persona: None,
     };
     let _ = std::fs::create_dir_all(&spec.home);
     let (tx, rx) = mpsc::channel::<MascotEvent>();

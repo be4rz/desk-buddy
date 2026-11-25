@@ -36,6 +36,9 @@ pub struct PackFile {
     pub idle_pool: Vec<PoolEntry>,
     #[serde(default)]
     pub memory: Memory,
+    /// `"persona"`: the characters a person can pick (optional; a pack without it has no persona).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persona: Option<crate::persona::PersonaFile>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]

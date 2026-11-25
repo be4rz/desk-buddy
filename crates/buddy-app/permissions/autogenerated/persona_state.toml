@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-persona-state"
+description = "Enables the persona_state command without any pre-configured scope."
+commands.allow = ["persona_state"]
+
+[[permission]]
+identifier = "deny-persona-state"
+description = "Denies the persona_state command without any pre-configured scope."
+commands.deny = ["persona_state"]

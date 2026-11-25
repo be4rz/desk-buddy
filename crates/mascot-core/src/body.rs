@@ -322,6 +322,13 @@ pub fn emotes(pack: &PackMeta) -> Vec<EmoteInfo> {
 /// The agent's "Your body" prompt section (design `#prompt-section`); `None` when the pack
 /// has no activities and no emotes that can play.
 pub fn prompt_text(pack: &PackMeta) -> Option<String> {
+    prompt_text_with(pack, false)
+}
+
+/// `prompt_text`; `persona_rate`: a "Who you are" section sets how often to gesture (its
+/// "Gestures:" line, which changes live with the person's slider), so this section only caps it at
+/// one per reply and never names a rate that could go stale.
+pub fn prompt_text_with(pack: &PackMeta, persona_rate: bool) -> Option<String> {
     let b = &pack.body;
     let acts = shown_activities(pack);
     let emos = shown_emotes(pack);
@@ -374,7 +381,11 @@ pub fn prompt_text(pack: &PackMeta) -> Option<String> {
         ));
     }
     if !emos.is_empty() {
-        s.push_str("- Use at most one emote per reply, only when it matches the mood. Most short\n  replies need none.\n");
+        s.push_str(if persona_rate {
+            "- Use at most one emote per reply, only when it matches the mood; \"Who you are\" says\n  how often.\n"
+        } else {
+            "- Use at most one emote per reply, only when it matches the mood. Most short\n  replies need none.\n"
+        });
     }
     if acts.iter().any(|(_, a)| a.kind == ActivityKind::Work) {
         s.push_str("- You go to the desk by yourself during long jobs; do not call it for that.\n");

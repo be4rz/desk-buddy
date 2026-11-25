@@ -13,6 +13,7 @@ import { setCurrentModel, setModels } from "./current.ts";
 import { executionEnv } from "./env.ts";
 import { compactionSettings } from "./ext/context/index.ts";
 import { bindRoot, command, EVENT_KIND, INPUT_KIND, recordEvent } from "./ext/core/index.ts";
+import { PERSONA_MAX_CHARS, setPersona } from "./ext/core/prompt.ts";
 import { currentTrigger, gate, markAsked, setTrigger, type Trigger } from "./ext/gate/index.ts";
 import { addFakeOAuth, rustInteraction } from "./ext/auth/index.ts";
 import { bindJobs } from "./ext/jobs/index.ts";
@@ -243,6 +244,14 @@ export async function host(init: Init, input: AsyncIterator<Record<string, unkno
         // `look` comes and goes with the model's image input.
         modelTools = modelToolsFor(model);
         await conv.configure({ model: piModel(model), modelTools }, ctx);
+        return {};
+      }
+      case "set_persona": {
+        // The person picked another personality (or changed their words): the section's text changes now, and
+        // the next model request carries it. A missing or blank text removes the section.
+        if (cmd.persona != null && typeof cmd.persona !== "string") throw new CmdError("bad_request", "set_persona needs a persona text or null.");
+        if (typeof cmd.persona === "string" && cmd.persona.length > PERSONA_MAX_CHARS) throw new CmdError("bad_request", `The persona text is over ${PERSONA_MAX_CHARS} characters.`);
+        setPersona(cmd.persona as string | null | undefined);
         return {};
       }
       case "models": {

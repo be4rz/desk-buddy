@@ -6,6 +6,7 @@ pub mod attention;
 pub mod body;
 pub mod brain;
 pub mod pack;
+pub mod persona;
 pub mod reaction;
 pub mod reflex;
 pub mod replay;
@@ -19,6 +20,7 @@ pub use brain::{
     bubble_ms, AppCategory, Brain, BrainConfig, DndAction, EyeState, FrontApp, Intent, LocalTime, MouthState, NowPlaying, Placement, Poke,
     Senses, Show, TraceLine, Visibility, WinRect,
 };
+pub use persona::{Effective as EffectivePersona, PersonaMeta};
 pub use pack::{load, load_report, ActivityMeta, BodyMeta, EmoteAct, EmoteMeta, ClipMeta, Dir, FaceMeta, Handoff, Ori, PackError, PackMeta, QuietPool, Role, SetFace, SetMeta, StationMeta, StripRef, Warmup};
 pub use reaction::Cursor;
 pub use reflex::Reflexes;

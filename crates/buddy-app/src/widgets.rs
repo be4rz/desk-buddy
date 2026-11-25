@@ -474,6 +474,26 @@ mod acl {
         assert_eq!(call(&app, "widget-browser", &format!("{ORIGIN}/browser/index.html"), "widget_ready"), Ok(()));
     }
 
+    /// Only the Personality window reaches the persona commands (the agent's pages and the bubble never).
+    #[test]
+    fn only_the_persona_window_gets_the_persona_commands() {
+        let app = mock_builder().invoke_handler(|i| {
+            i.resolver.resolve(());
+            true
+        }).build(tauri::generate_context!(test = true)).unwrap();
+        let local = "tauri://localhost/persona/index.html";
+        for cmd in ["persona_state", "persona_set", "persona_pick", "persona_reset", "persona_open_studio", "persona_close"] {
+            assert_eq!(call(&app, "persona", local, cmd), Ok(()), "{cmd}");
+            for other in ["bubble", "signin", "studio", "widget-media"] {
+                assert!(call(&app, other, local, cmd).unwrap_err().contains("not allowed"), "{cmd} from {other}");
+            }
+        }
+        // and the persona window gets nothing else
+        for cmd in ["signin_state", "card_answer", "studio_save", "widget_ready"] {
+            assert!(call(&app, "persona", local, cmd).unwrap_err().contains("not allowed"), "{cmd}");
+        }
+    }
+
     /// Every `"word"` in `text`.
     fn quoted(text: &str) -> std::collections::BTreeSet<String> {
         text.split('"').skip(1).step_by(2).map(str::to_string).collect()
@@ -486,7 +506,7 @@ mod acl {
     fn build_rs_capabilities_and_the_handler_list_the_same_commands() {
         let build: std::collections::BTreeSet<String> = include_str!("../build.rs").lines().filter(|l| l.starts_with("const ")).flat_map(quoted).collect();
         let mut granted = std::collections::BTreeSet::new();
-        for cap in [include_str!("../capabilities/bubble.json"), include_str!("../capabilities/signin.json"), include_str!("../capabilities/studio.json")] {
+        for cap in [include_str!("../capabilities/bubble.json"), include_str!("../capabilities/signin.json"), include_str!("../capabilities/persona.json"), include_str!("../capabilities/studio.json")] {
             let v: serde_json::Value = serde_json::from_str(cap).unwrap();
             for p in v["permissions"].as_array().unwrap().iter().filter_map(|p| p.as_str()?.strip_prefix("allow-")) {
                 assert!(granted.insert(p.replace('-', "_")), "{p} granted twice");
@@ -505,6 +525,6 @@ mod acl {
         let studio: std::collections::BTreeSet<String> = build.iter().filter(|c| c.starts_with("studio_")).cloned().collect();
         assert_eq!(studio.len(), 22);
         assert_eq!(studio, lists[1], "`--studio` registers exactly the studio commands");
-        assert_eq!(build.len(), 44);
+        assert_eq!(build.len(), 50);
     }
 }

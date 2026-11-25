@@ -91,6 +91,8 @@ pub struct Config {
     pub fake_oauth: Option<String>,
     /// The prompt's "Your body" section (`mascot_core::body::prompt_text`); `None` adds none.
     pub body: Option<String>,
+    /// The prompt's "Who you are" section (`mascot_core::persona::prompt_text`); `None` adds none.
+    pub persona: Option<String>,
 }
 
 /// The fake provider at `url` (no `/v1`).
@@ -121,7 +123,7 @@ impl Config {
         let fake_url = std::env::var("BUDDY_FAKE_MODEL").ok().filter(|u| !u.trim().is_empty());
         #[cfg(not(debug_assertions))]
         let fake_url: Option<String> = None;
-        let mut c = Config { store: Box::new(KeychainStore::new()), session: vec![], providers: vec![], fake: false, fake_oauth: None, body: None };
+        let mut c = Config { store: Box::new(KeychainStore::new()), session: vec![], providers: vec![], fake: false, fake_oauth: None, body: None, persona: None };
         #[cfg(debug_assertions)]
         {
             match std::env::var("BUDDY_CRED_STORE").ok().as_deref() {
@@ -151,7 +153,7 @@ impl Config {
     /// Tests: an in-memory store and no dev hooks.
     #[cfg(test)]
     pub fn memory(store: bridge::store::MemoryStore) -> Config {
-        Config { store: Box::new(store), session: vec![], providers: vec![], fake: false, fake_oauth: None, body: None }
+        Config { store: Box::new(store), session: vec![], providers: vec![], fake: false, fake_oauth: None, body: None, persona: None }
     }
 }
 
@@ -339,8 +341,14 @@ impl Harness {
     /// the inbox. An `Err` is the host API's (the caller shows it in the tray).
     pub fn start(home: &Path, wanted: &settings::Model) -> std::io::Result<Arc<Harness>> {
         let mut config = Config::from_env();
-        // the pack's "Your body" prompt section (runs on the main thread, after driver::start)
-        crate::driver::with_app(|a| config.body = mascot_core::body::prompt_text(&a.pack));
+        // the pack's "Your body" and "Who you are" prompt sections with the person's layer (`settings.persona`),
+        // run on the main thread, after driver::start. A later change swaps "Who you are" in place
+        // (`persona::send_prompt`); the body names no gesture rate when a persona sets it, so it never goes stale.
+        crate::driver::with_app(|a| {
+            let user = &a.settings.persona.user;
+            config.body = mascot_core::body::prompt_text_with(&a.pack, a.pack.persona.is_some());
+            config.persona = mascot_core::persona::prompt_text(&a.pack, user);
+        });
         let h = Harness::build(home, wanted, config, sidecar_bin())?;
         let _ = HARNESS.set(h.clone());
         h.clone().launch();
@@ -360,7 +368,7 @@ impl Harness {
             post(Inbox::Call(Box::new(move |a| a.policy_changed(&view))));
         }));
         let _ = pslot.set(Arc::downgrade(&policy));
-        let Config { store, session, providers, fake, fake_oauth, body } = config;
+        let Config { store, session, providers, fake, fake_oauth, body, persona } = config;
         let creds = Arc::new(Credentials::with_store(store));
         for (p, k) in &session {
             creds.set_api_key(p, k);
@@ -395,6 +403,7 @@ impl Harness {
             providers,
             settings: agent_settings,
             body,
+            persona,
         };
         let answer = auto_answer();
         let me: Arc<OnceLock<Weak<Harness>>> = Arc::default();

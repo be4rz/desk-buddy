@@ -363,6 +363,65 @@ fn create_edit_and_delete_a_user_mascot() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
+/// The personality tab (AC8): the page's starter loads, and a save that would break the
+/// persona is refused, dry or real, with nothing written.
+#[test]
+fn the_persona_tab_saves_through_the_checked_path_and_a_breaking_save_writes_nothing() {
+    let d = tmp("persona");
+    let (mut desk, lib, _, _) = library_desk(&d);
+    desk.handle("studio_create", &json!({ "from": "copy", "source": "blob", "name": "Blob two" })).unwrap();
+    let pj = lib.join("blob-two/pack.json");
+    let e = desk.handle("studio_edit", &Value::Null).unwrap();
+    // the state the tab reads: pack.json's text, and the emotes a gesture may name (the loader's
+    // list: this pack has no `body` block, so the built-in ones that can play)
+    let doc: Value = serde_json::from_str(e["text"].as_str().unwrap()).unwrap();
+    assert!(doc.get("persona").is_none() && doc.get("body").is_none());
+    assert!(e["emotes"].as_object().is_some_and(|o| !o.is_empty() && !o.contains_key("juggle")), "{e}");
+    for (_, v) in e["emotes"].as_object().unwrap() {
+        assert!(v["about"].is_string() && v["group"].is_string(), "{v}");
+    }
+    // "+ Add a personality": the page's starter (one preset named after the mascot, no gestures)
+    let starter = json!({
+        "default": "blob_two",
+        "presets": { "blob_two": {
+            "name": "Blob two", "tagline": "friendly helper",
+            "identity": "A small desk buddy who keeps you company while you work.",
+            "voice": ["Short and friendly: a sentence or two.", "Plain words, no jargon.", "Honest: says so when something looks wrong."],
+            "likes": [],
+            "examples": { "greeting": "Hi, {you}! I'm here if you need me.", "done": "Done. It works now.", "error": "That didn't work. Want me to look into it?", "checkin": "You've been at it a while. Maybe a short break?", "disagree": "I'd hold off on that: it could break something. Want a safer way?" },
+            "idle_lines": { "morning": ["Morning!"], "evening": ["Long day. Nearly there."], "back": ["Welcome back."], "long_session": ["Still here, still cheering you on."] },
+            "temperament": doc.get("temperament").cloned().unwrap_or(json!({})), "style": { "playfulness": 0.5, "emotes": 0.5 }
+        } }
+    });
+    let put = |path: Value, v: Value| json!({ "op": "set", "path": path, "json": v.to_string() });
+    let dry = desk.handle("studio_save", &json!({ "sha": e["sha"], "dry": true, "ops": [put(json!(["persona"]), starter.clone())] })).unwrap();
+    assert_eq!(dry["ok"], true);
+    assert!(!std::fs::read_to_string(&pj).unwrap().contains("persona"), "a dry run writes nothing");
+    let e = desk.handle("studio_save", &json!({ "sha": e["sha"], "ops": [put(json!(["persona"]), starter)] })).unwrap();
+    let saved = std::fs::read_to_string(&pj).unwrap();
+    assert!(saved.contains("blob_two"));
+    assert!(::studio::package::check(&lib.join("blob-two")).is_empty());
+    assert!(desk.handle("studio_state", &Value::Null).unwrap()["pack"]["id"] == "blob-two");
+    // each breaking edit: refused dry and real with the loader's words, the file untouched
+    let bad = [
+        (put(json!(["persona", "presets", "blob_two", "voice"]), json!(["a", "b"])), "2 rules, it needs 3 to 6"),
+        (put(json!(["persona", "presets", "blob_two", "gestures"]), json!({ "greeting": "juggle" })), "is not an emote in this pack's body"),
+        (put(json!(["persona", "default"]), json!("blob_too")), "did you mean \"blob_two\""),
+        (put(json!(["persona", "presets", "blob_two", "identity"]), json!("x".repeat(121))), "limit is 120"),
+    ];
+    for (op, why) in bad {
+        for dry in [true, false] {
+            let err = desk.handle("studio_save", &json!({ "sha": e["sha"], "dry": dry, "ops": [op.clone()] })).unwrap_err();
+            assert!(err.contains(why), "dry={dry}: {err}");
+            assert_eq!(std::fs::read_to_string(&pj).unwrap(), saved, "dry={dry}: nothing written");
+        }
+    }
+    // taking the personality away is allowed
+    let e = desk.handle("studio_save", &json!({ "sha": e["sha"], "ops": [{ "op": "remove", "path": ["persona"] }] })).unwrap();
+    assert!(!e["text"].as_str().unwrap().contains("persona"));
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 #[test]
 fn a_library_folder_whose_name_is_not_an_id_is_read_only() {
     let d = tmp("badname");

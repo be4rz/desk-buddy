@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 pub mod pack;
+pub mod persona;
 
 /// Bumped on any change a consumer must know about.
 pub const VERSION: u32 = 3;

@@ -59,6 +59,8 @@ export type Init = {
   settings: Settings;
   /** The "Your body" prompt section the app renders from the pack; absent → no section. */
   body?: string;
+  /** The "Who you are" prompt section (`mascot_core::persona::prompt_text`); absent → no section. `set_persona` changes it. */
+  persona?: string;
 };
 
 export type Settings = {

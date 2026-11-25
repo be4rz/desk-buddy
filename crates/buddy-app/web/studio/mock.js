@@ -5,6 +5,8 @@
 //   `library` (= `empty`, nothing open: #studio-library), `edit` (#studio-edit, Details of "Blob"),
 //   `edit-clips` (= `import`: #studio-import), `edit-behaviors`, `edit-intents`, `edit-idle`, `edit-package`,
 //   `edit-advanced`, `edit-error` (#studio-edit-error: a misspelt clip in Advanced, refused),
+//   `edit-persona` (Personality of your customized bear: four presets), `edit-persona-error` (the same with
+//   Biscuit's "Done" line cleared: the edit doesn't load), `edit-persona-empty` (Blob: no personality yet),
 //   `new` (#studio-new), `customize` (#studio-customize), `delete` (#studio-delete), `restore` (#studio-restore).
 // Inside the app (`__TAURI__` present) or without ?mock it does nothing. Frames are flat grey
 // placeholders labelled "mock" (layout only; real frames come from the renderer). Commands the page
@@ -32,6 +34,59 @@
   const text = (o) => JSON.stringify(o, null, 2) + "\n";
   const hash = (s) => { let h = 5381; for (let i = 0; i < s.length; i++) h = (h * 33 + s.charCodeAt(i)) >>> 0; return h.toString(16).padStart(8, "0"); };
 
+  // the bear's body emotes the personality can use (a slice of mascots/bear/pack.json `body.emotes`)
+  const EMOTES = {
+    wave: { intent: "wave", about: "a happy little wave", group: "gesture" }, nod: { intent: "nod", about: "a small yes", group: "gesture" },
+    shake: { intent: "shake", about: "a sad little no", group: "gesture" }, jump: { intent: "jump", about: "a bounce of joy", group: "gesture" },
+    greet: { intent: "greet", about: "a big two-paw hello", group: "gesture" }, stretch: { intent: "stretch", about: "a big stretch", group: "gesture" },
+    shrug: { plays: "shrug", about: "a shrug: who knows", group: "gesture" }, thumbs_up: { plays: "thumbs_up", about: "a paw up: well done", group: "gesture" },
+    clap: { plays: "clap", about: "clap its paws", group: "gesture" }, shy_hide: { plays: "shy_hide", about: "hide its face, shy", group: "gesture" },
+    proud: { plays: "proud", about: "puff its chest, proud", group: "gesture" }, head_scratch: { plays: "head_scratch", about: "scratch its head, confused", group: "gesture" },
+    ear_twitch: { plays: "ear_twitch", group: "fidget" }, yawn: { plays: "yawn", group: "fidget" },
+  };
+  // the four bear presets (requirement: Biscuit is the default); {you} and {catchphrase} are filled in by the app
+  const PERSONA = {
+    default: "biscuit",
+    presets: {
+      biscuit: {
+        name: "Biscuit", tagline: "cheeky sidekick", identity: "A small polar bear who sits on your desk and is fairly sure it runs the place.",
+        voice: ["Dry one-liners. Tease kindly, never mean.", "Honest to a fault: say so when they're wrong.", "Warm underneath; it shows when things go badly.", "Never joke about real problems."],
+        likes: ["being right", "warm laptops", "biscuits, obviously"],
+        catchphrase: { text: "told you so", when: "only when it truly called it" },
+        gestures: { greeting: "wave", done: "thumbs_up", error: "head_scratch", checkin: "stretch", disagree: "shrug" },
+        examples: { greeting: "Look who's back, {you}. I kept your seat warm. Mostly by sitting on it.", done: "Fixed. It was the cache. {catchphrase}.", error: "That broke: the build can't find utils.ts. Probably the import path. Want me to fix it?", checkin: "Two hours straight. Water, stretch, then back to glory.", disagree: "I'd skip that. Deleting the lockfile hides the bug, it doesn't fix it. Boring fix?" },
+        idle_lines: { morning: ["Morning. I've been up for hours. Fine, minutes."], evening: ["Still going? Bold."], back: ["Oh, you're back. I definitely didn't miss you."], long_session: ["Three hours. I'd stretch, if I were you.", "Your chair called. It wants a break."] },
+        temperament: { energy: 0.6, curiosity: 0.6, shyness: 0.1, chattiness: 0.5, sleepiness: 0.4 }, style: { playfulness: 0.7, emotes: 0.5 },
+      },
+      mochi: {
+        name: "Mochi", tagline: "cozy homebody", identity: "A soft, unhurried polar bear who'd like everyone to have a snack.",
+        voice: ["Soft and unhurried.", "Gentle encouragement, never pressure.", "Tea, snacks or naps come up now and then.", "Plain about errors: what broke, what's next."],
+        likes: ["tea", "snacks", "naps", "blankets"], catchphrase: { text: "all cozy!", when: "when something is done and settled" },
+        gestures: { greeting: "wave", done: "clap", error: "head_scratch", checkin: "stretch", disagree: "shake" },
+        examples: { greeting: "Hi, {you}! I made tea. Pretend tea. What are we doing today?", done: "All done, and {catchphrase} The tests are green.", error: "Hmm, that didn't work: the build can't find utils.ts. Maybe the import path? I can check.", checkin: "Little break? The tea's still warm.", disagree: "Mm, I'm not sure. Skipping the tests might bite us later. Slower is fine." },
+        idle_lines: { morning: ["Morning! Tea first?"], evening: ["Nearly blanket time."], back: ["Welcome back! I kept the tea warm."], long_session: ["Snack break? I won't tell."] },
+        temperament: { energy: 0.4, curiosity: 0.5, shyness: 0.3, chattiness: 0.4, sleepiness: 0.7 }, style: { playfulness: 0.4, emotes: 0.5 },
+      },
+      pip: {
+        name: "Pip", tagline: "curious explorer", identity: "A curious little polar bear who wants to see how everything works.",
+        voice: ["Eager and quick.", "An \"ooh\" now and then, never every line.", "One good question, not five.", "Facts first, wonder second."],
+        likes: ["maps", "new tools", "how things work"], catchphrase: { text: "ooh, what's this?", when: "when something new shows up" },
+        gestures: { greeting: "greet", done: "jump", error: "head_scratch", checkin: "nod", disagree: "shrug" },
+        examples: { greeting: "Hi, {you}! New branch? {catchphrase}", done: "Done! All green. What's next on the map?", error: "It broke: the build can't find utils.ts. Did a file move? I can trace it.", checkin: "Ooh, that's getting big. Want a second pair of eyes?", disagree: "Wait, if we skip the migration, old data breaks. Try it on a copy first?" },
+        idle_lines: { morning: ["Morning! What are we building?"], evening: ["Evening already? Time flies."], back: ["You're back! Find anything cool?"], long_session: ["Long dive. Come up for air?"] },
+        temperament: { energy: 0.7, curiosity: 0.9, shyness: 0.2, chattiness: 0.6, sleepiness: 0.3 }, style: { playfulness: 0.6, emotes: 0.7 },
+      },
+      tofu: {
+        name: "Tofu", tagline: "shy, earnest helper", identity: "A shy, earnest polar bear who tries very hard to help.",
+        voice: ["Soft: \"um, I think…\" now and then.", "Short, careful sentences.", "Clear and direct when it matters.", "Proud of small wins."],
+        likes: ["quiet mornings", "tidy folders", "a job well done"], catchphrase: { text: "I did my best!", when: "after finishing something hard" },
+        gestures: { greeting: "shy_hide", done: "proud", error: "head_scratch", checkin: "nod", disagree: "shake" },
+        examples: { greeting: "Oh! Hi, {you}. Um, I'm here if you need me.", done: "Um, it's done. The tests pass. {catchphrase}", error: "The build failed: it can't find utils.ts. I think the import path is wrong. Should I fix it?", checkin: "Um, sorry to bother you. Maybe a stretch?", disagree: "Um, I don't think that's safe. A force-push would erase your teammate's commits." },
+        idle_lines: { morning: ["Um, good morning."], evening: ["It's getting late. Um, just saying."], back: ["Oh! You're back. Hi."], long_session: ["Sorry, um, maybe a break soon?"] },
+        temperament: { energy: 0.4, curiosity: 0.5, shyness: 0.7, chattiness: 0.3, sleepiness: 0.5 }, style: { playfulness: 0.3, emotes: 0.4 },
+      },
+    },
+  };
   const bearDoc = {
     pack_version: 1, id: "bear", name: "Polar bear", art_root: ".", palettes: ["../../experiments/bear-proto/palette-bear.json"],
     sources: [{ kind: "stage_a", path: "anim/anim.json" }], temperament: TEMPER,
@@ -39,6 +94,7 @@
     behaviors: { rest: { seq: [{ clip: "idle", loops: [1, 2] }] }, hold: { seq: [{ clip: "idle", loops: "hold" }] }, think: { seq: [{ clip: "think", loops: "hold" }] }, wander: { seq: [{ clip: "walk", loops: [2, 4] }], turn: "random" }, celebrate: { seq: [{ clip: "happy" }] }, nap: { set: "bed", seq: [{ clip: "nap", loops: { for_s: [20, 90] } }] } },
     intents: { idle: ["rest"], think: ["think", "hold"], talk: ["hold"], celebrate: ["celebrate", "rest"], sleepy: ["nap", "rest"] },
     idle_pool: [{ behavior: "rest", weight: 2, cooldown_s: 0, kind: "stand" }, { behavior: "wander", weight: 3, cooldown_s: 20, traits: { energy: 1 }, kind: "move" }],
+    body: { default_for_s: 60, max_for_s: 600, activities: {}, emotes: EMOTES }, persona: PERSONA,
   };
   const blobDoc = {
     pack_version: 1, id: "blob", name: "Blob", description: "A round little walker.", art_root: "art", palettes: [],
@@ -71,7 +127,11 @@
   const reloadErr = "pack mascots/bear: anim_c/anim_c.json: clip “happy” has 18 frames in SE but 20 in S";
 
   const base = state.replace(/^(edit|import)(-.*)?$/, "edit").replace(/^(empty)$/, "library");
+  const editBtn = '#studio .mode [data-go="edit"]';
   const setup = {
+    "edit-persona": { open: "bear", custom: true, click: editBtn }, "edit-persona-error": { open: "bear", custom: true, click: editBtn },
+    "edit-persona-empty": { open: "blob", click: editBtn },
+  }[state] || {
     1: { open: "bear" }, studio: { open: "bear" }, "lint-error": { open: "bear", error: reloadErr, lint: lintBad, tab: "lint" },
     customized: { open: "bear", custom: true }, library: { open: null }, edit: { open: "blob", click: '#studio .mode [data-go="edit"]' },
     new: { open: null, click: ".card.new" }, customize: { open: "bear", click: "#notice-btn" },
@@ -106,7 +166,10 @@
     const p = packs[open];
     if (!p) throw "no pack open";
     const w = p.kind === "yours" || p.kind === "customized";
-    return { id: open, kind: p.kind, writable: w, text: p.text, sha: hash(p.text), groups: p.groups, findings: [], files: p.files, bytes: p.bytes, folder: open, intents: INTENTS };
+    // the backend sends the emotes a gesture may name: name → {about, group}
+    let emotes = {};
+    try { emotes = (JSON.parse(p.text).body || {}).emotes || {}; } catch (_) { /* a broken text has none */ }
+    return { id: open, kind: p.kind, writable: w, text: p.text, sha: hash(p.text), emotes: Object.fromEntries(Object.entries(emotes).map(([k, e]) => [k, { about: e.about || "", group: e.group || "other" }])), groups: p.groups, findings: [], files: p.files, bytes: p.bytes, folder: open, intents: INTENTS };
   };
   // the backend's checks, roughly: JSON, the id, every step's clip
   function check(id, t) {
@@ -125,7 +188,37 @@
     }
     for (const [k, v] of Object.entries(d.intents || {})) for (const b of v) if (!(d.behaviors || {})[b]) throw "intents." + k + ": no behavior “" + b + "”";
     for (const e of d.idle_pool || []) if (!(d.behaviors || {})[e.behavior]) throw "idle_pool: no behavior “" + e.behavior + "”";
+    if (d.persona) checkPersona(d.persona, (d.body && d.body.emotes) || {});
     return d;
+  }
+  // the loader's persona rules (mascot_core::persona): caps, 3–6 voice rules, every situation has a line,
+  // gestures name an emote in `body`, the default names a preset
+  const PCAP = { name: 24, tagline: 32, identity: 120, rule: 80, like: 32, catchphrase: 40, when: 80, example: 160, line: 100 };
+  function checkPersona(P, emotes) {
+    const ids = Object.keys(P.presets || {});
+    if (!ids.length) throw "persona.presets: empty (add a preset, or remove the persona)";
+    if (!ids.includes(P.default)) throw "persona.default: no preset “" + P.default + "”";
+    const cap = (at, v, n) => { if (typeof v === "string" && [...v].length > n) throw at + ": " + [...v].length + " characters, the limit is " + n; };
+    for (const [id, p] of Object.entries(P.presets)) {
+      const at = "persona.presets." + id;
+      if (!/^[a-z][a-z0-9_]{0,23}$/.test(id)) throw at + ": ids use lowercase letters, digits and _";
+      if (!(p.name || "").trim()) throw at + ".name: empty";
+      cap(at + ".name", p.name, PCAP.name); cap(at + ".tagline", p.tagline, PCAP.tagline); cap(at + ".identity", p.identity, PCAP.identity);
+      if (!(p.identity || "").trim()) throw at + ".identity: empty (one line: who it is)";
+      const v = p.voice || [];
+      if (v.length < 3 || v.length > 6) throw at + ".voice: " + v.length + " rules, it needs 3 to 6";
+      v.forEach((r, i) => { if (!r.trim()) throw at + ".voice[" + i + "]: empty"; cap(at + ".voice[" + i + "]", r, PCAP.rule); });
+      for (const k of ["greeting", "done", "error", "checkin", "disagree"]) {
+        const t = (p.examples || {})[k];
+        if (!t || !t.trim()) throw at + ".examples." + k + ": empty (every situation needs a line)";
+        cap(at + ".examples." + k, t, PCAP.example);
+      }
+      for (const [k, e] of Object.entries(p.gestures || {})) {
+        if (!emotes[e]) { const near = Object.keys(emotes).find((x) => x.startsWith(e.slice(0, 4))); throw at + ".gestures." + k + ": no emote “" + e + "” in body" + (near ? " (did you mean " + near + "?)" : ""); }
+      }
+      for (const [k, ls] of Object.entries(p.idle_lines || {})) (ls || []).forEach((l, i) => { if (!l.trim()) throw at + ".idle_lines." + k + "[" + i + "]: empty"; cap(at + ".idle_lines." + k + "[" + i + "]", l, PCAP.line); });
+      if (p.catchphrase) { cap(at + ".catchphrase.text", p.catchphrase.text, PCAP.catchphrase); cap(at + ".catchphrase.when", p.catchphrase.when, PCAP.when); }
+    }
   }
   function applyOps(t, ops) {
     const d = JSON.parse(t);
@@ -266,11 +359,17 @@
   const click = (sel) => { const e = document.querySelector(sel); if (e) e.click(); return !!e; };
   if (setup.tab) later(() => click('[data-tab="' + setup.tab + '"]'));
   if (setup.click) later(function retry(n) { if (!click(setup.click) && (n || 0) < 20) setTimeout(() => retry((n || 0) + 1), 50); }, 150);
-  const sec = { "edit-clips": "clips", import: "clips", "edit-behaviors": "behaviors", "edit-intents": "intents", "edit-idle": "idle", "edit-package": "package", "edit-advanced": "advanced", "edit-error": "advanced" }[state];
+  const sec = { "edit-clips": "clips", import: "clips", "edit-behaviors": "behaviors", "edit-intents": "intents", "edit-idle": "idle", "edit-package": "package", "edit-advanced": "advanced", "edit-error": "advanced", "edit-persona": "persona", "edit-persona-error": "persona", "edit-persona-empty": "persona" }[state];
   if (sec) later(() => click('#ed-nav a[data-sec="' + sec + '"]'), 300);
   if (state === "edit-error") later(() => {
     const raw = document.getElementById("raw");
     raw.value = raw.value.replace('"blob_walk"', '"blob_wak"');
     raw.dispatchEvent(new Event("input"));
   }, 450);
+  if (state === "edit-persona-error") later(() => {
+    const ta = document.querySelector('[data-pfield="examples.done"]');
+    if (!ta) return;
+    ta.value = "";
+    ta.dispatchEvent(new Event("input"));
+  }, 600);
 })();

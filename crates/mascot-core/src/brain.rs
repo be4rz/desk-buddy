@@ -768,6 +768,12 @@ impl Brain {
         !self.dnd && !self.quiet
     }
 
+    /// Whether the bear is on screen and moving (`Shown`), hidden by do-not-disturb (`Hidden`) or held
+    /// still by it (`Still`). The tray's own Hide is separate (`set_user_hidden`).
+    pub fn visibility(&self) -> Visibility {
+        self.vis
+    }
+
     /// Tray "When busy: Hide / Hold still" (additive to §4.3).
     pub fn set_dnd_action(&mut self, a: DndAction, now_ms: u64) {
         self.advance(now_ms);

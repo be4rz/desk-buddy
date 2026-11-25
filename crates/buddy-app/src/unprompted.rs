@@ -2,14 +2,16 @@
 //! sample runs through its own `Reflexes`; only `back_from_idle`, `morning` and `long_work`
 //! become candidates. A candidate is debounced (the same rule at most once per 30 min, any
 //! sense turn ≥ 5 min after the last), held back without spending budget (and offered again on
-//! the next sample) while the person is busy with the bubble or there's no running model, and then has to pass `attention::Budget`
+//! the next sample, unless a canned idle line spoke for that moment meanwhile: `spoken_for`) while the person is busy with
+//! the bubble or there's no running model, and then has to pass `attention::Budget`
 //! (4 an hour, none in DND or quiet hours). What the agent gets is coarse on purpose: the
 //! rule name and the time of day, never an app name or a window title.
 
 use std::collections::HashMap;
 
+use mascot_core::persona::{band, Band};
 use mascot_core::reflex::{BACK_FROM_IDLE, LONG_WORK, MORNING};
-use mascot_core::{Budget, LocalTime, Reflexes, Senses};
+use mascot_core::{Budget, EffectivePersona, LocalTime, Reflexes, Senses};
 
 pub const PER_HOUR: u32 = 4;
 /// The same rule again only after this long.
@@ -26,6 +28,46 @@ pub struct Ready {
     pub can_turn: bool,
 }
 
+/// The persona's voice for a check-in: who is speaking, a short
+/// gist of how, and how chatty. Never the person's own notes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Voice {
+    pub name: String,
+    pub tagline: String,
+    pub gist: String,
+    pub chattiness: f64,
+}
+
+/// The longest voice gist (characters).
+const GIST_MAX: usize = 60;
+
+impl Voice {
+    /// The voice of a persona in force: its name and tagline, the first sentence of its first voice
+    /// rule, and its effective chattiness.
+    pub fn of(e: &EffectivePersona) -> Voice {
+        let rule = e.voice.first().map(|v| e.fill(v)).unwrap_or_default();
+        let first = rule.split(". ").next().unwrap_or("");
+        let gist: String = first.trim().trim_end_matches('.').chars().filter(|c| !c.is_control()).take(GIST_MAX).collect();
+        Voice { name: e.name.clone(), tagline: e.tagline.clone(), gist: gist.trim().to_string(), chattiness: e.temperament.chattiness }
+    }
+
+    /// How long the line may be, by chattiness band (the window's Brief / Chatty / Talkative).
+    fn directive(&self) -> &'static str {
+        match band(self.chattiness) {
+            Band::Low => "one short sentence at most, and stay quiet unless it really helps",
+            Band::Mid => "one short line",
+            Band::High => "a short line or two, and speak up when you notice something",
+        }
+    }
+
+    /// `Reply in Biscuit's voice (cheeky sidekick; Dry one-liners): one short line, or nothing at all.`
+    fn instruction(&self) -> String {
+        let traits = [self.tagline.as_str(), self.gist.as_str()].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join("; ");
+        let traits = if traits.is_empty() { String::new() } else { format!(" ({traits})") };
+        format!("Reply in {}'s voice{traits}: {}, or nothing at all.", self.name, self.directive())
+    }
+}
+
 pub struct Unprompted {
     reflex: Reflexes,
     budget: Budget,
@@ -33,6 +75,10 @@ pub struct Unprompted {
     last_turn: Option<u64>,
     /// The candidate held back while busy or without a model (logged once).
     waiting: Option<&'static str>,
+    /// The rule whose model turn the last `sample` started (`None` when it started none).
+    started: Option<&'static str>,
+    /// The persona's voice for the check-in text (`None`: the plain text of before personas).
+    voice: Option<Voice>,
 }
 
 impl Default for Unprompted {
@@ -43,12 +89,13 @@ impl Default for Unprompted {
 
 impl Unprompted {
     pub fn new(per_hour: u32) -> Unprompted {
-        Unprompted { reflex: Reflexes::new(), budget: Budget::new(per_hour), last_rule: HashMap::new(), last_turn: None, waiting: None }
+        Unprompted { reflex: Reflexes::new(), budget: Budget::new(per_hour), last_rule: HashMap::new(), last_turn: None, waiting: None, started: None, voice: None }
     }
 
     /// One gated sample. `allowed`: `Brain::unprompted_allowed()`. Returns the summary to send
     /// as a sense turn, when one should start now (its budget is already taken).
     pub fn sample(&mut self, s: &Senses, now: u64, allowed: bool, ready: Ready) -> Option<String> {
+        self.started = None;
         // free = true: the brain's own reflex shows the bear's reaction; this copy only
         // decides about the model turn (app_switch never fires: chance is always false)
         let before = self.reflex.clone();
@@ -82,7 +129,27 @@ impl Unprompted {
         self.last_rule.insert(rule, now);
         self.last_turn = Some(now);
         eprintln!("[buddy] unprompted {rule}: turn ({}/{})", self.budget.used(now), self.budget.per_hour());
-        Some(summary(rule, s.local))
+        self.started = Some(rule);
+        Some(summary(rule, s.local, self.voice.as_ref()))
+    }
+
+    /// A canned idle line spoke for `rule`'s moment: a check-in for it counts as said (the same-rule
+    /// debounce), so a candidate held back for want of a model is not offered again.
+    pub fn spoken_for(&mut self, rule: &'static str, now: u64) {
+        self.last_rule.insert(rule, now);
+        if self.waiting == Some(rule) {
+            self.waiting = None;
+        }
+    }
+
+    /// The rule the last `sample` started a model turn for, if it started one.
+    pub fn started(&self) -> Option<&'static str> {
+        self.started
+    }
+
+    /// The persona's voice for the next check-ins (`None`: none in this mascot).
+    pub fn set_voice(&mut self, voice: Option<Voice>) {
+        self.voice = voice;
     }
 
     pub fn used(&self, now: u64) -> u32 {
@@ -117,15 +184,20 @@ fn time_of_day(t: LocalTime) -> &'static str {
     }
 }
 
-/// The sense turn's text: the rule and the time of day only (lead condition d).
-pub fn summary(rule: &str, local: LocalTime) -> String {
+/// The sense turn's text: the rule and the time of day only (lead condition d). With a persona
+/// `voice` the closing ask is in its voice; without one the text is what it was before personas.
+pub fn summary(rule: &str, local: LocalTime, voice: Option<&Voice>) -> String {
     let what = match rule {
         BACK_FROM_IDLE => "the person is back at the computer after a break",
         MORNING => "the person's first activity this morning",
         LONG_WORK => "the person has been working for a long stretch",
         _ => "something changed",
     };
-    format!("[unprompted · {rule} · {}] {what}. Say one short, friendly line, or nothing at all.", time_of_day(local))
+    let ask = match voice {
+        Some(v) => v.instruction(),
+        None => "Say one short, friendly line, or nothing at all.".to_string(),
+    };
+    format!("[unprompted · {rule} · {}] {what}. {ask}", time_of_day(local))
 }
 
 #[cfg(test)]
@@ -236,6 +308,89 @@ mod tests {
         assert_eq!(time_of_day(LocalTime { minutes: 13 * 60, weekday: 0 }), "afternoon");
         assert_eq!(time_of_day(LocalTime { minutes: 20 * 60, weekday: 0 }), "evening");
         assert_eq!(time_of_day(LocalTime { minutes: 2 * 60, weekday: 0 }), "night");
-        assert_eq!(summary(BACK_FROM_IDLE, LocalTime { minutes: 15 * 60, weekday: 0 }), "[unprompted · back_from_idle · afternoon] the person is back at the computer after a break. Say one short, friendly line, or nothing at all.");
+        assert_eq!(summary(BACK_FROM_IDLE, LocalTime { minutes: 15 * 60, weekday: 0 }, None), "[unprompted · back_from_idle · afternoon] the person is back at the computer after a break. Say one short, friendly line, or nothing at all.");
+    }
+
+    // ---- the persona's voice ----
+
+    const BACK_TEXT: &str = "[unprompted · back_from_idle · afternoon] the person is back at the computer after a break. Say one short, friendly line, or nothing at all.";
+    const AFTERNOON: LocalTime = LocalTime { minutes: 15 * 60, weekday: 0 };
+
+    fn voice_of(user: mascot_core::persona::UserPersona) -> Voice {
+        let pack = mascot_core::pack::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../mascots/bear")).unwrap();
+        Voice::of(&mascot_core::persona::resolve(&pack, &user).unwrap())
+    }
+
+    #[test]
+    fn without_a_persona_the_check_in_text_is_byte_identical_to_before() {
+        for (rule, what) in [
+            (BACK_FROM_IDLE, "the person is back at the computer after a break"),
+            (MORNING, "the person's first activity this morning"),
+            (LONG_WORK, "the person has been working for a long stretch"),
+        ] {
+            let want = format!("[unprompted · {rule} · afternoon] {what}. Say one short, friendly line, or nothing at all.");
+            assert_eq!(summary(rule, AFTERNOON, None), want);
+        }
+        assert_eq!(summary(BACK_FROM_IDLE, AFTERNOON, None), BACK_TEXT);
+        // and a whole `Unprompted` with no voice set sends the same bytes
+        let mut u = Unprompted::new(4);
+        let sent = away_and_back(&mut u, 0, true, READY).expect("a check-in");
+        assert_eq!(sent, BACK_TEXT);
+        assert_eq!(u.started(), Some(BACK_FROM_IDLE));
+        // a voice set and then cleared (a pack switch) is back to the plain text
+        let mut u = Unprompted::new(4);
+        u.set_voice(Some(voice_of(Default::default())));
+        u.set_voice(None);
+        assert_eq!(away_and_back(&mut u, 0, true, READY).as_deref(), Some(BACK_TEXT));
+    }
+
+    #[test]
+    fn with_a_persona_the_check_in_speaks_in_its_voice() {
+        let v = voice_of(Default::default());
+        assert_eq!((v.name.as_str(), v.tagline.as_str()), ("Biscuit", "cheeky sidekick"));
+        assert_eq!(v.gist, "Dry one-liners, kind teasing");
+        let text = summary(BACK_FROM_IDLE, AFTERNOON, Some(&v));
+        assert_eq!(
+            text,
+            "[unprompted · back_from_idle · afternoon] the person is back at the computer after a break. \
+             Reply in Biscuit's voice (cheeky sidekick; Dry one-liners, kind teasing): one short line, or nothing at all."
+        );
+        assert!(!text.contains("friendly"), "the plain wording is gone: {text}");
+        // it is the same text through `sample`
+        let mut u = Unprompted::new(4);
+        u.set_voice(Some(v));
+        assert_eq!(away_and_back(&mut u, 0, true, READY), Some(text));
+    }
+
+    #[test]
+    fn the_name_and_the_chattiness_directive_follow_the_persona() {
+        let user = |c: f64, name: &str| mascot_core::persona::UserPersona { chattiness: Some(c), name: Some(name.into()), ..Default::default() };
+        let quiet = summary(MORNING, AFTERNOON, Some(&voice_of(user(0.1, "Bun"))));
+        assert!(quiet.contains("Bun's voice") && quiet.contains("one short sentence at most, and stay quiet unless it really helps") && quiet.ends_with("or nothing at all."), "{quiet}");
+        let mid = summary(MORNING, AFTERNOON, Some(&voice_of(user(0.5, "Bun"))));
+        assert!(mid.contains(": one short line, or nothing at all."), "{mid}");
+        let loud = summary(MORNING, AFTERNOON, Some(&voice_of(user(0.9, "Bun"))));
+        assert!(loud.contains("a short line or two, and speak up when you notice something"), "{loud}");
+        assert!(quiet != mid && mid != loud && quiet != loud);
+        // the person's notes never ride along
+        let notes = mascot_core::persona::UserPersona { notes: Some("secret plans".into()), ..Default::default() };
+        assert!(!summary(MORNING, AFTERNOON, Some(&voice_of(notes))).contains("secret"));
+    }
+
+    #[test]
+    fn the_budget_and_debounce_are_the_same_with_a_voice() {
+        let mut u = Unprompted::new(4);
+        u.set_voice(Some(voice_of(Default::default())));
+        let mut sent = vec![];
+        for i in 0..5u64 {
+            u.last_rule.clear();
+            sent.push(away_and_back(&mut u, i * 12 * MIN, true, READY).is_some());
+        }
+        assert_eq!(sent, [true, true, true, true, false]);
+        assert_eq!(u.used(4 * 12 * MIN + 10 * MIN + 1_000), 4);
+        // a refused sample starts nothing
+        let mut u = Unprompted::new(4);
+        assert_eq!(away_and_back(&mut u, 0, false, READY), None);
+        assert_eq!(u.started(), None);
     }
 }

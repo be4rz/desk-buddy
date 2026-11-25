@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-persona-reset"
+description = "Enables the persona_reset command without any pre-configured scope."
+commands.allow = ["persona_reset"]
+
+[[permission]]
+identifier = "deny-persona-reset"
+description = "Denies the persona_reset command without any pre-configured scope."
+commands.deny = ["persona_reset"]

@@ -382,7 +382,18 @@ impl Desk {
         let groups = package::groups(dir, &s.session.pack).unwrap_or_default();
         let findings = if kind.writable() { package::check(dir) } else { vec![] };
         let (files, bytes) = footprint(dir, kind);
+        // the emotes a persona gesture may name (the loader's list: a pack with no `body` block gets
+        // the built-in ones, and one still waiting for art counts too): name → {about, group}
+        let pack = &s.session.pack;
+        let mut emotes = serde_json::Map::new();
+        for (name, e) in &pack.body.emotes {
+            emotes.insert(name.clone(), json!({ "about": e.about, "group": e.group }));
+        }
+        for w in pack.body_waiting.iter().filter(|w| w.kind == "emote") {
+            emotes.entry(w.name.clone()).or_insert_with(|| json!({ "about": "", "group": "other" }));
+        }
         Ok(json!({
+            "emotes": emotes,
             "id": s.session.pack.id, "kind": kind.as_str(), "writable": kind.writable(),
             "text": text, "sha": ::studio::sha256_hex(text.as_bytes()),
             "groups": groups, "findings": findings, "files": files, "bytes": bytes,

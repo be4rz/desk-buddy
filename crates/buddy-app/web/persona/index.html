@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Personality</title>
+<link rel="stylesheet" href="persona.css">
+<!-- mock.js only acts in a plain browser with ?mock=<state> (design parity checks) -->
+<script src="mock.js"></script>
+<script src="fill.js"></script>
+<script src="persona.js" defer></script>
+</head>
+<body>
+<main id="root" class="body" aria-busy="true">
+  <!-- the shape of the page until persona://state arrives (C2: skeleton, nothing jumps) -->
+  <div class="skel" aria-hidden="true">
+    <div class="sk h1"></div><div class="sk p"></div>
+    <div class="presets"><div class="sk card"></div><div class="sk card"></div><div class="sk card"></div><div class="sk card"></div></div>
+    <div class="sk bub"></div>
+    <div class="sk line"></div><div class="sk line"></div><div class="sk line"></div>
+  </div>
+</main>
+</body>
+</html>

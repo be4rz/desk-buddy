@@ -49,6 +49,8 @@ export type DriverOptions = {
   model?: Init["model"];
   /** The fake provider's models; default FAKE_MODELS. */
   models?: typeof FAKE_MODELS;
+  /** `Init.persona`: the "Who you are" section text. */
+  persona?: string;
 };
 
 export class Driver {
@@ -94,6 +96,7 @@ export class Driver {
       platform: process.platform === "darwin" ? "macos" : process.platform === "win32" ? "windows" : "linux",
       host: o.host ?? null,
       settings: { stepLimit: 50, shutdownMs: 3000, retryDelayMs: 50, ...o.settings, ...settings },
+      ...(o.persona === undefined ? {} : { persona: o.persona }),
     };
   }
 

@@ -299,9 +299,9 @@ fn the_emotes_fixture_plays_each_gesture_with_its_own_behavior() {
     assert_eq!(names.iter().cloned().collect::<std::collections::BTreeSet<_>>(), gestures, "the fixture has each gesture emote once");
     assert_eq!(names.len(), gestures.len());
     let end = items.last().unwrap().at_ms + 8000;
-    // seed 1: no idle desk spell or long prop set overlaps an emote (an emote at the desk is refused as busy, one
-    // during a prop set waits for its exit; p5's sets moved seed 3's picks)
-    let tl = replay::Timeline { timeline_version: replay::TIMELINE_VERSION, seed: 1, duration_ms: end, start_local: "10:00".into(), weekday: 2, items };
+    // seed 2: no idle desk spell or long prop set overlaps an emote (an emote at the desk is refused as busy, one
+    // during a prop set waits for its exit; p5's sets moved seed 3's picks, Biscuit's temperament seed 1's)
+    let tl = replay::Timeline { timeline_version: replay::TIMELINE_VERSION, seed: 2, duration_ms: end, start_local: "10:00".into(), weekday: 2, items };
     let log = replay::run(p, &tl);
     let items = &tl.items;
     for (k, name) in names.iter().enumerate() {

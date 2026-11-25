@@ -15,7 +15,11 @@ const USAGE: &str = "usage: buddy studio <cmd> …
   diff   <a.png> <b.png> [--out <png>]
   lint   --pack <dir>
   audit  --pack <dir> [--minutes 10] [--seeds 1,2,3 | --seed N] [--start YYYY-MM-DDTHH:MM]
-         [--temperament energy=0.5,…] [--chart <png>] [--out <dir>] [--timeline t.json --out <dir>]
+         [--preset <id>] [--temperament energy=0.5,…] [--chart <png>] [--out <dir>] [--timeline t.json --out <dir>]
+         (--preset: the temperament of that persona preset over the pack's; --temperament then goes over it)
+  persona render --pack <dir> [--preset <id>] [--user <json | file>]
+         the exact ## Who you are section the agent gets (the pack default when no --preset; --user is the
+         person's layer, a UserPersona object such as {call_me: Sam}, as JSON); exit 1 when the pack has no persona
   comments --pack <dir> [--open]
   import-aseprite <file.aseprite> --pack <dir> --name <clip-prefix>
   package check <dir>                      the package standard (mascots/README.md); exit 1 = findings
@@ -96,6 +100,18 @@ fn usage<T>(m: impl Into<String>) -> Result<T, Fail> {
 fn open(a: &Args) -> Result<session::Session, Fail> {
     let dir = PathBuf::from(a.req("pack").map_err(Fail::Usage)?);
     Ok(session::Session::open(&dir)?)
+}
+
+/// The pack's temperament with the persona preset `id`'s traits over it. A usage error when the
+/// pack has no persona or no such preset.
+fn preset_temperament(pack: &mascot_core::PackMeta, id: &str) -> Result<mascot_protocol::pack::Temperament, Fail> {
+    let Some(persona) = &pack.persona else {
+        return usage(format!("--preset {id}: this pack has no persona{}", pack.persona_issues.first().map(|i| format!(" ({i})")).unwrap_or_default()));
+    };
+    match persona.preset(id) {
+        Some(p) => Ok(p.temperament.over(pack.temperament)),
+        None => usage(format!("--preset {id}: no such preset in this pack (have: {})", persona.ids().join(", "))),
+    }
 }
 
 fn zoom(a: &Args, def: usize) -> Result<usize, Fail> {
@@ -199,7 +215,7 @@ fn run(cmd: &str, rest: &[String]) -> Result<Out, Fail> {
             Ok(if r.errors == 0 { Out::Ok(line, j) } else { Out::Findings(line, j) })
         }
         "audit" => {
-            let a = p(&["pack", "minutes", "seed", "seeds", "start", "temperament", "chart", "timeline", "out"])?;
+            let a = p(&["pack", "minutes", "seed", "seeds", "start", "preset", "temperament", "chart", "timeline", "out"])?;
             let minutes: f64 = a.num("minutes", 10.0).map_err(Fail::Usage)?;
             if !(minutes > 0.0 && minutes <= 24.0 * 60.0) {
                 return usage("--minutes is above 0 and at most 1440");
@@ -219,9 +235,14 @@ fn run(cmd: &str, rest: &[String]) -> Result<Out, Fail> {
             let label = a.req("pack").map_err(Fail::Usage)?.to_string();
             let dir = PathBuf::from(&label);
             let pack = std::sync::Arc::new(mascot_core::pack::load_report(&dir).map_err(Error::from)?);
-            let temperament = match a.opt("temperament") {
-                Some(t) => Some(audit::parse_temperament(&pack.temperament, t).map_err(Fail::Usage)?),
+            // the preset's temperament over the pack's, then --temperament over that
+            let base = match a.opt("preset") {
+                Some(id) => Some(preset_temperament(&pack, id)?),
                 None => None,
+            };
+            let temperament = match a.opt("temperament") {
+                Some(t) => Some(audit::parse_temperament(base.as_ref().unwrap_or(&pack.temperament), t).map_err(Fail::Usage)?),
+                None => base,
             };
             let order: Vec<String> = pack.idle_pool.iter().map(|e| e.name().to_string()).collect();
             // v1 (one timeline, `audit.json` + `audit.png` in --out) when a timeline is given
@@ -244,7 +265,7 @@ fn run(cmd: &str, rest: &[String]) -> Result<Out, Fail> {
                 let j = serde_json::to_value(&r).expect("json");
                 return Ok(Out::Ok(format!("ok {} {}  distinct={}", jf.display(), pf.display(), r.distinct), j));
             }
-            let r = audit::report(pack, &label, &seeds, minutes, &start, temperament)?;
+            let r = audit::report(pack, &label, &seeds, minutes, &start, temperament.clone())?;
             let json = serde_json::to_string_pretty(&r).expect("json") + "\n";
             let png = |run: &audit::Run| {
                 let (w, h, px) = audit::chart_v2(run, &order);
@@ -271,8 +292,42 @@ fn run(cmd: &str, rest: &[String]) -> Result<Out, Fail> {
                 })
                 .collect();
             line += if r.pass { "ok audit" } else { "audit: findings" };
-            let j = serde_json::to_value(&r).expect("json");
+            let mut j = serde_json::to_value(&r).expect("json");
+            if let Some(id) = a.opt("preset") {
+                j["preset"] = serde_json::json!(id);
+                if let Some(t) = &temperament {
+                    j["temperament"] = serde_json::json!({ "energy": t.energy, "curiosity": t.curiosity, "shyness": t.shyness, "chattiness": t.chattiness, "sleepiness": t.sleepiness });
+                }
+            }
             Ok(if r.pass { Out::Ok(line, j) } else { Out::Findings(line, j) })
+        }
+        "persona" => {
+            let Some((sub, rest)) = rest.split_first() else { return usage("persona render") };
+            if sub != "render" {
+                return usage(format!("unknown persona command “{sub}”"));
+            }
+            let a = parse_args(rest, &["pack", "preset", "user"]).map_err(Fail::Usage)?;
+            if !a.pos.is_empty() {
+                return usage("persona render takes --pack, --preset and --user");
+            }
+            let dir = PathBuf::from(a.req("pack").map_err(Fail::Usage)?);
+            let pack = mascot_core::pack::load_report(&dir).map_err(Error::from)?;
+            let mut user = match a.opt("user") {
+                None => mascot_core::persona::UserPersona::default(),
+                Some(u) => {
+                    let text = if u.trim_start().starts_with('{') { u.to_string() } else { std::fs::read_to_string(u).map_err(|e| Fail::Error(format!("{u}: {e}")))? };
+                    serde_json::from_str(&text).map_err(|e| Fail::Usage(format!("--user: {e}")))?
+                }
+            };
+            if let Some(id) = a.opt("preset") {
+                preset_temperament(&pack, id)?;
+                user.preset = Some(id.to_string());
+            }
+            let Some(text) = mascot_core::persona::prompt_text(&pack, &user) else {
+                return Err(Fail::Error(format!("{}: the pack has no persona (the agent gets no “Who you are” section)", dir.display())));
+            };
+            let preset = mascot_core::persona::resolve(&pack, &user).map(|e| e.preset).unwrap_or_default();
+            Ok(Out::Ok(text.clone(), serde_json::json!({ "pack": pack.id, "preset": preset, "text": text })))
         }
         "comments" => {
             let a = p(&["pack"])?;

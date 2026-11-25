@@ -1,0 +1,23 @@
+{
+  "about": "The persona fill rule (mascot_core::persona::fill). One shared set of cases: the Rust unit test, the Personality page's fill.js and agent/test/unit/persona_fill.test.ts must all produce `out`. `you` / `catchphrase` null = unset.",
+  "cases": [
+    {"name": "me", "text": "I am {me}.", "me": "Biscuit", "you": null, "catchphrase": null, "out": "I am Biscuit."},
+    {"name": "you set", "text": "Hi, {you}!", "me": "Biscuit", "you": "Sam", "catchphrase": null, "out": "Hi, Sam!"},
+    {"name": "you unset drops its comma", "text": "Hi, {you}!", "me": "Biscuit", "you": null, "catchphrase": null, "out": "Hi!"},
+    {"name": "you unset mid text", "text": "Morning, {you}. I saved you the good side of the desk.", "me": "Biscuit", "you": null, "catchphrase": null, "out": "Morning. I saved you the good side of the desk."},
+    {"name": "you unset without a comma drops its space", "text": "Hello {you}", "me": "Biscuit", "you": null, "catchphrase": null, "out": "Hello"},
+    {"name": "you unset keeps the comma after it", "text": "Hello {you}, how are you?", "me": "Biscuit", "you": null, "catchphrase": null, "out": "Hello, how are you?"},
+    {"name": "catchphrase at the start", "text": "{catchphrase}", "me": "Biscuit", "you": null, "catchphrase": "told you so", "out": "Told you so"},
+    {"name": "catchphrase after a sentence is capitalised, its dot kept", "text": "Fixed. It was the cache, like I said an hour ago. {catchphrase}.", "me": "Biscuit", "you": null, "catchphrase": "told you so", "out": "Fixed. It was the cache, like I said an hour ago. Told you so."},
+    {"name": "catchphrase mid sentence stays lowercase", "text": "All done, and {catchphrase} The tests are green.", "me": "Mochi", "you": null, "catchphrase": "all cozy!", "out": "All done, and all cozy! The tests are green."},
+    {"name": "no second dot after a catchphrase that ends in punctuation", "text": "Done. {catchphrase}.", "me": "Mochi", "you": null, "catchphrase": "all cozy!", "out": "Done. All cozy!"},
+    {"name": "after a question mark", "text": "Hi, {you}! New branch? {catchphrase}", "me": "Pip", "you": "Sam", "catchphrase": "ooh, what's this?", "out": "Hi, Sam! New branch? Ooh, what's this?"},
+    {"name": "capital of a non-ascii letter", "text": "Well. {catchphrase}", "me": "Biscuit", "you": null, "catchphrase": "été chaud", "out": "Well. Été chaud"},
+    {"name": "catchphrase unset: token, dot and space go", "text": "Done. {catchphrase}. Next.", "me": "Biscuit", "you": null, "catchphrase": null, "out": "Done. Next."},
+    {"name": "catchphrase unset at the end", "text": "Done. {catchphrase}", "me": "Biscuit", "you": null, "catchphrase": null, "out": "Done."},
+    {"name": "unknown token stays as written", "text": "Hello {x} and {me}, {Me}", "me": "Biscuit", "you": null, "catchphrase": null, "out": "Hello {x} and Biscuit, {Me}"},
+    {"name": "lone braces stay as written", "text": "a { b } c {me", "me": "Biscuit", "you": null, "catchphrase": null, "out": "a { b } c {me"},
+    {"name": "a filled value is not scanned again", "text": "I am {me}.", "me": "{you}", "you": "Sam", "catchphrase": null, "out": "I am {you}."},
+    {"name": "no tokens", "text": "Plain text.", "me": "Biscuit", "you": "Sam", "catchphrase": "x", "out": "Plain text."}
+  ]
+}

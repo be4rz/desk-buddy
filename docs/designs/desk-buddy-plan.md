@@ -30,6 +30,7 @@ shows what is done and what comes next.
 | D14 | **The S0 mascot demo (D12) passed, 2026-11-09.** The user approved the "cute" Blender bear (mochi body, flat plush face) and its Stage A clips: idle, walk, run and their start/stop transitions. The bear is about 100 px tall. S1 put it on the real desktop (spikes/s1-window: NSPanel + CALayer, 0.3% CPU idle), and the user found the 64/100 sizes and zoom ×1–×3 all fine. The default is 100 px, and zoom is a user setting. The brain and harness (S2) are worked on in a separate session. |
 | D15 | **S3 is dropped, 2026-11-10.** D13 moved all art to Blender, so the bear ships as PNG strips + JSON from `experiments/mascot/bear3d/`, not `.aseprite`. That removes S3's open question (`asefile` vs `aseprite-io`), and S1 already loads and composites the pipeline output, so no spike is left to run. The versioned **pack format** (manifest + loader over the pipeline output, intent → clip map) is built in P1a. Headless composite, `lint` and `diff` move to P4 with the studio; P1b may pull the composite forward. `.aseprite` import for user-made mascots also waits for P4. §3 and §5 were updated to match. |
 | D16 | **Face layers for blinking and talking; no eye look-at in v1, 2026-11-10.** The Blender pipeline renders the bear as whole-body frames, so the eyes and mouth come as separate small **face layers** per direction (eyes open/closed, a few mouth shapes), drawn over the body at a **per-frame face position** that Blender exports with each clip (as it does `root_px`), so the face follows head bobs. The brain then picks blink timing at random (jittered timers) and flaps the mouth while `Speaking` streams. Faces are rendered only for the directions where the face shows (not N, NE, NW). A pipeline check, like `verify_b.py`, requires body + open-eyes/closed-mouth layer to match the original render pixel for pixel. Baking blinks and talking into the clips was rejected: blinks would repeat on the idle loop's fixed beat (30 frames, 2.5 s), and a baked mouth can't follow streamed speech. **Look-at in v1 = turning the body** toward the target in the 8 directions. Moving the eyes within the face waits until blinking and talking have been judged on the desktop. P1a's pack format carries the face layers and positions; the art round renders them. |
+| D17 | **Personality is pack data and changes tone only, 2026-11-26.** A pack's optional `persona` block holds presets (name, identity, voice rules, examples, idle lines, temperament); the user picks one and tunes it in `settings.persona` (tray **Personality ▸**, **Customize…**). It shapes the prompt's "Who you are" section, the brain's temperament, check-in wording and canned idle lines. It never changes tools, approvals or the policy, and the agent has no command to change it. The bear ships four original presets: Biscuit (default, cheeky sidekick), Mochi, Pip and Tofu. |
 
 ## 0. Goals (from the request)
 
@@ -522,6 +523,7 @@ animation plugs into it.
 | A4 | **Idle life:** fidgets and postures | ✅ built (pack v2 idle brain: `variety` rule, `for_s` holds, turn first, hidden entries; stage kit; art stages f g p m t + lean, all in the bear's idle pool; `buddy studio audit` v2 passes 10 and 30 min on seeds 1,2,3) | A2's turn-in-place clip |
 | A5 | **Real clips for the borrowed intents** | ✅ built (stages e + x, 19 one-shots; the 11 intents play their own clip first with the old chain behind; 16 new gesture emotes in `mascot list` and the prompt; `emotes.jsonl` replay) | A1 |
 | A6 | **Desktop reactions, prop activities, rare surprises** | ✅ built (p4 reactions: pack `contexts` + `reactions`, cursor sense, drag dangle/land/dizzy, flinch/pet/follow, morning, evening, away, approval_wait, edge entries; stages r s w. p5: 16 prop activities in set stages sit_a sit_b play out + nightcap, idle `long` entries and `buddy mascot do`; 11 rare surprises in stage z on 2400–3600 s cooldowns, seasonal hats by month; sheet index `out/bear3d/sheets.html`) | A4 |
+| A7 | **Personality** (added 2026-11-26) | ✅ built (pack `persona` block, 4 bear presets, "Who you are" prompt section + `set_persona`, settings v3 `persona`, tray Personality ▸ + `persona` window, canned idle lines, persona-voiced check-ins, studio Personality tab, `buddy studio persona render`, `audit --preset`) | A1, A6 |
 
 **Who decides an animation** (applies to every step):
 
@@ -622,6 +624,39 @@ choice > the automatic default.
 - Fidgets and gestures fit the 84×123 Stage C frame. Lying down, rolling and
   props need a wider frame or a set, as Stage B does.
 - Keep the bear cute and toy-like in every clip (ground rules).
+
+**A7. Personality** (added 2026-11-26, D17)
+- Request: the bear should show a personality in how it talks, and the user
+  can change it. Before this, the whole voice was one hard-coded preamble line
+  and `temperament` only moved the body.
+- Pack: an optional `persona` block, `{default, presets{<id>{name, tagline,
+  identity, voice[3-6], likes, catchphrase{text,when}, gestures, examples,
+  idle_lines, temperament, style}}}`, checked by the loader, `lint` and
+  `package check` (`mascots/bear/README.md` § personality). The bear's
+  presets: Biscuit (default), Mochi, Pip, Tofu.
+- Prompt: `mascot_core::persona::prompt_text` renders "## Who you are" (voice,
+  style bands, gestures, examples, the user's notes as a quoted tone-only
+  block). The sidecar's preamble is mascot-neutral and holds the guardrails:
+  honesty over flattery, plain words for approvals, errors and destructive
+  actions, drop the bit when the person is upset, no guilt or affection
+  scores. A change reaches the running sidecar with `set_persona` (pi-durable
+  replaces the section; one prompt-cache miss per change).
+- User layer: `settings.persona` (settings v3): preset, name, call_me,
+  catchphrase, chattiness, playfulness, emotes, notes (≤ 500 characters,
+  refused when longer), and `pack`, the mascot it was made for (another mascot
+  starts from its own default; call_me and notes stay). Tray **Personality ▸** picks a preset; **Customize…**
+  opens the `persona` window (rendered example lines as the preview, no model
+  call). The effective temperament (pack → preset → user chattiness) drives
+  the brain too.
+- Voice without the model: canned idle lines (morning, evening, back,
+  long_session) on a 20–40 min cooldown scaled by chattiness, never queued,
+  never during DND, quiet hours, fullscreen, a turn or an open bubble, and
+  outside the 4-an-hour budget. Check-ins ask for a line in the persona's
+  voice.
+- Gap on purpose: no agent command changes the persona, so injected text
+  can't rewrite it.
+- Eval: `agent/scripts/persona-eval.ts` (live model, `BUDDY_EVAL=1`, never in
+  CI) checks each preset on a bad plan, an error and a sad message.
 
 ## 8. Open questions
 

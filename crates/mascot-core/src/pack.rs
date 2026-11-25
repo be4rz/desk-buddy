@@ -116,6 +116,12 @@ pub struct PackMeta {
     /// Problems in `pack.json`'s `body` block; their entries are dropped. `load` refuses a pack
     /// with any, `load_report` keeps them for `buddy studio lint`.
     pub body_issues: Vec<String>,
+    /// `pack.json` `"persona"`: the characters a person can pick (only the presets that passed
+    /// `persona::check`). `None` = the pack has none, or none of them passed.
+    pub persona: Option<crate::persona::PersonaMeta>,
+    /// Problems in `pack.json`'s `persona` block; the presets they name are dropped. `load` refuses
+    /// a pack with any, `load_report` keeps them for `buddy studio lint`.
+    pub persona_issues: Vec<String>,
     /// `pack.json` `"turning"` (p2): the clips facing changes play. `None`, or clips that are not
     /// there (art not rendered yet), and facing changes snap.
     pub turning: Option<TurningFile>,
@@ -700,13 +706,16 @@ impl PackMeta {
     }
 }
 
-/// Loads and validates the pack in `dir` (`dir/pack.json`). A problem in the `body` block
-/// is an error too (the first one).
+/// Loads and validates the pack in `dir` (`dir/pack.json`). A problem in the `body` or `persona`
+/// block is an error too (the first one).
 pub fn load(dir: &Path) -> Result<PackMeta, PackError> {
     let meta = load_report(dir)?;
     match meta.body_issues.first() {
         Some(i) => Err(PackError::Invalid { dir: dir.to_path_buf(), path: "pack.json".into(), msg: i.clone() }),
-        None => Ok(meta),
+        None => match meta.persona_issues.first() {
+            Some(i) => Err(PackError::Invalid { dir: dir.to_path_buf(), path: "pack.json".into(), msg: i.clone() }),
+            None => Ok(meta),
+        },
     }
 }
 
@@ -850,6 +859,8 @@ impl Loader {
             warmup: Warmup::default(),
             body: BodyMeta { default_for_s: 120, max_for_s: 1800, activities: Vec::new(), emotes: Vec::new() },
             body_issues: Vec::new(),
+            persona: None,
+            persona_issues: Vec::new(),
             turning: None,
             stations: BTreeMap::new(),
             work: None,
@@ -887,6 +898,13 @@ impl Loader {
                 meta.body_issues.clear();
                 meta.body_waiting.clear(); // the pack never asked for these
             }
+        }
+        if let Some(pf) = file.persona.clone() {
+            // gestures may name any emote the pack lists (also one still waiting for art)
+            let emotes: Vec<String> = meta.body.emotes.iter().map(|(n, _)| n.clone()).chain(meta.body_waiting.iter().filter(|w| w.kind == "emote").map(|w| w.name.clone())).collect();
+            let (persona, issues) = crate::persona::check(pf, &emotes);
+            meta.persona = persona;
+            meta.persona_issues = issues;
         }
         Ok(meta)
     }

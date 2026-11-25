@@ -122,6 +122,7 @@
   <aside class="pane nav" id="ed-nav" aria-label="sections">
     <h4>Mascot</h4>
     <a data-sec="details">Details</a>
+    <a data-sec="persona">Personality</a>
     <a data-sec="clips">Clips <span class="pill grey">art</span></a>
     <h4>Behavior</h4>
     <a data-sec="behaviors">Behaviors</a>
@@ -152,6 +153,25 @@
         <h4>Blinking and talking</h4>
         <div class="field"><label for="f-blink">Blink every</label><span><input class="num" id="f-blink" type="number" min="200" step="100"> ms <small>±</small> <input class="num" id="f-jitter" type="number" min="0" max="1" step="0.05"> <small>jitter · needs face layers</small></span></div>
         <div class="field"><label for="f-mouth">Mouth frame</label><span><input class="num" id="f-mouth" type="number" min="20" step="10"> ms</span></div>
+      </fieldset>
+
+      <fieldset class="sec" id="sec-persona">
+        <h2>Personality</h2><p class="sub">How it talks. People pick one of these presets in the app (tray › Personality) and tune its name, catchphrase and sliders there; this is what they start from. Tone only: nothing here changes what it's allowed to do.</p>
+        <div class="box" id="p-empty" hidden>
+          <b>No personality yet</b>
+          <p class="hint">It talks in the app's plain voice, and the Personality window has nothing to pick. Add one to give it a name, a voice and its own example lines.</p>
+          <div class="row start"><button class="btn small primary" id="p-add" type="button">+ Add a personality</button></div>
+        </div>
+        <div class="split" id="p-main">
+          <div>
+            <div class="blist"><table class="t" id="p-list"></table></div>
+            <div class="row start"><input class="txt mono inline" id="p-new-name" placeholder="new_preset" maxlength="24" aria-label="new preset id"><button class="btn small" id="p-new" type="button">+ New preset</button></div>
+            <p class="hint">A new preset starts as a copy of the selected one.</p>
+            <p class="err" id="p-new-err"></p>
+            <div class="row start"><button class="btn small quiet danger-text" id="p-remove" type="button">Remove the personality</button></div>
+          </div>
+          <div class="box" id="p-edit"></div>
+        </div>
       </fieldset>
 
       <fieldset class="sec" id="sec-clips">

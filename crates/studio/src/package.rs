@@ -190,6 +190,9 @@ fn check_as(dir: &Path, folder: &str) -> Vec<Finding> {
             for b in &pack.body_issues {
                 f.push(finding("pack.json", format!("body: {b}")));
             }
+            for p in &pack.persona_issues {
+                f.push(finding("pack.json", p.clone()));
+            }
             for file in crate::session::files(dir, Some(&pack)) {
                 let rel = file.strip_prefix(dir).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| file.display().to_string());
                 match file.canonicalize() {
@@ -249,6 +252,10 @@ pub fn bundle(src: &Path, out: &Path, id: Option<&str>, name: Option<&str>) -> R
     let text = std::fs::read_to_string(&pj).map_err(io(&pj))?;
     let pf: PackFile = serde_json::from_str(&text).map_err(|e| Error(format!("{}: {e}", pj.display())))?;
     let pack = mascot_core::pack::load_report(src)?;
+    // a personality problem is the author's to fix first (unlike a body one, it isn't carried over)
+    if let Some(i) = pack.persona_issues.first() {
+        return err(format!("{}: {i}; fix the personality before bundling", pj.display()));
+    }
     let id = id.unwrap_or(&pf.id).to_string();
     if !valid_id(&id) {
         return err(format!("id “{id}”: use 1–32 lowercase letters, digits, - and _ (starting with a letter or digit)"));
@@ -456,7 +463,7 @@ pub fn apply(text: &str, ops: &[Op]) -> Result<String> {
 
 /// Check `text` as the next pack.json of the package `dir`; the loaded pack when it is fine.
 /// Refused: JSON that doesn't parse, a changed id, a manifest off the standard, a pack that
-/// doesn't load or draw, new `body` problems, and a behavior that would need a clip the pack
+/// doesn't load or draw, new `body` or `persona` problems, and a behavior that would need a clip the pack
 /// doesn't have (one that could play before, or a new one).
 pub fn validate_edit(dir: &Path, text: &str) -> Result<PackMeta> {
     jsonedit::validate(text).map_err(|e| Error(format!("pack.json: {e}")))?;
@@ -473,6 +480,11 @@ pub fn validate_edit(dir: &Path, text: &str) -> Result<PackMeta> {
     let old_issues: BTreeSet<&String> = cur.iter().flat_map(|c| c.body_issues.iter()).collect();
     if let Some(i) = pack.body_issues.iter().find(|i| !old_issues.contains(i)) {
         return err(format!("body: {i}"));
+    }
+    // persona issues already read like "persona.presets.x.voice: …"
+    let old_persona: BTreeSet<&String> = cur.iter().flat_map(|c| c.persona_issues.iter()).collect();
+    if let Some(i) = pack.persona_issues.iter().find(|i| !old_persona.contains(i)) {
+        return err(i.clone());
     }
     for b in pack.behaviors.keys() {
         if pack.available(b) {

@@ -567,7 +567,7 @@
     $("ed-lock").textContent = lock || "";
     $("ed-lock").hidden = !lock;
     $("sec-" + m.sec).disabled = !!lock && m.sec !== "package";
-    ({ details: renderDetails, clips: renderClips, behaviors: renderBehaviors, intents: renderIntents, idle: renderIdle, package: renderPackage, advanced: renderAdvanced })[m.sec]();
+    ({ details: renderDetails, persona: renderPersona, clips: renderClips, behaviors: renderBehaviors, intents: renderIntents, idle: renderIdle, package: renderPackage, advanced: renderAdvanced })[m.sec]();
     renderSavebar();
     renderCheck();
   }
@@ -922,6 +922,255 @@
     put(["idle_pool", pool.length], { behavior: names.includes("rest") ? "rest" : names[0], weight: 1, cooldown_s: 0 });
     renderIdle();
   });
+
+  // ---------- edit: personality (`persona` in pack.json) ----------
+  // One preset per way of talking; `persona.default` is the one a new user gets. The caps and the
+  // 3–6 voice rules are the loader's (`mascot_core::persona`); the forms only guide, the check decides.
+  const SITS = [["greeting", "Hello"], ["done", "Done"], ["error", "Oops"], ["checkin", "Check-in"], ["disagree", "Push back"]];
+  const MOMENTS = [["morning", "Morning"], ["evening", "Evening"], ["back", "Back from away"], ["long_session", "Long session"]];
+  const PCAP = { name: 24, tagline: 32, identity: 120, rule: 80, like: 32, catchphrase: 40, when: 80, example: 160, line: 100 };
+  const PP = (id, ...rest) => ["persona", "presets", id, ...rest];
+  const presetIds = () => Object.keys((m.doc.persona && m.doc.persona.presets) || {});
+  function starter() {
+    const name = [...(m.doc.name || m.ed.id)].slice(0, 24).join("");
+    let id = slug(name).replace(/-/g, "_").slice(0, 24) || "main";
+    if (!/^[a-z]/.test(id)) id = ("m_" + id).slice(0, 24); // a preset id starts with a letter
+    return {
+      default: id,
+      presets: { [id]: {
+        name, tagline: "friendly helper", identity: "A small desk buddy who keeps you company while you work.",
+        voice: ["Short and friendly: a sentence or two.", "Plain words, no jargon.", "Honest: says so when something looks wrong."],
+        likes: [],
+        examples: { greeting: "Hi, {you}! I'm here if you need me.", done: "Done. It works now.", error: "That didn't work. Want me to look into it?", checkin: "You've been at it a while. Maybe a short break?", disagree: "I'd hold off on that: it could break something. Want a safer way?" },
+        idle_lines: { morning: ["Morning!"], evening: ["Long day. Nearly there."], back: ["Welcome back."], long_session: ["Still here, still cheering you on."] },
+        temperament: { ...(m.doc.temperament || {}) }, style: { playfulness: 0.5, emotes: 0.5 },
+      } },
+    };
+  }
+  $("p-add").addEventListener("click", () => { put(["persona"], starter()); m.psel = null; renderPersona(); });
+  $("p-remove").addEventListener("click", () => { del(["persona"]); m.psel = null; renderPersona(); });
+  $("p-new").addEventListener("click", () => {
+    const id = $("p-new-name").value.trim();
+    const why = !/^[a-z][a-z0-9_]{0,23}$/.test(id) ? "Use lowercase letters, digits and _ (starting with a letter)." : presetIds().includes(id) ? "There is already a preset “" + id + "”." : "";
+    $("p-new-err").textContent = why;
+    if (why) return;
+    const from = m.doc.persona.presets[m.psel] || {};
+    put(PP(id), { ...JSON.parse(JSON.stringify(from)), name: id[0].toUpperCase() + id.slice(1).replace(/_/g, " ") });
+    m.psel = id;
+    $("p-new-name").value = "";
+    renderPersona();
+  });
+
+  function renderPersona() {
+    const P = m.doc.persona;
+    $("p-empty").hidden = !!P;
+    $("p-main").hidden = !P;
+    if (!P) return;
+    const ids = presetIds();
+    if (!ids.includes(m.psel)) m.psel = ids.includes(P.default) ? P.default : ids[0] || null;
+    renderPresetList();
+    const box = $("p-edit");
+    const id = m.psel;
+    if (!id) return box.replaceChildren(el("p", "hint", "No presets yet: add one on the left."));
+    const p = P.presets[id];
+    const parts = [];
+    const field = (label, ctl, cls) => { const f = el("div", "field" + (cls ? " " + cls : "")); const l = el("label", "", label); if (ctl.id) l.htmlFor = ctl.id; f.append(l, ctl); return f; };
+    const text = (key, cap, path, opt) => {
+      const i = Object.assign(el("input", "txt"), { id: "p-" + key, maxLength: cap, value: getp(path) == null ? "" : getp(path) });
+      if (opt && opt.ph) i.placeholder = opt.ph;
+      i.addEventListener("input", () => {
+        if (opt && opt.optional && !i.value.trim()) del(path); else put(path, i.value);
+        if (key === "name") renderPresetList();
+      });
+      return i;
+    };
+    const idf = el("span", "mono", id);
+    if (id === P.default) idf.append(" ", el("span", "pill teal", "default"));
+    parts.push(field("Id", idf));
+    parts.push(field("Name", text("name", PCAP.name, PP(id, "name"))));
+    parts.push(field("Tagline", text("tagline", PCAP.tagline, PP(id, "tagline"), { optional: true, ph: "e.g. cheeky sidekick · shown in the tray" })));
+    parts.push(field("Who it is", text("identity", PCAP.identity, PP(id, "identity"), { ph: "One line, e.g. a small polar bear who thinks it runs the desk" })));
+
+    // voice: 3 to 6 short rules
+    const voice = Array.isArray(p.voice) ? p.voice : [];
+    parts.push(el("h4", "", "Voice · " + voice.length + (voice.length === 1 ? " rule" : " rules") + ", 3 to 6"));
+    parts.push(...lineList(voice, PP(id, "voice"), PCAP.rule, "voice rule", { min: 3, max: 6, add: "+ Add rule", ph: "e.g. Dry one-liners. Tease kindly, never mean." }));
+
+    // catchphrase: the words, and when it says them
+    parts.push(el("h4", "", "Catchphrase"));
+    const cp = p.catchphrase || {};
+    const cpt = Object.assign(el("input", "txt"), { id: "p-cp", maxLength: PCAP.catchphrase, value: cp.text || "", placeholder: "e.g. told you so" });
+    const cpw = Object.assign(el("input", "txt"), { id: "p-cpw", maxLength: PCAP.when, value: cp.when || "", placeholder: "e.g. only when it truly called it" });
+    const setCp = () => { if (!cpt.value.trim() && !cpw.value.trim()) del(PP(id, "catchphrase")); else put(PP(id, "catchphrase"), { text: cpt.value, when: cpw.value }); };
+    cpt.addEventListener("input", setCp);
+    cpw.addEventListener("input", setCp);
+    parts.push(field("Says", cpt), field("When", cpw));
+
+    // likes: chips
+    parts.push(el("h4", "", "Likes"));
+    const likes = Array.isArray(p.likes) ? p.likes : [];
+    const lk = el("div", "chips");
+    likes.forEach((t, i) => {
+      const c = el("span", "chip", t + " ");
+      const x = el("button", "x", "✕");
+      x.type = "button";
+      x.setAttribute("aria-label", "remove " + t);
+      x.addEventListener("click", () => { del(PP(id, "likes", i)); renderPersona(); });
+      c.append(x);
+      lk.append(c);
+    });
+    const add = Object.assign(el("input", "txt mono inline"), { maxLength: PCAP.like, placeholder: "+ a like, Enter" });
+    add.setAttribute("aria-label", "add a like");
+    add.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" || !add.value.trim()) return;
+      e.preventDefault();
+      if (!p.likes) put(PP(id, "likes"), [add.value.trim()]); else put(PP(id, "likes", likes.length), add.value.trim());
+      renderPersona();
+      const again = document.querySelector('#p-edit .chips input');
+      if (again) again.focus();
+    });
+    lk.append(add);
+    parts.push(lk);
+
+    // what it says, by situation: the Personality window shows these as its sample bubble
+    parts.push(el("h4", "", "Example lines"));
+    parts.push(el("p", "hint", "Bubble length, in its voice. {you} is what the person asked to be called, {catchphrase} its catchphrase. The model sees these as examples, and the Personality window shows them as the sample."));
+    // the backend's list (a pack with no body block still has the built-in emotes), else the block itself
+    const emotes = (m.ed && m.ed.emotes) || (m.doc.body && m.doc.body.emotes) || {};
+    for (const [k, label] of SITS) {
+      const path = PP(id, "examples", k);
+      const ta = Object.assign(el("textarea", "sel"), { id: "p-ex-" + k, maxLength: PCAP.example, rows: 2, value: getp(path) || "" });
+      ta.dataset.pfield = "examples." + k;
+      const cnt = el("span", "count", "");
+      const show = () => { cnt.textContent = [...ta.value].length + " / " + PCAP.example; };
+      show();
+      ta.addEventListener("input", () => { show(); put(path, ta.value); });
+      const col = el("div", "");
+      const g = gestureRow(id, k, emotes);
+      g.append(cnt);
+      col.append(ta, g);
+      parts.push(field(label, col, "top"));
+      parts[parts.length - 1].querySelector("label").htmlFor = ta.id;
+    }
+
+    // canned lines it says on its own (no model call)
+    parts.push(el("h4", "", "Idle lines"));
+    parts.push(el("p", "hint", "Said now and then with no model call, so they carry mood only, never facts. One is picked at random; it never repeats the last few."));
+    for (const [k, label] of MOMENTS) {
+      const path = PP(id, "idle_lines", k);
+      const lines = Array.isArray(getp(path)) ? getp(path) : [];
+      const col = el("div", "");
+      col.append(...lineList(lines, path, PCAP.line, label.toLowerCase() + " line", { min: 1, max: 8, add: "+ Line", ph: "" }));
+      parts.push(field(label, col, "top"));
+    }
+
+    // temperament and the window's sliders
+    parts.push(el("h4", "", "Temperament"));
+    parts.push(el("p", "hint", "Replaces the mascot's temperament (Details) while this preset is on: it moves the body as well as the voice."));
+    const tbox = el("div", "narrow");
+    const base = m.doc.temperament || {};
+    tbox.append(...TEMPER.map((k) => slider(k, (p.temperament || {})[k] != null ? p.temperament[k] : base[k] != null ? base[k] : 0.5, (v) => put(PP(id, "temperament", k), v), !p.temperament)));
+    parts.push(tbox);
+    parts.push(el("h4", "", "Where the window's sliders start"));
+    const sbox = el("div", "narrow");
+    sbox.append(...["playfulness", "emotes"].map((k) => slider(k === "emotes" ? "gestures" : k, (p.style || {})[k] != null ? p.style[k] : 0.5, (v) => put(PP(id, "style", k), v), !p.style)));
+    parts.push(sbox);
+
+    // the preset itself
+    const acts = el("div", "row");
+    const isDef = id === P.default;
+    const mk = button("Make default", "quiet", () => { put(["persona", "default"], id); renderPersona(); });
+    mk.disabled = isDef;
+    const rm = button("Delete preset", "quiet danger-text", () => { del(PP(id)); m.psel = null; renderPersona(); });
+    rm.disabled = isDef;
+    rm.title = isDef ? "the default can't be deleted: make another preset the default first" : "delete " + id;
+    if (isDef) acts.append(el("span", "hint", "new users start with this one"));
+    acts.append(mk, rm);
+    parts.push(acts);
+    box.replaceChildren(...parts);
+  }
+  function renderPresetList() {
+    const P = m.doc.persona;
+    const head = el("tr");
+    head.append(el("th", "", "Preset"), el("th", "", ""));
+    $("p-list").replaceChildren(head, ...presetIds().map((id) => {
+      const q = P.presets[id] || {};
+      const tr = el("tr", id === m.psel ? "sel" : "");
+      const td = el("td", "");
+      td.append(el("b", "", q.name || id), el("small", "", id + (q.tagline ? " · " + q.tagline : "")));
+      const tdr = el("td", "right");
+      if (id === P.default) tdr.append(el("span", "pill teal", "default"));
+      tr.append(td, tdr);
+      tr.tabIndex = 0;
+      tr.addEventListener("click", () => { m.psel = id; renderPersona(); });
+      tr.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); m.psel = id; renderPersona(); } });
+      return tr;
+    }));
+  }
+  // a numbered list of one-line inputs with ✕ and + (voice rules, idle lines)
+  function lineList(list, path, cap, what, o) {
+    const rows = list.map((t, i) => {
+      const row = el("div", "line");
+      const inp = Object.assign(el("input", "txt"), { maxLength: cap, value: t, placeholder: o.ph || "" });
+      inp.setAttribute("aria-label", what + " " + (i + 1));
+      inp.addEventListener("input", () => put(path.concat(i), inp.value));
+      const x = button("✕", "quiet", () => { del(path.concat(i)); renderPersona(); });
+      x.disabled = list.length <= o.min;
+      x.title = list.length <= o.min ? "at least " + o.min : "remove";
+      x.setAttribute("aria-label", "remove " + what + " " + (i + 1));
+      row.append(el("span", "n", String(i + 1)), inp, x);
+      return row;
+    });
+    const r = el("div", "row start");
+    const b = button(o.add, "quiet", () => {
+      put(Array.isArray(getp(path)) ? path.concat(list.length) : path, Array.isArray(getp(path)) ? "" : [""]);
+      renderPersona();
+      const ins = document.querySelectorAll("#p-edit input[aria-label^='" + what + " ']");
+      if (ins.length) ins[ins.length - 1].focus();
+    });
+    b.disabled = list.length >= o.max;
+    if (b.disabled) b.title = "at most " + o.max;
+    r.append(b);
+    return rows.concat(r);
+  }
+  // the gesture it does with a situation's line: an emote from the pack's body block
+  function gestureRow(id, sit, emotes) {
+    const path = PP(id, "gestures", sit);
+    const cur = getp(path);
+    const sel = el("select", "narrow-sel");
+    sel.setAttribute("aria-label", sit + " gesture");
+    sel.append(option("", "no gesture", !cur));
+    if (cur && !emotes[cur]) sel.append(option(cur, cur + " (missing)", true));
+    const groups = {};
+    for (const [k, e] of Object.entries(emotes)) (groups[e.group || "other"] = groups[e.group || "other"] || []).push(k);
+    for (const g of ["gesture", "fidget", "move", "surprise", "other"].filter((g) => groups[g]).concat(Object.keys(groups).filter((g) => !["gesture", "fidget", "move", "surprise", "other"].includes(g)))) {
+      const og = el("optgroup");
+      og.label = g + "s";
+      og.append(...groups[g].map((k) => option(k, k, k === cur)));
+      sel.append(og);
+    }
+    const about = el("span", "hint about", cur && emotes[cur] && emotes[cur].about ? emotes[cur].about : "");
+    sel.addEventListener("change", () => {
+      if (sel.value) put(path, sel.value); else del(path);
+      about.textContent = sel.value && emotes[sel.value] && emotes[sel.value].about ? emotes[sel.value].about : "";
+    });
+    const r = el("div", "gest");
+    r.append(el("span", "hint", "with"), sel, about);
+    if (!Object.keys(emotes).length) { sel.disabled = true; about.textContent = "no emotes: the body block (Advanced) lists them"; }
+    return r;
+  }
+  function slider(label, v, set, inherited) {
+    const row = el("div", "slider");
+    const lab = el("span", "mono", v.toFixed(2).replace(/^0/, ""));
+    const r = el("input");
+    Object.assign(r, { type: "range", min: 0, max: 100, value: Math.round(v * 100) });
+    r.setAttribute("aria-label", label);
+    r.addEventListener("input", () => { lab.textContent = (r.value / 100).toFixed(2).replace(/^0/, ""); });
+    r.addEventListener("change", () => set(Number(r.value) / 100));
+    if (inherited) row.title = "not set: from the mascot";
+    row.append(el("span", "", label), r, lab);
+    return row;
+  }
 
   function renderPackage() {
     const ed = m.ed;

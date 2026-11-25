@@ -275,6 +275,65 @@ leave the pack.
 - Do-not-disturb, quiet hours and the tray's hide refuse `do` and `emote` (status
   `refused`, nothing plays); `stop` and `list` always answer.
 
+## The personality (A7, D17)
+
+`persona` in `pack.json` is how the mascot talks. It is optional: a pack without it talks in the
+app's plain voice and its check-ins keep the old wording. It changes tone only, never tools,
+approvals or the policy.
+
+```json
+"persona": {"default": "biscuit", "presets": {"biscuit": {
+  "name": "Biscuit", "tagline": "cheeky sidekick", "identity": "…",
+  "voice": ["3 to 6 short rules"], "likes": ["…"],
+  "catchphrase": {"text": "told you so", "when": "…"},
+  "gestures": {"greeting": "wave", "done": "thumbs_up", "error": "head_scratch", "checkin": "stretch", "disagree": "shrug"},
+  "examples": {"greeting": "…", "done": "…", "error": "…", "checkin": "…", "disagree": "…"},
+  "idle_lines": {"morning": ["…"], "evening": ["…"], "back": ["…"], "long_session": ["…"]},
+  "temperament": {"energy": 0.6, "curiosity": 0.6, "shyness": 0.1, "chattiness": 0.5, "sleepiness": 0.4},
+  "style": {"playfulness": 0.7, "emotes": 0.5}}}}
+```
+
+- **Presets.** The bear has four, all original: **Biscuit** (default; cheeky sidekick: dry
+  one-liners, kind teasing, honest to a fault, warm underneath), **Mochi** (cozy homebody),
+  **Pip** (curious explorer), **Tofu** (shy, earnest helper). A preset sets the voice, examples,
+  idle lines and temperament together. The pack's top-level `temperament` equals Biscuit's.
+- **Where it goes.** `mascot_core::persona::prompt_text` renders the prompt's "## Who you are"
+  section: identity, voice rules, likes, catchphrase and when to use it, style bands, gestures and
+  the examples (bubble length, the tone to match). `examples` are also the Customize window's
+  preview. `idle_lines` are canned lines the app says with no model call (below).
+- **Placeholders** in example and idle lines: `{me}` (the name), `{you}` (what the person asked to
+  be called; dropped with its comma when unset: "Hi, {you}!" → "Hi!") and `{catchphrase}`
+  (capitalised at a sentence start). The rule is in `mascot_core::persona::fill`, and
+  `crates/buddy-app/web/persona/fill.js` must match it (`crates/mascot-core/tests/fixtures/persona_fill.json`
+  pins both).
+- **Rules.** Preset ids are `^[a-z][a-z0-9_]{0,23}$`, and `default` names one. `name` and
+  `identity` aren't empty. `voice` has 3–6 rules, all five `examples` are set, each moment has 1–8
+  idle lines, and every `gestures` entry is an emote in `body`. Caps: name 24, tagline 32, identity
+  120, voice rule 80, like 32 (at most 8), catchphrase 40, `when` 80, example 160, idle line 100.
+  An unknown `{x}` placeholder is a problem. `buddy studio lint` reports `bad_persona`,
+  `bad_persona_gesture` (with "did you mean"), `bad_persona_default`, `bad_persona_length` and
+  `bad_persona_placeholder`. The app refuses such a pack, and the studio refuses a save that adds one.
+- **The person's layer** (`settings.persona`, settings v3): `preset`, `name`, `call_me`,
+  `catchphrase`, `chattiness`, `playfulness`, `emotes` (0–1) and `notes` (≤ 500 characters). `null`
+  follows the preset. The preset owns name, catchphrase and the three sliders; `call_me` and the
+  notes are the person's and survive a preset switch. `pack` records the mascot the layer was made
+  for: when another mascot is on the desktop at launch, the preset and the fields it owns are
+  cleared (`call_me` and the notes stay). The notes go into the prompt as a quoted,
+  tone-only block. Effective temperament = the pack's, then the preset's, then the person's
+  chattiness; it drives the brain too.
+- **Idle lines.** Morning, evening (18:00–22:00, once a day), back from away and a long session.
+  Cooldown `40 − 20 × chattiness` minutes (±10%), said with probability `0.4 + 0.6 × chattiness`, no
+  line twice in a row. Never during do-not-disturb, quiet hours, fullscreen or a screen share, a
+  hidden bear, a turn or an open bubble, and never queued for later. They don't count against the
+  4-an-hour check-ins. The log says only `[buddy] idle line <moment>`. Lines carry mood, never facts.
+- **Tools.**
+  - `buddy studio persona render --pack <dir> [--preset <id>] [--user '<json>' | <file>] [--json]`
+    prints the exact "Who you are" text.
+  - `buddy studio audit --pack <dir> --preset <id> …` audits with that preset's temperament. All
+    four bear presets pass at `--minutes 10` and `30` on seeds 1,2,3.
+  - `bun run agent/scripts/persona-eval.ts` (needs `BUDDY_EVAL=1` and a real key; never in CI)
+    tries each preset on a bad plan, an error and a sad message.
+
 ## Sprite spec (every clip the art round adds)
 
 | Rule | Value |

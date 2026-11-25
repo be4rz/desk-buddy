@@ -21,6 +21,9 @@
 //! builds only: `ANTHROPIC_API_KEY` (a session key, never stored), `BUDDY_CRED_STORE=memory|fail`
 //! and `BUDDY_FAKE_OAUTH=1` (a scripted `fake-oauth` provider; see `harness.rs`).
 //!
+//! Personality: the tray's Personality ▸ picks a preset of the pack's persona, Customize… opens
+//! `persona/` (page `web/persona/`); `settings.persona` is the person's layer (v3).
+//!
 //! Studio (p6): the tray's Studio… opens `studio/` (page `web/studio/`) on the running pack.
 //! `buddy-app --studio [<pack-dir>]` runs the studio alone: no bear, agent, lock or host.json,
 //! so it can run next to the app on the same `BUDDY_HOME`; it writes only the mascot library
@@ -31,9 +34,11 @@ mod caller;
 mod driver;
 mod events;
 mod harness;
+mod idle_lines;
 mod instance;
 mod media_os;
 mod panel;
+mod persona;
 mod senses;
 mod settings;
 mod signin;
@@ -187,7 +192,7 @@ fn main() {
             std::process::exit(0);
         }
     };
-    let (settings, note) = settings::load(&home);
+    let (mut settings, note) = settings::load(&home);
     let warning = note.map(|settings::LoadNote::Reset { bad, why }| {
         eprintln!("[buddy] settings reset to defaults: {why} (kept {})", bad.display());
         "Settings reset (see settings.json.bad)".to_string()
@@ -203,6 +208,10 @@ fn main() {
         Ok(p) => Arc::new(p),
         Err(e) => fail("mascot pack", e),
     };
+    // the person's personality layer belongs to the mascot it was made for
+    if let Some(line) = settings.persona.for_pack(&pack.id) {
+        eprintln!("[buddy] {line}");
+    }
     // a room that is there but broken stops the launch like a broken pack; none at all is fine
     let room = match room_dir(&settings.room, &home) {
         Some(d) => match mascot_core::room::load(&d) {
@@ -254,7 +263,9 @@ fn main() {
         Some(_) => true,
         None => items.is_none(), // a replay drives the senses itself
     };
-    let brain = Brain::new(pack.clone(), BrainConfig { seed: seed(), temperament: None, dnd_action }, 0);
+    // the persona's temperament (pack, preset, the person's chattiness): the same one a change sets later
+    let temperament = Some(persona::effects(&pack, &settings.persona.user).temperament);
+    let brain = Brain::new(pack.clone(), BrainConfig { seed: seed(), temperament, dnd_action }, 0);
 
     studio::configure(Some(dir.clone()), studio_roots(&home), studio::Desktop { current: settings.pack.clone(), set: desktop_setter(home.clone(), true) });
     let mut boot = Some((pack, art, settings, home, brain, items, warning, icon));
@@ -276,6 +287,12 @@ fn main() {
             signin::signin_remove,
             signin::signin_reopen,
             signin::signin_close,
+            persona::persona_state,
+            persona::persona_set,
+            persona::persona_pick,
+            persona::persona_reset,
+            persona::persona_open_studio,
+            persona::persona_close,
             widgets::widget_ready,
             widgets::widget_reply,
             widgets::widget_state,
@@ -324,6 +341,7 @@ fn main() {
                 floors: art.room().map(|r| r.floors.iter().map(|f| (f.id.clone(), f.name.clone())).collect()).unwrap_or_default(),
                 floor: driver::floor_choice(&art, &settings.floor).to_string(),
                 scenes: art.room().is_some_and(|r| !r.scenes.is_empty()).then_some(settings.scenes),
+                persona: persona::tray(&pack, &settings.persona.user),
             };
             let wanted = settings.model.clone();
             let home2 = home.clone();
@@ -332,6 +350,7 @@ fn main() {
             driver::with_app(|a| a.bubble_win = Some(win));
             tray::build(app, tray_init)?;
             signin::window::init(app.handle().clone());
+            persona::window::init(app.handle().clone());
             studio::window::init(app.handle().clone());
             let mut host_port = None;
             match harness::Harness::start(&home2, &wanted) {

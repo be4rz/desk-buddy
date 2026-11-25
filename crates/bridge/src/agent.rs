@@ -28,6 +28,8 @@ use crate::{BridgeError, Res};
 /// How long a start may take to send `ready`.
 const READY_WAIT: Duration = Duration::from_secs(20);
 const CMD_WAIT: Duration = Duration::from_secs(15);
+/// The longest persona text the sidecar takes, in UTF-16 units (`agent/src/ext/core/prompt.ts`).
+pub const PERSONA_MAX_CHARS: usize = 20_000;
 /// A sign-in waits for the person (a browser, a pasted code).
 const LOGIN_WAIT: Duration = Duration::from_secs(600);
 
@@ -88,6 +90,8 @@ pub struct AgentSpec {
     pub settings: Value,
     /// The prompt's "Your body" section, from the pack (`Init.body`); `None` adds no section.
     pub body: Option<String>,
+    /// The prompt's "Who you are" section for the first start (`Init.persona`); `Agent::set_persona` changes it later.
+    pub persona: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -126,6 +130,8 @@ pub struct Agent {
     auth: Mutex<Option<Arc<dyn AuthUi>>>,
     /// The model the next start uses; `set_model` changes it (after a sign-in).
     model: Mutex<Option<ModelRef>>,
+    /// The "Who you are" text the next start uses; `set_persona` changes it.
+    persona: Mutex<Option<String>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -135,7 +141,8 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 impl Agent {
     pub fn new(spec: AgentSpec, policy: Arc<Production>, host: Arc<Host>, creds: Arc<Credentials>, sink: impl Fn(AgentEvent) + Send + Sync + 'static) -> Arc<Agent> {
         let spec_model = spec.model.clone();
-        Arc::new(Agent { spec, policy, host, creds, sink: Box::new(sink), run: Mutex::new(None), gen: AtomicU64::new(0), exited: AtomicU64::new(0), readied: AtomicU64::new(0), mapper: Mutex::new(Mapper::new()), ready: Mutex::new(None), auth: Mutex::new(None), model: Mutex::new(spec_model) })
+        let spec_persona = spec.persona.clone();
+        Arc::new(Agent { spec, policy, host, creds, sink: Box::new(sink), run: Mutex::new(None), gen: AtomicU64::new(0), exited: AtomicU64::new(0), readied: AtomicU64::new(0), mapper: Mutex::new(Mapper::new()), ready: Mutex::new(None), auth: Mutex::new(None), model: Mutex::new(spec_model), persona: Mutex::new(spec_persona) })
     }
 
     pub fn id(&self) -> &str {
@@ -237,6 +244,7 @@ impl Agent {
             host: Some(HostApi { url: self.host.url(), token }),
             settings,
             body: self.spec.body.clone(),
+            persona: lock(&self.persona).clone(),
         };
         // The sidecar's own environment: nothing of the app's, no key.
         let env = vec![
@@ -289,6 +297,24 @@ impl Agent {
             return Ok(json!({}));
         }
         self.cmd("set_model", json!({ "model": model }))
+    }
+
+    /// The "Who you are" section of this and every later start; a running sidecar swaps it now, and its next
+    /// model request carries it. `None` removes the section. A text over the sidecar's cap
+    /// (`PERSONA_MAX_CHARS`) is refused here and never kept, so no later start sends it either.
+    pub fn set_persona(&self, persona: Option<String>) -> Res<Value> {
+        if persona.as_ref().is_some_and(|p| p.encode_utf16().count() > PERSONA_MAX_CHARS) {
+            return Err(BridgeError::new("usage", format!("The persona text is over {PERSONA_MAX_CHARS} characters.")));
+        }
+        *lock(&self.persona) = persona.clone();
+        if !self.is_running() {
+            return Ok(json!({}));
+        }
+        self.cmd("set_persona", json!({ "persona": persona }))
+    }
+
+    pub fn persona(&self) -> Option<String> {
+        lock(&self.persona).clone()
     }
 
     pub fn model(&self) -> Option<ModelRef> {

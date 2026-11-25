@@ -1,14 +1,17 @@
-//! `settings.json` v2 (design §3.2; v2 only changes a default: `dnd.fullscreen` is off, and a v1 file
-//! is read with it off once, see `load`). Every key has a default; unknown keys
+//! `settings.json` v3 (design §3.2; v2 only changes a default: `dnd.fullscreen` is off, and a v1 file
+//! is read with it off once, see `load`; v3 adds `persona`, the person's layer over the mascot's
+//! personality, and a v2 file reads with none: the pack's default). Every key has a default; unknown keys
 //! (top level and inside each object) are kept and written back. A file that does not
-//! parse is renamed `settings.json.bad` and defaults are used. Writes are atomic.
+//! parse is renamed `settings.json.bad` and defaults are used. A hand-edited persona value over its cap
+//! or out of 0..1 is cut or clamped on read (with a `[buddy]` line), never a reset. Writes are atomic.
 
 use std::path::{Path, PathBuf};
 
+use mascot_core::persona::{caps, UserPersona};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
 type Extra = Map<String, Value>;
 
@@ -33,6 +36,8 @@ pub struct Settings {
     pub scenes: bool,
     /// The first-launch hello (or the setup bubble) was shown: it never repeats.
     pub onboarded: bool,
+    /// v3: the person's layer over the mascot's personality (tray Personality ▸, the Personality window).
+    pub persona: Persona,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -54,8 +59,65 @@ impl Default for Settings {
             floor: "grid".into(),
             scenes: true,
             onboarded: false,
+            persona: Persona::default(),
             extra: Extra::new(),
         }
+    }
+}
+
+/// `settings.persona`: `mascot_core::persona::UserPersona` (null = follow the preset, or the pack's
+/// default preset) plus any unknown keys, kept.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct Persona {
+    /// The mascot (pack id) this layer was made for; `None` in a file written before it was kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pack: Option<String>,
+    #[serde(flatten)]
+    pub user: UserPersona,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+impl Persona {
+    /// The layer is the person's take on one mascot: on another one (put on the desktop since) its
+    /// preset and the fields a preset owns are cleared, so the new mascot keeps its own name and
+    /// voice; what it calls the person and the notes stay. A layer with no mascot yet takes this
+    /// one. `Some(line)` for the log when something was cleared.
+    pub fn for_pack(&mut self, id: &str) -> Option<String> {
+        let was = self.pack.replace(id.to_string())?;
+        if was == id || (self.user.preset.is_none() && !crate::persona::customized(&self.user)) {
+            return None;
+        }
+        self.user = UserPersona { preset: None, ..crate::persona::reset(&self.user) };
+        Some(format!("persona: made for mascot \"{was}\"; {id} starts from its own default"))
+    }
+
+    /// A hand-edited value over its cap is cut to it, one out of 0..1 clamped (a non-finite one
+    /// dropped): one line each for the log. The rest of the file stands.
+    pub fn sanitize(&mut self) -> Vec<String> {
+        let mut notes = vec![];
+        let u = &mut self.user;
+        for (k, v, cap) in [("name", &mut u.name, caps::NAME), ("call_me", &mut u.call_me, caps::CALL_ME), ("catchphrase", &mut u.catchphrase, caps::CATCHPHRASE), ("notes", &mut u.notes, caps::NOTES)] {
+            if let Some(t) = v.as_mut() {
+                let n = t.chars().count();
+                if n > cap {
+                    *t = t.chars().take(cap).collect();
+                    notes.push(format!("settings: persona.{k} was {n} characters, cut to {cap}"));
+                }
+            }
+        }
+        for (k, v) in [("chattiness", &mut u.chattiness), ("playfulness", &mut u.playfulness), ("emotes", &mut u.emotes)] {
+            if let Some(x) = *v {
+                if !x.is_finite() {
+                    *v = None;
+                    notes.push(format!("settings: persona.{k} is not a number, following the preset"));
+                } else if !(0.0..=1.0).contains(&x) {
+                    *v = Some(x.clamp(0.0, 1.0));
+                    notes.push(format!("settings: persona.{k} {x} is out of 0..1, clamped"));
+                }
+            }
+        }
+        notes
     }
 }
 
@@ -214,7 +276,11 @@ pub fn read(home: &Path) -> Result<Option<Settings>, String> {
     // the old default: v2 starts everyone at "stay visible" (the tray toggle turns it back on)
     if s.settings_version < 2 {
         s.dnd.fullscreen = false;
-        s.settings_version = VERSION;
+    }
+    // v2 → v3: no `persona` yet, which reads as the pack's default personality
+    s.settings_version = s.settings_version.max(VERSION);
+    for line in s.persona.sanitize() {
+        eprintln!("[buddy] {line}");
     }
     Ok(Some(s))
 }
@@ -256,12 +322,14 @@ mod tests {
         assert_eq!(note, None);
         let v = serde_json::to_value(&s).unwrap();
         let want: Value = serde_json::from_str(
-            r#"{"settings_version":2,"pack":"bear","zoom":1,"position":null,
+            r#"{"settings_version":3,"pack":"bear","zoom":1,"position":null,
             "dnd":{"action":"hide","fullscreen":false,"screen_share":true},
             "quiet_hours":{"enabled":true,"start":"22:30","end":"07:30"},
             "attention":{"per_hour":4},"model":{"provider":"anthropic","model":"claude-sonnet-5-5"},
             "edges":{"enabled":true},"studio":{"packs_dir":null},
-            "room":"starter","floor":"grid","scenes":true,"onboarded":false}"#,
+            "room":"starter","floor":"grid","scenes":true,"onboarded":false,
+            "persona":{"preset":null,"name":null,"call_me":null,"catchphrase":null,
+            "chattiness":null,"playfulness":null,"emotes":null,"notes":null}}"#,
         )
         .unwrap();
         assert_eq!(v, want);
@@ -273,12 +341,13 @@ mod tests {
         std::fs::write(path(&h), r#"{"settings_version":1,"zoom":2,"dnd":{"action":"hide","fullscreen":true,"screen_share":true}}"#).unwrap();
         let (mut s, note) = load(&h);
         assert_eq!(note, None);
-        assert_eq!((s.settings_version, s.dnd.fullscreen, s.dnd.screen_share, s.zoom), (2, false, true, 2));
-        // the person turns it back on: v2 keeps it
+        assert_eq!((s.settings_version, s.dnd.fullscreen, s.dnd.screen_share, s.zoom), (3, false, true, 2));
+        assert_eq!(s.persona, Persona::default());
+        // the person turns it back on: v2 and later keep it
         s.dnd.fullscreen = true;
         s.save(&h).unwrap();
         let (s, _) = load(&h);
-        assert_eq!((s.settings_version, s.dnd.fullscreen), (2, true));
+        assert_eq!((s.settings_version, s.dnd.fullscreen), (3, true));
     }
 
     #[test]
@@ -350,6 +419,91 @@ mod tests {
         assert!(matches!(note, Some(LoadNote::Reset { .. })), "{note:?}");
         assert!(d.join("settings.json.bad").is_file() && !path(&d).exists());
         std::fs::remove_dir_all(d).ok();
+    }
+
+    #[test]
+    fn a_v2_file_reads_as_the_pack_default_personality_and_saves_as_v3() {
+        let h = tmp_home("v2v3");
+        std::fs::write(path(&h), r#"{"settings_version":2,"zoom":2,"dnd":{"action":"still","fullscreen":true}}"#).unwrap();
+        let (s, note) = load(&h);
+        assert_eq!(note, None);
+        assert_eq!((s.settings_version, s.zoom, s.dnd.action, s.dnd.fullscreen), (3, 2, DndAct::Still, true));
+        assert_eq!(s.persona.user, UserPersona::default());
+        s.save(&h).unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(path(&h)).unwrap()).unwrap();
+        assert_eq!(v["settings_version"], 3);
+        assert!(v["persona"].as_object().unwrap().values().all(Value::is_null), "{v}");
+    }
+
+    #[test]
+    fn a_v3_persona_round_trips_with_its_unknown_keys() {
+        let h = tmp_home("v3rt");
+        std::fs::write(
+            path(&h),
+            r#"{"settings_version":3,"persona":{"preset":"mochi","name":"Bun","call_me":"Sam","catchphrase":null,
+               "chattiness":0.2,"playfulness":null,"emotes":0.9,"notes":"Keep it short.\nNo puns before 10.","later":{"x":1}}}"#,
+        )
+        .unwrap();
+        let (mut s, note) = load(&h);
+        assert_eq!(note, None);
+        let u = &s.persona.user;
+        assert_eq!((u.preset.as_deref(), u.name.as_deref(), u.call_me.as_deref(), u.catchphrase.as_deref()), (Some("mochi"), Some("Bun"), Some("Sam"), None));
+        assert_eq!((u.chattiness, u.playfulness, u.emotes), (Some(0.2), None, Some(0.9)));
+        assert_eq!(u.notes.as_deref(), Some("Keep it short.\nNo puns before 10."));
+        s.persona.user.playfulness = Some(0.4);
+        s.save(&h).unwrap();
+        let (back, _) = load(&h);
+        assert_eq!(back, s);
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(path(&h)).unwrap()).unwrap();
+        assert_eq!(v["persona"]["later"]["x"], 1);
+        assert_eq!(v["persona"]["playfulness"], 0.4);
+    }
+
+    #[test]
+    fn a_hand_edited_persona_is_cut_and_clamped_not_reset() {
+        let h = tmp_home("v3cap");
+        let notes = "n".repeat(900);
+        let name = "é".repeat(30);
+        std::fs::write(
+            path(&h),
+            format!(r#"{{"settings_version":3,"zoom":2,"persona":{{"preset":"tofu","name":"{name}","notes":"{notes}","chattiness":1.7,"emotes":-3}}}}"#),
+        )
+        .unwrap();
+        let (s, note) = load(&h);
+        assert_eq!(note, None, "not a reset");
+        assert!(path(&h).is_file() && !h.join("settings.json.bad").exists());
+        let u = &s.persona.user;
+        assert_eq!((s.zoom, u.preset.as_deref()), (2, Some("tofu")));
+        assert_eq!(u.notes.as_ref().unwrap().chars().count(), 500);
+        assert_eq!(u.name.as_ref().unwrap().chars().count(), 24);
+        assert_eq!((u.chattiness, u.emotes), (Some(1.0), Some(0.0)));
+        let mut p = s.persona.clone();
+        assert!(p.sanitize().is_empty(), "clean after one pass");
+    }
+
+    #[test]
+    fn the_persona_layer_belongs_to_its_mascot() {
+        let mine = UserPersona { preset: Some("mochi".into()), name: Some("Bun".into()), catchphrase: Some("Yo".into()), chattiness: Some(0.2), call_me: Some("Sam".into()), notes: Some("No puns.".into()), ..Default::default() };
+        // a layer from before it was kept takes the mascot it finds, unchanged
+        let mut p = Persona { user: mine.clone(), ..Default::default() };
+        assert_eq!(p.for_pack("bear"), None);
+        assert_eq!((p.pack.as_deref(), &p.user), (Some("bear"), &mine));
+        assert_eq!(p.for_pack("bear"), None, "the same mascot again");
+        // another mascot on the desktop: its own preset and name, the person's own fields stay
+        let line = p.for_pack("fox").unwrap();
+        assert!(line.contains("\"bear\"") && !line.contains("Bun") && !line.contains("Sam"), "ids only: {line}");
+        assert_eq!(p.user, UserPersona { call_me: Some("Sam".into()), notes: Some("No puns.".into()), ..Default::default() });
+        assert_eq!(p.pack.as_deref(), Some("fox"));
+        // nothing of the bear's left to clear: no line
+        assert_eq!(p.for_pack("bear"), None);
+        // the mascot id round-trips; a layer without one writes no key
+        let h = tmp_home("v3pack");
+        let mut s = Settings::default();
+        s.save(&h).unwrap();
+        assert!(!std::fs::read_to_string(path(&h)).unwrap().contains("\"pack\": null"));
+        s.persona.pack = Some("bear".into());
+        s.save(&h).unwrap();
+        assert_eq!(load(&h).0.persona.pack.as_deref(), Some("bear"));
     }
 
     #[test]

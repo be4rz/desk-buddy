@@ -26,7 +26,8 @@ Rules (each one is a finding of `buddy studio package check`):
 - `palettes` are `palettes/<name>.json`.
 - Nothing else at the top level (dotfiles are ignored). No link points outside the folder, and
   every file the pack reads resolves inside it.
-- The pack loads (`mascot_core::pack`), has no `body` problems and draws (`mascot-render`).
+- The pack loads (`mascot_core::pack`), has no `body` or `persona` problems and draws (`mascot-render`).
+  `bundle` refuses a source with `persona` problems.
 
 The repo's `bear/` is a **linked dev pack**, not a package: its `art_root` points at the Blender
 output in `experiments/mascot/out/bear3d/`, so a re-render shows up without a copy. Bundling it

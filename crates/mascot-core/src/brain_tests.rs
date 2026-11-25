@@ -70,6 +70,8 @@ impl TempPack {
         std::fs::create_dir_all(root.join("pack")).unwrap();
         let t = TempPack { root };
         let mut p = t.bear_json();
+        // these tests edit the body and behaviors; the bear's persona names its emotes (own tests in persona/)
+        p.as_object_mut().unwrap().remove("persona");
         p["art_root"] = json!(t.root.join("art"));
         let pals: Vec<Value> = p["palettes"].as_array().unwrap().iter().map(|v| json!(bear_dir().join(v.as_str().unwrap()))).collect();
         p["palettes"] = json!(pals);
@@ -685,6 +687,7 @@ fn blink_intervals_are_jittered_inside_bounds() {
     t.add_face();
     let mut p = t.load().unwrap_or_else(|e| panic!("{e}"));
     p.timers.blink.double_p = 0.0;
+    p.temperament.sleepiness = 0.5; // the bear's own differs; the mean below is the unscaled one
     let bt = p.timers.blink;
     let starts = blink_starts(Arc::new(p.clone()), 9, 600_000);
     assert!(starts.len() > 50, "{}", starts.len());

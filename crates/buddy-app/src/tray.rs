@@ -13,6 +13,11 @@
 //! Settings pass: "Hide over fullscreen apps" (writes `dnd.fullscreen`, off by default: the bear stays
 //! visible), "Model ▸" (the models of the signed-in providers, from the sidecar's catalog; writes
 //! `settings.model`) and "Approvals ▸ Full access" (the policy's `full` mode).
+//! Personality: "Personality ▸" (first of the Model / Approvals / Accounts / Studio group): one check
+//! item per preset (`persona:<id>`, "Biscuit · cheeky sidekick"), a separator and "Customize…"
+//! (`persona_customize`, the Personality window); a pack with no persona has a disabled "No
+//! personality in this mascot" line instead of the presets. The title reads "Personality: Biscuit",
+//! "… (customized)", or the new name when renamed.
 
 use mascot_core::{Dir, EyeState, Intent, MouthState, Show, Visibility};
 use mascot_render::{Art, View};
@@ -104,6 +109,26 @@ pub struct TrayInit {
     pub floor: String,
     /// `settings.scenes`; `None` when the room has no scenes (the item is then disabled)
     pub scenes: Option<bool>,
+    /// the Personality submenu (`persona::tray`)
+    pub persona: crate::persona::TrayView,
+}
+
+/// The Personality submenu: the presets as check items (or the no-persona line), a separator, Customize….
+/// Returns the submenu and its check items by id.
+fn persona_menu(app: &TauriApp<Wry>, v: &crate::persona::TrayView) -> tauri::Result<(Submenu<Wry>, Vec<(String, CheckMenuItem<Wry>)>)> {
+    let sub = Submenu::with_id(app, "persona", &v.title, true)?;
+    let mut checks = vec![];
+    if v.items.is_empty() {
+        sub.append(&MenuItem::with_id(app, "persona_none", "No personality in this mascot", false, None::<&str>)?)?;
+    }
+    for (id, label, on) in &v.items {
+        let it = CheckMenuItem::with_id(app, id, label, true, *on, None::<&str>)?;
+        sub.append(&it)?;
+        checks.push((id.clone(), it));
+    }
+    sub.append(&PredefinedMenuItem::separator(app)?)?;
+    sub.append(&MenuItem::with_id(app, "persona_customize", "Customize…", true, None::<&str>)?)?;
+    Ok((sub, checks))
 }
 
 /// The Floor submenu's title, e.g. "Floor: Tatami".
@@ -204,6 +229,7 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
     let approvals = Submenu::with_id_and_items(app, "approvals", approvals_label("allowlist"), true, &[&mode_ask, &mode_list, &mode_full])?;
     let model = Submenu::with_id(app, "model", "Model", true)?;
     fill_models(app.handle(), &model, &[]);
+    let (personality, persona_checks) = persona_menu(app, &t.persona)?;
     let fs_hide = CheckMenuItem::with_id(app, "fs_hide", "Hide over fullscreen apps", true, t.dnd_fullscreen, None::<&str>)?;
     // Grid and None are always there; the room pack's floors follow (ids `floor:<id>`)
     let mut floors = vec![("grid".to_string(), "Grid".to_string()), ("none".to_string(), "None".to_string())];
@@ -244,7 +270,7 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
     items.extend([&sep1 as &dyn IsMenuItem<Wry>, &ask, &agent]);
     // "Reset web caution" goes in under the agent line while tainted
     let taint_at = items.len();
-    items.extend([&sep4 as &dyn IsMenuItem<Wry>, &size, &floor, &scenes, &hide, &next, &sep2, &dnd, &quiet, &busy, &fs_hide, &budget, &sep5, &model, &approvals, &signin, &studio, &sep3, &quit]);
+    items.extend([&sep4 as &dyn IsMenuItem<Wry>, &size, &floor, &scenes, &hide, &next, &sep2, &dnd, &quiet, &busy, &fs_hide, &budget, &sep5, &personality, &model, &approvals, &signin, &studio, &sep3, &quit]);
     let menu = Menu::with_items(app, &items)?;
 
     let hide2 = hide.clone();
@@ -311,6 +337,13 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
             let _ = bs2.set_checked(s.dnd.action == DndAct::Still);
             let _ = busy2.set_text(busy_label(s.dnd.action));
         }));
+        let (pm, pc) = (personality.clone(), persona_checks.clone());
+        a.on_persona = Some(Box::new(move |v| {
+            let _ = pm.set_text(&v.title);
+            for (id, it) in &pc {
+                let _ = it.set_checked(v.items.iter().any(|(i, _, on)| i == id && *on));
+            }
+        }));
         let _ = dnd2.set_checked(a.dnd_toggle());
         a.on_hidden = Some(Box::new(move |h| {
             let _ = hide2.set_text(if h { "Show bear" } else { "Hide bear" });
@@ -352,6 +385,14 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
                     });
                 }
                 "studio" => crate::studio::window::open(false),
+                "persona_customize" => crate::persona::window::open(),
+                p if p.starts_with("persona:") => {
+                    let id = p["persona:".len()..].to_string();
+                    // a refusal is logged there, and the checkmarks go back
+                    with_app(|a| {
+                        let _ = a.persona_op(crate::persona::Op::Pick(id));
+                    });
+                }
                 "taint" => {
                     std::thread::spawn(|| {
                         if let Some(h) = harness::get() {

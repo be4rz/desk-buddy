@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-persona-set"
+description = "Enables the persona_set command without any pre-configured scope."
+commands.allow = ["persona_set"]
+
+[[permission]]
+identifier = "deny-persona-set"
+description = "Denies the persona_set command without any pre-configured scope."
+commands.deny = ["persona_set"]

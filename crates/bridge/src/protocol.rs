@@ -73,6 +73,9 @@ pub struct Init {
     /// The "Your body" prompt section the pack's body block renders to (`mascot_core::body::prompt_text`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
+    /// The "Who you are" prompt section (`mascot_core::persona::prompt_text`); `set_persona` changes it later.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub persona: Option<String>,
 }
 
 pub fn platform() -> &'static str {
@@ -195,7 +198,7 @@ mod tests {
     /// `Init.body` (the pack's "Your body" section) is sent as `body`, and left out when there is none.
     #[test]
     fn init_carries_the_body_section_only_when_set() {
-        let init = |body: Option<&str>| Init {
+        let init = |body: Option<&str>, persona: Option<&str>| Init {
             t: "init",
             v: 1,
             agent_id: "main".into(),
@@ -210,8 +213,12 @@ mod tests {
             host: None,
             settings: serde_json::json!({}),
             body: body.map(str::to_string),
+            persona: persona.map(str::to_string),
         };
-        assert_eq!(serde_json::to_value(init(Some("## Your body\n…"))).unwrap()["body"], "## Your body\n…");
-        assert!(serde_json::to_value(init(None)).unwrap().get("body").is_none());
+        assert_eq!(serde_json::to_value(init(Some("## Your body\n…"), None)).unwrap()["body"], "## Your body\n…");
+        assert!(serde_json::to_value(init(None, None)).unwrap().get("body").is_none());
+        // `Init.persona` (the "Who you are" section) is sent as `persona`, and left out when there is none.
+        assert_eq!(serde_json::to_value(init(None, Some("## Who you are\n…"))).unwrap()["persona"], "## Who you are\n…");
+        assert!(serde_json::to_value(init(None, None)).unwrap().get("persona").is_none());
     }
 }

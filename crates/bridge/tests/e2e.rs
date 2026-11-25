@@ -126,6 +126,10 @@ fn fixture(name: &str) -> Fx {
 }
 
 fn fixture_with(name: &str, settings: Value) -> Fx {
+    fixture_full(name, settings, None)
+}
+
+fn fixture_full(name: &str, settings: Value, persona: Option<&str>) -> Fx {
     let root = std::env::temp_dir().join(format!("buddy-e2e-{name}-{}-{}", std::process::id(), policy::random_hex(3)));
     std::fs::create_dir_all(root.join("home")).unwrap();
     let script_path = root.join("script.json");
@@ -171,6 +175,7 @@ fn fixture_with(name: &str, settings: Value) -> Fx {
             s
         },
         body: None,
+        persona: persona.map(str::to_string),
     };
     let events = Arc::new(Mutex::new(Vec::new()));
     let e2 = events.clone();
@@ -414,6 +419,7 @@ fn a_start_that_dies_before_ready_keeps_the_last_exit() {
         providers: vec![],
         settings: json!({}),
         body: None,
+        persona: None,
     };
     let agent = Agent::new(spec, Arc::new(Production::new(|_, _| {})), host, Arc::new(Credentials::new()), |_| {});
     assert!(agent.start().is_err());
@@ -601,4 +607,33 @@ fn a_sense_prompt_runs_with_an_s_id() {
     let input = fx.snapshot().into_iter().find(|e| e["kind"] == "buddy.input").expect("the turn's input");
     assert_eq!(input["data"]["source"], "sense", "{input}");
     assert_eq!(input["data"]["requestId"], id.as_str());
+}
+
+/// The transcript, system entries included.
+fn shown(fx: &Fx) -> String {
+    Value::Array(fx.snapshot()).to_string()
+}
+
+#[test]
+fn the_persona_section_reaches_the_model_and_set_persona_swaps_it_for_the_next_turn() {
+    let biscuit = "## Who you are\n\nYour name is Biscuit, a cheeky sidekick.";
+    let mochi = "## Who you are\n\nYour name is Mochi, a gentle companion.";
+    let fx = fixture_full("persona", json!({}), Some(biscuit));
+    let from = fx.len();
+    fx.agent.prompt("said hello").unwrap();
+    fx.run_end(from);
+    assert!(shown(&fx).contains("Biscuit, a cheeky sidekick"), "Init.persona is in the first request");
+
+    // a running sidecar swaps it now
+    fx.agent.set_persona(Some(mochi.into())).unwrap();
+    assert_eq!(fx.agent.persona().as_deref(), Some(mochi));
+    let from = fx.len();
+    fx.agent.prompt("said hello again").unwrap();
+    fx.run_end(from);
+    // (that the old text is gone from that request is checked against the fake's recorded bodies: agent/test/scenarios/persona.test.ts)
+    assert!(shown(&fx).contains("Mochi, a gentle companion"), "the next request carries the new persona");
+
+    // an oversized text is refused and never kept: the running persona and the next start's stay Mochi
+    assert!(fx.agent.set_persona(Some("x".repeat(20_001))).is_err());
+    assert_eq!(fx.agent.persona().as_deref(), Some(mochi));
 }

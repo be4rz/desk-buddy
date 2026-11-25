@@ -24,6 +24,7 @@ use objc2_foundation::{NSRunLoop, NSRunLoopCommonModes, NSTimer};
 use crate::bubble::window::BubbleWin;
 use crate::bubble::{Bubble, Mode, Out};
 use crate::harness::{self, AgentState};
+use crate::idle_lines::{self, IdleLines, Line};
 use crate::panel::Panel;
 use crate::senses::{self, Ring};
 use crate::settings::{self, DndAct, Settings};
@@ -152,6 +153,10 @@ pub struct App {
     policy_mode: String,
     /// the tray's checkmarks after `Inbox::Settings`
     pub on_settings: Option<Box<dyn Fn(&Settings)>>,
+    /// the tray's Personality submenu after a persona change
+    pub on_persona: Option<Box<dyn Fn(&crate::persona::TrayView)>>,
+    /// `pack.json` `name` (the Personality window's "How Blob talks to you")
+    pub pack_name: String,
     /// the speech bubble's state and window
     pub bubble: Bubble,
     pub bubble_win: Option<BubbleWin>,
@@ -168,6 +173,8 @@ pub struct App {
     last_mouth: Option<MouthState>,
     /// sense-triggered model turns and their budget (p4)
     unprompted: Unprompted,
+    /// canned persona idle lines: free, no model call, apart from the budget (`idle_lines.rs`)
+    idle: IdleLines,
     /// the tray's budget line, on change
     budget_line: String,
     pub on_budget: Option<Box<dyn Fn(&str)>>,
@@ -248,6 +255,7 @@ pub fn start(init: Init, handle: tauri::AppHandle) {
     set_floor_view(&init.art, &init.settings.floor, &mut view);
     view.scenes = init.settings.scenes;
     init.panel.set_anchor(init.art.anchor());
+    let pack_name = crate::persona::pack_name(&init.pack);
     let app = App {
         brain: init.brain,
         raw: Senses::default(),
@@ -283,6 +291,8 @@ pub fn start(init: Init, handle: tauri::AppHandle) {
         on_mode: None,
         policy_mode: "allowlist".into(),
         on_settings: None,
+        on_persona: None,
+        pack_name,
         bubble: Bubble::new(),
         bubble_win: None,
         bubble_loaded: false,
@@ -292,6 +302,7 @@ pub fn start(init: Init, handle: tauri::AppHandle) {
         mouth_log: std::env::var_os("BUDDY_STATS").is_some(),
         last_mouth: None,
         unprompted: Unprompted::default(),
+        idle: IdleLines::new(policy::now_ms()),
         budget_line: Unprompted::default().line(0, None),
         on_budget: None,
         on_ask: None,
@@ -301,6 +312,7 @@ pub fn start(init: Init, handle: tauri::AppHandle) {
     APP.with(|a| *a.borrow_mut() = Some(app));
     forward(rx, handle);
     with_app(|a| {
+        a.persona_voice();
         a.edges_cfg();
         a.wake()
     });
@@ -417,6 +429,40 @@ impl App {
         }
     }
 
+    /// The Personality window's view of `settings.persona`.
+    pub fn persona_view(&self) -> serde_json::Value {
+        crate::persona::view(&self.pack, &self.pack_name, &self.settings.persona.user)
+    }
+
+    /// A persona change from the window or the tray: written first, then in force at once (the
+    /// brain's temperament now, the agent's section from its next model request), the tray and the
+    /// window follow. On `Err` nothing changed.
+    pub fn persona_op(&mut self, op: crate::persona::Op) -> Result<serde_json::Value, String> {
+        let r = crate::persona::run(&self.pack, &self.pack_name, &mut self.settings, &self.home, op);
+        match &r {
+            Ok((_, true)) => {
+                let fx = crate::persona::effects(&self.pack, &self.settings.persona.user);
+                self.brain.set_temperament(fx.temperament);
+                crate::persona::send_prompt(fx.prompt);
+                self.persona_voice();
+                eprintln!("[buddy] {}", crate::persona::log_line(&self.pack, &self.settings.persona.user));
+                crate::persona::window::emit(&self.persona_view());
+            }
+            Ok(_) => {}
+            Err(e) => eprintln!("[buddy] persona: refused ({})", e.split(':').next().unwrap_or("")),
+        }
+        // also after a refusal: a clicked check item has toggled itself
+        self.persona_tray();
+        r.map(|(v, _)| v)
+    }
+
+    /// The tray's Personality submenu, from the settings.
+    pub fn persona_tray(&self) {
+        if let Some(f) = &self.on_persona {
+            f(&crate::persona::tray(&self.pack, &self.settings.persona.user));
+        }
+    }
+
     pub fn save_settings(&self) {
         if let Err(e) = self.settings.save(&self.home) {
             eprintln!("[buddy] cannot write {}: {e}", settings::path(&self.home).display());
@@ -475,19 +521,46 @@ impl App {
         self.refresh_budget(now);
     }
 
-    /// A sense sample may start an unprompted model turn (budgeted, off the main thread).
+    /// The persona in force reaches the canned idle lines and the check-in text (a pack without a
+    /// persona has neither).
+    fn persona_voice(&mut self) {
+        let e = mascot_core::persona::resolve(&self.pack, &self.settings.persona.user);
+        self.unprompted.set_voice(e.as_ref().map(unprompted::Voice::of));
+        self.idle.set_persona(e);
+    }
+
+    /// A sense sample may start an unprompted model turn (budgeted, off the main thread), or say a
+    /// canned idle line (free, no model).
     fn sense_turn(&mut self, now: u64) {
+        let bubble_up = self.bubble.running() || self.bubble.shown().is_some();
         let busy = self.bubble.running() || matches!(self.bubble.shown().map(|m| m.mode), Some(Mode::Prompt | Mode::Card | Mode::Reminder));
         let h = harness::get();
         let ready = unprompted::Ready { busy, can_turn: h.as_ref().is_some_and(|h| h.can_turn()) };
-        if let (Some(summary), Some(h)) = (self.unprompted.sample(&self.senses, now, self.brain.unprompted_allowed(), ready), h) {
+        let env = idle_lines::Env {
+            allowed: self.brain.unprompted_allowed(),
+            shown: self.brain.visibility() == Visibility::Shown && !self.user_hidden,
+            busy: bubble_up,
+        };
+        let step = idle_lines::step(&mut self.unprompted, &mut self.idle, &self.senses, now, env, ready);
+        if let (Some(summary), Some(h)) = (step.check_in, h) {
             std::thread::spawn(move || {
                 if let Err(e) = h.prompt_sense(&summary) {
                     eprintln!("[buddy] unprompted turn: {e}");
                 }
             });
         }
+        if let Some(line) = step.line {
+            self.idle_say(line, now);
+        }
         self.refresh_budget(now);
+    }
+
+    /// A canned idle line, said like a `buddy say` (`harness.rs` `on_host`): its own bubble, and the
+    /// brain talks. Called here, not through the inbox, so the text never reaches the event log.
+    fn idle_say(&mut self, line: Line, now: u64) {
+        eprintln!("[buddy] idle line {}", line.moment);
+        self.bubble_say(line.text.clone(), None, false);
+        self.brain.event(&MascotEvent::Say { text: line.text, emotion: None }, now);
     }
 
     /// The tray's "Check-ins: N of 4 this hour" / "Check-ins paused (…)", on change.

@@ -24,6 +24,13 @@
 //!   isn't the set clip's frame count or the patch dir has no layer for a slot.
 //! - `bad_body`: a problem in pack.json's `body` block (activities and emotes), one per entry, from
 //!   `pack::load_report` (the app refuses such a pack).
+//! - `bad_persona`: a problem in pack.json's `persona` block, one per issue, from `pack::load_report`
+//!   (the app refuses such a pack). `name` is the preset it is in. The code says which kind:
+//!   `bad_persona_gesture` (a gesture that is not an emote of the pack's `body`; the detail carries a
+//!   `did you mean "…"?` hint when a name is close), `bad_persona_default` (`persona.default` names
+//!   no preset), `bad_persona_length` (a field over its cap, or too few/many voice rules or lines),
+//!   `bad_persona_placeholder` (an unknown `{x}`), and `bad_persona` for the rest (missing example,
+//!   bad id, a value outside 0..1, …).
 //! - `waits_for_art` (warn, v2 `#hidden-log`): a wired idle entry (or quiet-hours pool name), emote,
 //!   activity or reaction (`#pack-reactions`: none of its behaviors can play) whose art is not
 //!   loaded yet (an optional source not rendered); it is skipped until it lands. Carries `name`,
@@ -174,11 +181,31 @@ pub fn check_pixels(file: &str, w: usize, h: usize, rgba: &[u8], fw: usize, pale
     }
 }
 
+/// One `persona` problem as an issue: its code by kind, `name` = the preset it is in.
+fn persona_issue(text: &str) -> Issue {
+    let code = if text.starts_with("persona.default:") {
+        "bad_persona_default"
+    } else if text.contains(".gestures.") && text.contains("is not an emote") {
+        "bad_persona_gesture"
+    } else if text.contains("unknown placeholder") {
+        "bad_persona_placeholder"
+    } else if text.contains("the limit is") || text.contains("the most is") || text.contains(" it needs ") {
+        "bad_persona_length"
+    } else {
+        "bad_persona"
+    };
+    let preset = text.strip_prefix("persona.presets.").and_then(|r| r.split(['.', ':']).next()).map(str::to_string);
+    Issue { name: preset, ..issue(code, "error", "pack.json", text.to_string()) }
+}
+
 /// Lint a loaded pack.
 pub fn lint(pack: &PackMeta) -> Report {
     let mut r = Report { pack: pack.id.clone(), ..Default::default() };
     for b in &pack.body_issues {
         r.push(issue("bad_body", "error", "pack.json", b.clone()));
+    }
+    for b in &pack.persona_issues {
+        r.push(persona_issue(b));
     }
     if pack.pack_version < 2 {
         for k in &pack.v2_keys {
@@ -411,6 +438,37 @@ mod tests {
         let bad: Vec<_> = r.issues.iter().filter(|i| i.code == "bad_body").map(|i| (i.severity, i.file.as_str(), i.detail.as_str())).collect();
         assert_eq!(bad, vec![("error", "pack.json", "body: activities.juggle: unknown behavior \"juggle\"")]);
         assert!(r.errors >= 1);
+    }
+
+    #[test]
+    fn persona_problems_are_errors_with_a_code_by_kind() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../mascots/bear");
+        let mut pack = mascot_core::pack::load_report(&dir).unwrap();
+        assert!(pack.persona_issues.is_empty(), "{:?}", pack.persona_issues);
+        assert!(!lint(&pack).issues.iter().any(|i| i.code.starts_with("bad_persona")));
+        pack.persona_issues = vec![
+            "persona.presets.pip.gestures.done: \"waev\" is not an emote in this pack's body (did you mean \"wave\"?)".into(),
+            "persona.default: no preset \"pipp\" (did you mean \"pip\"?); have: pip".into(),
+            "persona.presets.pip.voice: 7 rules, it needs 3 to 6".into(),
+            "persona.presets.pip.identity: 130 characters, the limit is 120".into(),
+            "persona.presets.pip.examples.done: unknown placeholder {x} (have: {me}, {you}, {catchphrase})".into(),
+            "persona.presets.pip.examples.error: missing".into(),
+        ];
+        let r = lint(&pack);
+        let got: Vec<_> = r.issues.iter().filter(|i| i.code.starts_with("bad_persona")).map(|i| (i.code, i.severity, i.name.as_deref())).collect();
+        assert_eq!(
+            got,
+            vec![
+                ("bad_persona_gesture", "error", Some("pip")),
+                ("bad_persona_default", "error", None),
+                ("bad_persona_length", "error", Some("pip")),
+                ("bad_persona_length", "error", Some("pip")),
+                ("bad_persona_placeholder", "error", Some("pip")),
+                ("bad_persona", "error", Some("pip")),
+            ]
+        );
+        assert!(r.issues.iter().any(|i| i.detail.contains("did you mean \"wave\"")));
+        assert!(r.errors >= 6);
     }
 
     /// p4 reactions: the react fixture lints clean; a quiet-hours name and a reaction without art

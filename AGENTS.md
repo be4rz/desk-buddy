@@ -56,6 +56,15 @@ and talks through speech bubbles, powered by an LLM. The repo is public and open
   listed by the sidecar's `models` command; writes `settings.model`), **Approvals ▸ Full access** (policy mode `full`:
   everything runs except ask rules, `policy::rules::attention` commands and `sensitive_path` files; deny rules still
   deny, and it runs as `allowlist` while the chat is marked by the web).
+  Personality (A7, D17): the pack's `persona` presets (`mascots/bear/README.md` § personality; Biscuit is the bear's
+  default) + the person's `settings.persona` (settings.json v3) → `mascot_core::persona` (check, resolve, `fill`,
+  `prompt_text` = the prompt's "Who you are" section, sent as `Init.persona` / `set_persona`, no restart). Tray
+  **Personality ▸** (`persona:<id>`, `persona_customize`) and the `persona` window (`src/persona/`, page
+  `web/persona/index.html?mock=<state>`, only it may call `persona_*`; `web/persona/fill.js` must match the Rust fill,
+  fixture `crates/mascot-core/tests/fixtures/persona_fill.json`). Canned idle lines `src/idle_lines.rs` (no model call,
+  outside the check-in budget, log `[buddy] idle line <moment>` only). Tone only: the agent has no command to change it
+  and `crates/policy` never reads it. `buddy studio persona render --pack <dir> [--preset <id>]`, `audit --preset <id>`;
+  live eval `BUDDY_EVAL=1 bun run agent/scripts/persona-eval.ts` (real key, never in CI).
   Rooms (floors and pocket scenes, D13): a room pack is `rooms/<id>/room.json` + PNGs, mascot-independent
   (`rooms/README.md`; loader `mascot_core::room`, drawn by `mascot-render` via `Art::load_with`). `settings.room` (default
   `starter`), `BUDDY_ROOM=<dir>` overrides; a broken room exits 1 with `[buddy] cannot load room …`, none at all runs with

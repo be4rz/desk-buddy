@@ -1,0 +1,134 @@
+/* The Personality window (tray Personality ▸ Customize…). The shell, tokens and shared classes are the
+   Accounts window's (`web/signin/signin.css`: `.body`, `.intro`, `h2.group`, `label.lbl`, `input.field`,
+   `.btn`, `.row`, `.hint`, `.note`, `.badge`, `.foot`); the pick-one card is the studio's `.opt` with its
+   dot, the slider row is the studio's `.slider`, the situation picker is the studio's `.seg`, and the
+   sample is the speech bubble's own `.bubble` (`web/bubble/bubble.css`). Bear-owned UI: the same in
+   light and dark, like every other desk-buddy window; the title bar is the system's own. */
+:root {
+  --ink: #1b1820; --ink-2: #2a2530;
+  --paper: #fbfaf8; --paper-2: #f1eff4; --fur: #dcd8e6; --fur-3: #b9b3cb; --fur-4: #8a83a0; --fur-5: #6a6480;
+  --teal: #4f8a83; --teal-l: #a9dccf; --teal-d: #2f5a58;
+  --hat: #8b78ad; --hat-l: #d3c6ea; --hat-d: #5a4a72;
+  --blush: #e8a9b2; --rose: #c08a8f; --rose-d: #5e3f4e;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; padding: 0; background: var(--paper); color: var(--ink); font: 13px/1.45 var(--sans); overflow-wrap: anywhere; }
+
+/* ---- from signin.css (same rules) ---- */
+.body { padding: 14px 14px 0; }
+.intro h1 { font-size: 17px; margin: 0 0 2px; }
+.intro p { margin: 0 0 12px; color: var(--fur-5); }
+h2.group { font: 600 11px var(--sans); text-transform: uppercase; letter-spacing: .06em; color: var(--fur-5); margin: 14px 0 6px; }
+label.lbl { display: block; margin-top: 10px; font-weight: 600; }
+input.field, textarea.field { width: 100%; font: 13px var(--mono); padding: 7px 9px; border-radius: 7px; border: 1.5px solid var(--fur-3); background: #fff; color: var(--ink); margin-top: 4px; }
+input.field:focus, textarea.field:focus { outline: 2px solid var(--hat); border-color: var(--hat); }
+.row { display: flex; gap: 6px; align-items: center; justify-content: flex-end; margin-top: 8px; flex-wrap: wrap; }
+.hint { font-size: 11px; color: var(--fur-5); margin-right: auto; }
+.btn { font: 600 13px var(--sans); border-radius: 7px; border: 1.5px solid var(--ink); background: var(--paper); color: var(--ink); padding: 5px 11px; cursor: pointer; box-shadow: 0 2px 0 var(--ink); }
+.btn.small { font-size: 12px; padding: 3px 8px; }
+.btn.primary { background: var(--teal); color: var(--paper); }
+.btn[disabled] { opacity: .45; cursor: default; box-shadow: none; }
+.btn:active:not([disabled]) { transform: translateY(2px); box-shadow: none; }
+.btn:focus-visible { outline: 2px solid var(--hat); outline-offset: 2px; }
+.note { font-size: 12px; border-radius: 6px; padding: 5px 8px; margin: 0 0 8px; }
+.note.err { background: #f8d4dc; color: var(--rose-d); border: 1px solid var(--blush); }
+.note.info { background: var(--paper-2); color: var(--hat-d); border: 1px solid var(--hat-l); }
+.badge { font: 600 10px var(--sans); background: var(--hat-l); color: var(--hat-d); border-radius: 999px; padding: 1px 7px; margin-left: 6px; vertical-align: 1px; white-space: nowrap; }
+
+.badge.rose { background: #f8d4dc; color: var(--rose-d); }
+
+/* variant: words, not keys (signin's field is monospace because it holds keys and codes) */
+input.field.words, textarea.field.words { font-family: var(--sans); }
+input.field::placeholder, textarea.field::placeholder { color: var(--fur-4); }
+
+/* ---- the preset picker: studio's `.opt` (#studio-new), two to a row ---- */
+.presets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.opt { display: flex; gap: 9px; align-items: flex-start; border: 1.5px solid var(--fur-3); border-radius: 9px; padding: 8px 10px; cursor: pointer; background: #fff; text-align: left; font: inherit; color: inherit; width: 100%; min-width: 0; }
+.opt.on { border-color: var(--teal); background: #f1f8f6; }
+.opt:focus-visible { outline: 2px solid var(--hat); outline-offset: 2px; }
+.opt .dot { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--ink); margin-top: 2px; flex: none; }
+.opt.on .dot { background: radial-gradient(var(--teal) 45%, #fff 50%); }
+.opt .t { min-width: 0; }
+.opt b { display: block; }
+.opt small { display: block; color: var(--fur-5); font-size: 11.5px; }
+.opt[disabled] { cursor: default; opacity: .6; }
+
+/* ---- the sample: a stage like the desktop, the real bubble, who said it under the tail ---- */
+.stage { background: var(--paper-2); border: 1px solid var(--fur); border-radius: 10px; padding: 10px 12px 8px; }
+.seg { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 10px; }
+.seg button { font: 11px var(--mono); padding: 2px 7px; border: 1px solid var(--fur-3); border-radius: 4px; background: #fff; color: var(--ink); cursor: pointer; }
+.seg button.on { background: var(--hat-d); color: #fff; border-color: var(--hat-d); }
+.seg button:focus-visible { outline: 2px solid var(--hat); outline-offset: 1px; }
+.bubble { position: relative; width: 290px; max-width: 100%; margin: 0 auto; background: var(--paper); color: var(--ink); border: 2px solid var(--ink); border-radius: 12px; padding: 10px 12px; font: 14px/1.45 var(--sans); box-shadow: 0 3px 0 rgba(27,24,32,.35); }
+.bubble::after { content: ""; position: absolute; left: 50%; bottom: -10px; width: 14px; height: 14px; background: var(--paper); border-right: 2px solid var(--ink); border-bottom: 2px solid var(--ink); transform: translateX(-50%) rotate(45deg); }
+/* three lines of 14px text: the longest example fits, and switching situations moves nothing */
+.bubble .text { min-height: calc(14px * 1.45 * 3); white-space: pre-wrap; overflow-wrap: anywhere; }
+.said { text-align: center; font: 11px var(--mono); color: var(--fur-5); margin-top: 14px; min-height: 16px; }
+.said b { color: var(--ink-2); font-weight: 600; }
+.tip { display: inline-grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; border: 1px solid var(--fur-3); color: var(--fur-5); font: 600 10px/1 var(--sans); text-transform: none; letter-spacing: 0; margin-left: 5px; vertical-align: 1px; cursor: help; background: #fff; padding: 0; }
+.tip:focus-visible { outline: 2px solid var(--hat); outline-offset: 1px; }
+.pop { font: 12px/1.4 var(--sans); text-transform: none; letter-spacing: 0; color: var(--ink-2); background: #fff; border: 1px solid var(--fur-3); border-radius: 7px; padding: 6px 8px; margin: -2px 0 8px; }
+
+/* ---- make it yours ---- */
+.pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 10px; }
+.chg { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--hat); margin-left: 6px; vertical-align: 1px; }
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.sliders { margin-top: 12px; }
+.slider { display: grid; grid-template-columns: 104px minmax(0, 1fr) 76px; align-items: center; gap: 8px; margin: 4px 0; }
+.slider > span:first-child { font-weight: 600; white-space: nowrap; }
+.slider input { width: 100%; height: 24px; accent-color: var(--teal); margin: 0; }
+.slider .word { font: 600 12px var(--sans); color: var(--hat-d); white-space: nowrap; }
+
+/* ---- advanced: the notes ---- */
+details.adv { margin-top: 14px; border-top: 1px solid var(--fur); }
+details.adv > summary { list-style: none; cursor: pointer; font: 600 11px var(--sans); text-transform: uppercase; letter-spacing: .06em; color: var(--fur-5); padding: 10px 0 2px; display: flex; align-items: center; gap: 6px; }
+details.adv > summary::-webkit-details-marker { display: none; }
+details.adv > summary::before { content: "▸"; font-size: 10px; transition: transform .12s; }
+details.adv[open] > summary::before { transform: rotate(90deg); }
+details.adv > summary:focus-visible { outline: 2px solid var(--hat); outline-offset: 2px; border-radius: 4px; }
+details.adv > summary .badge { text-transform: none; letter-spacing: 0; }
+textarea.field { min-height: 104px; resize: vertical; line-height: 1.45; }
+textarea.field.over { border-color: var(--rose-d); }
+textarea.field.over:focus { outline-color: var(--rose-d); }
+.count { font: 11px var(--mono); color: var(--fur-5); white-space: nowrap; }
+.count.over { color: var(--rose-d); font-weight: 600; }
+.hint.err { color: var(--rose-d); }
+.adv .row { margin-top: 4px; flex-wrap: nowrap; align-items: flex-start; }
+
+/* ---- the bar: what happened to the last change, and Reset ---- */
+.bar { position: sticky; bottom: 0; display: flex; align-items: center; gap: 8px; margin: 16px -14px 0; padding: 8px 14px; min-height: 44px; background: var(--paper-2); border-top: 1px solid var(--fur); }
+.bar > .btn { flex: none; white-space: nowrap; }
+.bar .status { margin-right: auto; font-size: 12px; color: var(--fur-5); min-width: 0; }
+.bar .status.ok::before { content: "✓ "; color: var(--teal-d); font-weight: 700; }
+.bar.err { background: #fdf0f2; border-top-color: var(--rose); }
+.bar.err .status { color: var(--rose-d); }
+.bar .status .btn { margin-left: 6px; }
+.linkish { border: 0; background: none; padding: 0; font: 600 12px var(--sans); color: var(--hat-d); cursor: pointer; text-decoration: underline; margin-left: 4px; }
+
+/* ---- a mascot without a personality ---- */
+.empty-card { border: 1px dashed var(--fur-3); border-radius: 10px; background: #fff; padding: 14px; margin-top: 4px; }
+.empty-card b { display: block; font-size: 14px; margin-bottom: 2px; }
+.empty-card p { margin: 0; color: var(--fur-5); }
+
+/* ---- skeleton (before the first state) ---- */
+@keyframes pulse { 50% { opacity: .55; } }
+.skel .sk { background: var(--paper-2); border-radius: 7px; animation: pulse 1.2s ease-in-out infinite; }
+.skel .h1 { width: 40%; height: 20px; margin-bottom: 6px; }
+.skel .p { width: 80%; height: 13px; margin-bottom: 14px; }
+.skel .card { height: 52px; }
+.skel .bub { height: 128px; margin: 14px 0; border-radius: 10px; }
+.skel .line { height: 34px; margin: 10px 0; }
+@media (prefers-reduced-motion: reduce) { .skel .sk { animation: none; } details.adv > summary::before { transition: none; } .btn:active:not([disabled]) { transform: none; } }
+
+/* the window's narrowest (380 pt) and below */
+@media (max-width: 400px) {
+  .pair { grid-template-columns: minmax(0, 1fr); }
+  .slider { grid-template-columns: 88px minmax(0, 1fr) 70px; gap: 6px; }
+}
+@media (max-width: 330px) {
+  .presets { grid-template-columns: minmax(0, 1fr); }
+}

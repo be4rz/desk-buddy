@@ -35,6 +35,15 @@ pub fn hide_ms(text: &str) -> u64 {
 }
 
 /// What the bear is doing during a tool call, in plain words.
+/// A line with its whitespace collapsed: two lines that differ only in spacing say the same thing.
+fn squash(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn same_line(a: &str, b: &str) -> bool {
+    squash(a) == squash(b)
+}
+
 fn activity(kind: WorkKind) -> &'static str {
     match kind {
         WorkKind::Buddy => "Working on it",
@@ -292,10 +301,19 @@ impl Bubble {
         matches!(self.mode(), Some(Mode::Card | Mode::Prompt | Mode::Reminder))
     }
 
-    /// The turn's speech: the agent's own lines, then the answer.
+    /// The turn's speech: the agent's own lines, then the answer. A line is shown once: a model often
+    /// `buddy say`s its reply and then gives the same words as its answer, so an answer that repeats a
+    /// said line (or, while it streams, is the start of one) adds nothing, and so does a said line again.
     fn turn_text(&self) -> String {
-        let mut parts: Vec<&str> = self.said.iter().map(String::as_str).collect();
-        if !self.text.is_empty() {
+        let mut parts: Vec<&str> = Vec::new();
+        for s in &self.said {
+            if !parts.iter().any(|p| same_line(p, s)) {
+                parts.push(s);
+            }
+        }
+        let answer = self.text.trim();
+        let repeats = |p: &&str| same_line(p, answer) || (self.run && squash(p).starts_with(&squash(answer)));
+        if !answer.is_empty() && !parts.iter().any(repeats) {
             parts.push(&self.text);
         }
         parts.join("\n")
@@ -784,6 +802,29 @@ mod tests {
         // The agent's line after its turn ended is a standalone line too.
         let Out::Show(m) = b.say("late", None, true, 200) else { panic!() };
         assert_eq!(m.streaming, Some(false));
+    }
+
+    #[test]
+    fn an_answer_that_repeats_the_agents_say_line_is_shown_once() {
+        let line = "Hey there! Did you get some rest? 🐻‍❄️";
+        let mut b = Bubble::new();
+        b.submitted("hey");
+        b.event(&MascotEvent::Thinking, 0);
+        b.say(line, Some("happy".into()), true, 1);
+        // while it streams, the start of the same words adds nothing
+        assert_eq!(b.event(&speaking("Hey there! Did"), 2), Out::Keep, "the bubble already shows it");
+        assert_eq!(b.event(&speaking(&format!("{line}\n")), 3), Out::Keep);
+        let Out::Show(m) = b.event(&MascotEvent::Idle, 4) else { panic!() };
+        assert_eq!(m.text.as_deref(), Some(line));
+        // the same line said twice is shown once; a different answer still follows
+        let mut b = Bubble::new();
+        b.submitted("hey");
+        b.event(&MascotEvent::Thinking, 0);
+        b.say("Hi!", None, true, 1);
+        b.say("Hi!", None, true, 2);
+        b.event(&speaking("All set."), 3);
+        let Out::Show(m) = b.event(&MascotEvent::Idle, 4) else { panic!() };
+        assert_eq!(m.text.as_deref(), Some("Hi!\nAll set."));
     }
 
     #[test]
