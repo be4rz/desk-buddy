@@ -1,0 +1,117 @@
+//! Shared helpers. Fixtures use invented people and places only.
+#![allow(dead_code)]
+
+use jiff::civil::Date;
+use memory::{Applied, Now, Store};
+use serde_json::{json, Value};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
+
+static N: AtomicU32 = AtomicU32::new(0);
+
+/// A scratch directory that removes itself.
+pub struct Tmp(pub PathBuf);
+
+impl Tmp {
+    pub fn new() -> Tmp {
+        let n = N.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("memory-test-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        Tmp(dir)
+    }
+
+    /// The store's folder, like `BUDDY_HOME/memory`.
+    pub fn mem(&self) -> PathBuf {
+        self.0.join("memory")
+    }
+}
+
+impl Drop for Tmp {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+pub fn date(y: i16, m: i8, d: i8) -> Date {
+    Date::new(y, m, d).unwrap()
+}
+
+/// 2026-11-27, the day the design was written.
+pub fn now() -> Now {
+    now_on(date(2026, 11, 27))
+}
+
+pub fn now_on(today: Date) -> Now {
+    Now::new(today, format!("{today}T09:12:03+07:00"))
+}
+
+pub fn store() -> (Tmp, Store) {
+    let tmp = Tmp::new();
+    let s = Store::open(&tmp.mem()).unwrap();
+    (tmp, s)
+}
+
+/// A direct read connection, to look at columns the API doesn't show.
+pub fn db(dir: &Path) -> rusqlite::Connection {
+    rusqlite::Connection::open(dir.join("memory.sqlite")).unwrap()
+}
+
+/// `SELECT status, valid_to, superseded_by, authority FROM facts WHERE id = ?`
+pub fn row(dir: &Path, id: i64) -> (String, Option<String>, Option<i64>, i64) {
+    db(dir)
+        .query_row("SELECT status, valid_to, superseded_by, authority FROM facts WHERE id = ?1", [id], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })
+        .unwrap()
+}
+
+pub fn count(dir: &Path, sql: &str) -> i64 {
+    db(dir).query_row(sql, [], |r| r.get(0)).unwrap()
+}
+
+/// A memory.extract item.
+pub fn item(kind: &str, predicate: Option<&str>, value: Option<&str>, text: &str) -> Value {
+    json!({"turn": "u:t1", "kind": kind, "predicate": predicate, "qualifier": null, "value": value,
+           "text": text, "importance": 6, "validFrom": null, "quote": null})
+}
+
+pub fn with(mut v: Value, key: &str, val: Value) -> Value {
+    v[key] = val;
+    v
+}
+
+/// Runs one extraction of turn `u:t1` where the person said `said`.
+pub fn extract(s: &Store, said: &str, items: Vec<Value>, now: &Now) -> Applied {
+    s.add_pending("u:t1", &now.at).unwrap();
+    let args = s.extract_args(10, now.today).unwrap();
+    let reply = json!({"items": items, "turns": [{"requestId": "u:t1", "said": said}], "missing": []});
+    s.apply_extract(&args, &reply, now).unwrap()
+}
+
+/// Stores `home_city = value` at the given authority (1 guess, 2 bear, 3 chat, 4 window).
+pub fn city(s: &Store, value: &str, authority: u8, now: &Now) -> i64 {
+    let text = format!("Lives in {value}");
+    let id = match authority {
+        1 => extract(s, "x", vec![item("profile", Some("home_city"), Some(value), &text)], now).items[0].outcome.id(),
+        3 => extract(
+            s,
+            &format!("I live in {value}"),
+            vec![with(item("profile", Some("home_city"), Some(value), &text), "quote", json!(format!("I live in {value}")))],
+            now,
+        )
+        .items[0]
+            .outcome
+            .id(),
+        _ => {
+            let op = memory::RememberIn { text, key: Some("home_city".into()), value: Some(value.into()), ..Default::default() };
+            s.remember(op, now).unwrap().id()
+        }
+    }
+    .unwrap();
+    if authority == 4 {
+        s.edit(id, &format!("Lives in {value}"), None, now).unwrap()
+    } else {
+        id
+    }
+}

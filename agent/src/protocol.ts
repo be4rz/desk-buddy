@@ -61,6 +61,8 @@ export type Init = {
   body?: string;
   /** The "Who you are" prompt section (`mascot_core::persona::prompt_text`); absent → no section. `set_persona` changes it. */
   persona?: string;
+  /** The "What I know about you" prompt section (`crates/memory` render); absent → empty section. `set_memory` changes it. */
+  memory?: string;
 };
 
 export type Settings = {
@@ -113,6 +115,39 @@ export type Status = {
 };
 
 export type Cmd = { t: "cmd"; id: string; op: string; [k: string]: unknown };
+
+/** `set_memory`: the whole memory section, or null (also blank) to empty it. Over MEMORY_MAX_CHARS → "bad_request". */
+export type SetMemoryCmd = { t: "cmd"; id: string; op: "set_memory"; memory: string | null };
+
+/** `memory.extract` (agent/src/ext/memory/extract.ts), the shapes of design I1. */
+export type MemoryTurnIn = { requestId: string; endedAt: string };
+export type MemoryKnown = { id: number; subject: string; predicate: string; qualifier: string | null; value: string };
+export type MemoryRegistryEntry = { key: string; kind: string; one: boolean; qualifier: string | null };
+export type MemoryExtractCmd = {
+  t: "cmd";
+  id: string;
+  op: "memory.extract";
+  /** 1..10, `u:` ids only. */
+  turns: MemoryTurnIn[];
+  known: MemoryKnown[];
+  registry: MemoryRegistryEntry[];
+  today: string;
+  /** Phase 1 sends false: the prompt leaves out `episode`. */
+  episodes: boolean;
+};
+export type MemoryItem = {
+  /** The request id of the turn the item came from. */
+  turn: string;
+  kind: string;
+  predicate: string | null;
+  qualifier: string | null;
+  value: string | null;
+  text: string;
+  importance: number;
+  validFrom: string | null;
+  quote: string | null;
+};
+export type MemoryExtractAck = { items: MemoryItem[]; turns: { requestId: string; said: string }[]; missing: string[] };
 export type Res = { t: "res"; id: string; ok: true; result: unknown } | { t: "res"; id: string; ok: false; error: { code: string; message: string } };
 
 export type Out =

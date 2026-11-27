@@ -32,6 +32,7 @@ shows what is done and what comes next.
 | D16 | **Face layers for blinking and talking; no eye look-at in v1, 2026-11-10.** The Blender pipeline renders the bear as whole-body frames, so the eyes and mouth come as separate small **face layers** per direction (eyes open/closed, a few mouth shapes), drawn over the body at a **per-frame face position** that Blender exports with each clip (as it does `root_px`), so the face follows head bobs. The brain then picks blink timing at random (jittered timers) and flaps the mouth while `Speaking` streams. Faces are rendered only for the directions where the face shows (not N, NE, NW). A pipeline check, like `verify_b.py`, requires body + open-eyes/closed-mouth layer to match the original render pixel for pixel. Baking blinks and talking into the clips was rejected: blinks would repeat on the idle loop's fixed beat (30 frames, 2.5 s), and a baked mouth can't follow streamed speech. **Look-at in v1 = turning the body** toward the target in the 8 directions. Moving the eyes within the face waits until blinking and talking have been judged on the desktop. P1a's pack format carries the face layers and positions; the art round renders them. |
 | D17 | **Personality is pack data and changes tone only, 2026-11-26.** A pack's optional `persona` block holds presets (name, identity, voice rules, examples, idle lines, temperament); the user picks one and tunes it in `settings.persona` (tray **Personality ▸**, **Customize…**). It shapes the prompt's "Who you are" section, the brain's temperament, check-in wording and canned idle lines. It never changes tools, approvals or the policy, and the agent has no command to change it. The bear ships four original presets: Biscuit (default, cheeky sidekick), Mochi, Pip and Tofu. |
 | D18 | **Screen awareness is two opt-in levels with fixed privacy rules, 2026-11-27.** **Level A, activity sense** (on by default, tray **Activity awareness**, no permission): the bear knows which app is in front, for how long and how often it changes, from signals it already senses (NSWorkspace activation, the app's display name, idle time). A short summary of app display names and whole minutes (`Last 20 min: VS Code 14m → Chrome 4m`; never window titles, document names, URLs or bundle ids) may ride in a budgeted check-in, under D4's budget, debounce, DND and quiet hours; moments are `long_dwell`, `flip_loop`, `late_hour` (own check-ins) and `back_after_away` (enriches the return greeting). This replaces p4's "no app name in a sense turn" for that summary only. The log is RAM-only (30 min), never written or logged, and turning the toggle off clears it. **Level C, screen look** (off by default, tray **Screen look**): `buddy screen look` / the typed `screen_look` tool reads the text on the display the bear is on (ScreenCaptureKit + on-device Vision OCR; the tool can also show the model a downscaled picture). Screen Recording permission is asked only when the person turns it on. Every use asks (policy card; Full access still asks), the bear peeks first, it is refused while a deny-listed app (password managers, Keychain, Messages, Mail, chat apps; `settings.screen_look.deny`) is in front, deny-listed apps' windows are left out of the capture, and it never runs in a check-in. The app saves and logs no capture. What it returns is untrusted input and marks the conversation like a web page. The OCR text stays in that conversation's history like any tool result; the picture is used for the asking turn only and is not stored. `screen_look` is the one typed tool beside the CLI, because a shell result can't carry a picture. **Level B** (window titles, accessibility text) is out. |
+| D19 | **Memory is Rust-owned and local, 2026-11-27.** The bear remembers the person across chats in `BUDDY_HOME/memory/memory.sqlite` (`crates/memory`): one `facts` table, changed only by a deterministic `reconcile()` keyed by subject + predicate, with authority ranks (the window 4, the person's own quoted words 3, `buddy memory remember` 2, an inference 1), so the person's word always beats a guess and no model call ever replaces a fact. A batched post-chat extractor (`memory.extract`, one model call outside the chat) finds the facts; the core facts reach the prompt as the last section, "What I know about you", through `Init.memory` / `set_memory` (flushed once before the next prompt, so at most one cache miss per turn); per-turn recall rides on the message, never in a section. Senses are never extracted or stored, secrets are filtered on every write path, the agent's file tools and shell can't reach the folder, and the **What I remember** window is the only hard erase and holds the off switch. |
 
 ## 0. Goals (from the request)
 
@@ -198,6 +199,9 @@ shows what is done and what comes next.
   Since D18 that summary may name the apps in front and their minutes (activity
   sense, never titles); the screen itself is read only on request (`buddy screen
   look`, D18).
+- **Memory (D19).** What the bear remembers lives only in `BUDDY_HOME/memory/`;
+  sense events are never extracted or stored there, and the agent reaches it only
+  through `buddy memory …` (its file tools and shell are refused the folder).
 
 ### Context
 
@@ -440,6 +444,7 @@ crates/
   mascot-render/       CPU composite + integer upscale (trait for later backends) [P1b]
   host/ ✅             buddy CLI + loopback API (tokens, origin/host checks)
   policy/ ✅           modes, rules, taint (ported from 2market)
+  memory/ ✅           what the bear remembers: facts store, reconcile, render (D19)
   bridge/ ✅           sidecar process + JSONL protocol, MascotEvent mapping, in-memory credentials
   widgets/             widget manager, manifest, JS SDK               [P3]
   studio/              studio mode + headless render/audit            [P4]
@@ -531,6 +536,7 @@ animation plugs into it.
 | A5 | **Real clips for the borrowed intents** | ✅ built (stages e + x, 19 one-shots; the 11 intents play their own clip first with the old chain behind; 16 new gesture emotes in `mascot list` and the prompt; `emotes.jsonl` replay) | A1 |
 | A6 | **Desktop reactions, prop activities, rare surprises** | ✅ built (p4 reactions: pack `contexts` + `reactions`, cursor sense, drag dangle/land/dizzy, flinch/pet/follow, morning, evening, away, approval_wait, edge entries; stages r s w. p5: 16 prop activities in set stages sit_a sit_b play out + nightcap, idle `long` entries and `buddy mascot do`; 11 rare surprises in stage z on 2400–3600 s cooldowns, seasonal hats by month; sheet index `out/bear3d/sheets.html`) | A4 |
 | A7 | **Personality** (added 2026-11-26) | ✅ built (pack `persona` block, 4 bear presets, "Who you are" prompt section + `set_persona`, settings v3 `persona`, tray Personality ▸ + `persona` window, canned idle lines, persona-voiced check-ins, studio Personality tab, `buddy studio persona render`, `audit --preset`) | A1, A6 |
+| M | **Memory** (bs-yvhhdi5o, added 2026-11-27, D19): p1 core, p2 history/search/reflection, p3 vectors/admission | ✅ p1 built (`crates/memory` facts store + reconcile + render, `memory.extract`, `set_memory` section, `buddy memory remember\|forget\|list\|search\|open`, the gate's private-folder deny, What I remember window + tray item, settings v5 `memory`) · ⬜ p2 · ⬜ p3 | A7 |
 
 **Who decides an animation** (applies to every step):
 
@@ -664,6 +670,37 @@ choice > the automatic default.
   can't rewrite it.
 - Eval: `agent/scripts/persona-eval.ts` (live model, `BUDDY_EVAL=1`, never in
   CI) checks each preset on a bad plan, an error and a sad message.
+
+**Memory** (added 2026-11-27, D19)
+- Request: the bear should remember the person across chats and restarts (who
+  they are, how they like help, what it promised), locally, and the person can
+  see, fix and erase all of it.
+- Store: `crates/memory` owns `BUDDY_HOME/memory/memory.sqlite` (rusqlite,
+  bundled; `user_version` migrations, a newer file opens read-only) and the
+  generated `MEMORY.md`. Every write goes through `reconcile()`: keyed slots
+  from a fixed predicate registry (home_city, timezone, job, people:<relation>,
+  pets:<species>, …), single-valued slots supersede (the old row kept with
+  `valid_to`) only at equal or higher authority, otherwise the new value waits
+  as a dispute for the person.
+- Extraction: a chat turn that ends with an answer queues its request id; after
+  5 idle minutes (or 10 queued turns) the app sends `memory.extract`, and the
+  sidecar makes one model call outside the conversation, reading only the
+  person's words and the bear's final answers. Rust checks each item's quote
+  against the person's exact words (authority 3 only when it matches),
+  validates it and drops anything that looks like a key or password. Phase 1
+  stores no episodes.
+- Prompt: "## What I know about you" is the last section (after skills),
+  rendered by Rust, capped at 2,000 characters and sent dirty-once before the
+  next prompt, never mid-turn. Off or empty sends an empty section.
+- Agent: `buddy memory remember|forget|list|search|open` through the host API
+  (503 without the app). Reads run freely; `remember` and `forget` ask every
+  time while the chat is marked by the web. The gate denies every file tool and
+  any shell word inside `BUDDY_HOME/memory`.
+- Person: tray **What I remember…** opens the window: what it knows by group,
+  disputes to answer, edit, forget, erase completely, forget everything (typed
+  phrase) and the "Remember new things" switch (`settings.memory`, v5).
+- Next: p2 history, keyword search, recall on the message and reflection; p3
+  optional local vectors and admission.
 
 ## 8. Open questions
 

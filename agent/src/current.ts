@@ -16,6 +16,11 @@ export function setCurrentModel(m: ModelRef | null) {
   current = m;
 }
 
+/** The models collection and current model ref, for a direct one-shot model call (`memory.extract`). */
+export function currentModelCall(): { models: Models; ref: ModelRef } | undefined {
+  return models && current ? { models, ref: current } : undefined;
+}
+
 /** pi-ai's record of a model, when the catalog has it. */
 export function modelInfo(m: ModelRef | null = current): { contextWindow: number; input: readonly string[] } | undefined {
   if (!m || !models) return undefined;

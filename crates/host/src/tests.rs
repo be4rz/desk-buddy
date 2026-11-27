@@ -22,8 +22,10 @@ fn start(name: &str) -> Fx {
     let (tx, events) = mpsc::channel();
     let tx = Mutex::new(tx);
     let host = Host::start(&dir.join("host.json"), move |e| {
+        // a sink with no store (design I4): memory commands answer 503 no_memory
+        let reply = if matches!(e.action, Action::Memory(_)) { Err(Refusal::no_memory()) } else { Ok(json!({})) };
         let _ = tx.lock().unwrap().send(e);
-        Ok(json!({}))
+        reply
     })
     .unwrap();
     Fx { host, events, dir }
@@ -480,4 +482,176 @@ fn screen_look_reaches_the_sink_with_its_image_flag_and_refusals_keep_the_envelo
     assert_eq!((e.turn.as_deref(), e.after_turn), (Some("u:old"), true), "a stale header is late");
     drop(host);
     let _ = fs::remove_dir_all(&dir);
+}
+
+// ------------------------------------------------------------ memory (design I4)
+
+fn user_auth(fx: &Fx) -> String {
+    format!("Bearer {}", fx.host.user_token())
+}
+
+#[test]
+fn memory_routes_map_to_their_ops_and_a_sink_with_no_store_answers_503() {
+    let fx = start("memory-routes");
+    let auth = user_auth(&fx);
+    let h = [("Authorization", auth.as_str())];
+    let p = fx.host.port();
+    let remember = |s: &str| MemoryOp::Remember { text: s.into(), key: None, qualifier: None, value: None, kind: None, importance: None, from: None };
+    let cases: Vec<(&str, &str, Option<Value>, MemoryOp)> = vec![
+        ("POST", "/v1/memory/remember", Some(json!({ "text": "  Likes tea " })), remember("Likes tea")),
+        (
+            "POST",
+            "/v1/memory/remember",
+            Some(json!({ "text": "Lives in Hanoi", "key": "home_city", "value": "Hanoi", "kind": "profile", "importance": 8, "from": "2026-10" })),
+            MemoryOp::Remember { text: "Lives in Hanoi".into(), key: Some("home_city".into()), qualifier: None, value: Some("Hanoi".into()), kind: Some("profile".into()), importance: Some(8), from: Some("2026-10".into()) },
+        ),
+        (
+            "POST",
+            "/v1/memory/remember",
+            Some(json!({ "text": "Her sister is Linh", "key": "people:sister", "value": null })),
+            MemoryOp::Remember { text: "Her sister is Linh".into(), key: Some("people".into()), qualifier: Some("sister".into()), value: None, kind: None, importance: None, from: None },
+        ),
+        ("POST", "/v1/memory/forget", Some(json!({ "id": 12 })), MemoryOp::Forget { id: Some(12), key: None, qualifier: None }),
+        ("POST", "/v1/memory/forget", Some(json!({ "key": "people:sister" })), MemoryOp::Forget { id: None, key: Some("people".into()), qualifier: Some("sister".into()) }),
+        ("POST", "/v1/memory/forget", Some(json!({ "key": "home_city" })), MemoryOp::Forget { id: None, key: Some("home_city".into()), qualifier: None }),
+        ("GET", "/v1/memory/list", None, MemoryOp::List { kind: None }),
+        ("GET", "/v1/memory/list?kind=preference", None, MemoryOp::List { kind: Some("preference".into()) }),
+        ("GET", "/v1/memory/search?q=sister", None, MemoryOp::Search { q: "sister".into(), limit: 5 }),
+        ("GET", "/v1/memory/search?q=hanoi%20city+food&limit=20", None, MemoryOp::Search { q: "hanoi city food".into(), limit: 20 }),
+        ("GET", "/v1/memory/search?q=x&limit=1", None, MemoryOp::Search { q: "x".into(), limit: 1 }),
+        ("POST", "/v1/memory/open", Some(json!({})), MemoryOp::Open),
+        ("POST", "/v1/memory/open", None, MemoryOp::Open),
+    ];
+    for (method, path, body, op) in cases {
+        let r = request(p, method, path, &h, body.as_ref()).unwrap();
+        assert_eq!((r.status, r.body["error"]["code"].as_str(), r.body["ok"].as_bool()), (503, Some("no_memory"), Some(false)), "{method} {path}");
+        assert_eq!(r.body["error"]["message"], "desk-buddy's memory isn't available.");
+        let e = fx.events.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(e.action, Action::Memory(op), "{method} {path}");
+        assert_eq!(e.caller, Caller::User);
+    }
+}
+
+#[test]
+fn memory_usage_errors_never_reach_the_sink_and_wrong_methods_are_405() {
+    let fx = start("memory-bad");
+    let auth = user_auth(&fx);
+    let h = [("Authorization", auth.as_str())];
+    let p = fx.host.port();
+    let long = "x".repeat(201);
+    let bad: Vec<(&str, &str, Option<Value>)> = vec![
+        ("POST", "/v1/memory/remember", Some(json!({}))),
+        ("POST", "/v1/memory/remember", Some(json!({ "text": "" }))),
+        ("POST", "/v1/memory/remember", Some(json!({ "text": "   " }))),
+        ("POST", "/v1/memory/remember", Some(json!({ "text": 5 }))),
+        ("POST", "/v1/memory/remember", Some(json!({ "text": long }))),
+        ("POST", "/v1/memory/remember", Some(json!({ "text": "a", "key": "" }))),
+        ("POST", "/v1/memory/remember", Some(json!({ "text": "a", "key": "people:" }))),
+        ("POST", "/v1/memory/remember", Some(json!({ "text": "a", "key": ":sister" }))),
+        ("POST", "/v1/memory/remember", Some(json!({ "text": "a", "key": 3 }))),
+        ("POST", "/v1/memory/remember", Some(json!({ "text": "a", "importance": 0 }))),
+        ("POST", "/v1/memory/remember", Some(json!({ "text": "a", "importance": 11 }))),
+        ("POST", "/v1/memory/remember", Some(json!({ "text": "a", "importance": "high" }))),
+        ("POST", "/v1/memory/remember", Some(json!({ "text": "a", "kind": 1 }))),
+        ("POST", "/v1/memory/forget", Some(json!({}))),
+        ("POST", "/v1/memory/forget", Some(json!({ "id": 0 }))),
+        ("POST", "/v1/memory/forget", Some(json!({ "id": -3 }))),
+        ("POST", "/v1/memory/forget", Some(json!({ "id": "x" }))),
+        ("POST", "/v1/memory/forget", Some(json!({ "key": " " }))),
+        ("POST", "/v1/memory/forget", Some(json!({ "id": 1, "key": "home_city" }))),
+        ("GET", "/v1/memory/search", None),
+        ("GET", "/v1/memory/search?q=", None),
+        ("GET", "/v1/memory/search?q=%20", None),
+        ("GET", "/v1/memory/search?limit=3", None),
+        ("GET", "/v1/memory/search?q=x&limit=0", None),
+        ("GET", "/v1/memory/search?q=x&limit=21", None),
+        ("GET", "/v1/memory/search?q=x&limit=-1", None),
+        ("GET", "/v1/memory/search?q=x&limit=many", None),
+        ("GET", "/v1/memory/search?q=%ZZ", None),
+    ];
+    for (method, path, body) in bad {
+        let r = request(p, method, path, &h, body.as_ref()).unwrap();
+        assert_eq!((r.status, r.body["error"]["code"].as_str(), r.body["ok"].as_bool()), (400, Some("usage"), Some(false)), "{method} {path} {body:?}");
+    }
+    // exactly 200 characters is fine (and counts characters, not bytes)
+    let ok = request(p, "POST", "/v1/memory/remember", &h, Some(&json!({ "text": "é".repeat(200) }))).unwrap();
+    assert_eq!(ok.status, 503, "past the checks, to a sink with no store");
+    assert!(matches!(fx.events.recv_timeout(Duration::from_secs(2)).unwrap().action, Action::Memory(MemoryOp::Remember { .. })));
+    assert!(fx.events.try_recv().is_err(), "only the valid request reached the sink");
+    // a wrong method is 405, an unknown route 404
+    for (method, path) in [("GET", "/v1/memory/remember"), ("GET", "/v1/memory/forget"), ("POST", "/v1/memory/list"), ("POST", "/v1/memory/search"), ("GET", "/v1/memory/open"), ("PUT", "/v1/memory/open")] {
+        let r = request(p, method, path, &h, None).unwrap();
+        assert_eq!((r.status, r.body["error"]["code"].as_str()), (405, Some("method")), "{method} {path}");
+    }
+    for path in ["/v1/memory/recall", "/v1/memory/", "/v1/memory/erase"] {
+        assert_eq!(request(p, "GET", path, &h, None).unwrap().status, 404, "{path}");
+    }
+    // no token, no memory
+    assert_eq!(request(p, "GET", "/v1/memory/list", &[], None).unwrap().status, 401);
+    assert!(fx.events.try_recv().is_err());
+}
+
+#[test]
+fn memory_replies_pass_through_and_refusals_keep_their_codes() {
+    let dir = std::env::temp_dir().join(format!("buddy-host-memory-{}-{}", std::process::id(), random_hex(3)));
+    let host = Host::start(&dir.join("host.json"), |e| match e.action {
+        Action::Memory(MemoryOp::Remember { text, .. }) if text.contains("sk-") => Err(Refusal::secret()),
+        Action::Memory(MemoryOp::Remember { text, .. }) if text == "off" => Err(Refusal::memory_off()),
+        Action::Memory(MemoryOp::Remember { .. }) => Ok(json!({ "id": 12, "outcome": "created" })),
+        Action::Memory(MemoryOp::Forget { id: Some(12), .. }) => Ok(json!({ "forgotten": [12] })),
+        Action::Memory(MemoryOp::Forget { .. }) => Err(Refusal::new(404, "not_found", "Nothing like that to forget.")),
+        Action::Memory(MemoryOp::List { .. }) => Ok(json!({ "facts": [{ "id": 12, "kind": "profile", "text": "Lives in Hanoi", "key": "home_city", "value": "Hanoi", "since": "2026-10", "source": "chat" }] })),
+        Action::Memory(MemoryOp::Search { .. }) => Err(Refusal::memory_off()),
+        Action::Memory(MemoryOp::Open) => Ok(json!({})),
+        _ => Ok(json!({})),
+    })
+    .unwrap();
+    let auth = format!("Bearer {}", host.user_token());
+    let h = [("Authorization", auth.as_str())];
+    let p = host.port();
+    let r = request(p, "POST", "/v1/memory/remember", &h, Some(&json!({ "text": "Lives in Hanoi" }))).unwrap();
+    assert_eq!((r.status, r.body), (200, json!({ "ok": true, "id": 12, "outcome": "created" })));
+    let r = request(p, "POST", "/v1/memory/remember", &h, Some(&json!({ "text": "my key is sk-abc" }))).unwrap();
+    assert_eq!((r.status, r.body["error"]["code"].as_str(), r.body["error"]["message"].as_str()), (400, Some("secret"), Some("That looks like a password or key, so I won't keep it.")));
+    let r = request(p, "POST", "/v1/memory/remember", &h, Some(&json!({ "text": "off" }))).unwrap();
+    assert_eq!((r.status, r.body["error"]["code"].as_str()), (409, Some("memory_off")));
+    assert_eq!(request(p, "POST", "/v1/memory/forget", &h, Some(&json!({ "id": 12 }))).unwrap().body, json!({ "ok": true, "forgotten": [12] }));
+    let r = request(p, "POST", "/v1/memory/forget", &h, Some(&json!({ "id": 99 }))).unwrap();
+    assert_eq!((r.status, r.body["error"]["code"].as_str()), (404, Some("not_found")));
+    let r = request(p, "GET", "/v1/memory/list", &h, None).unwrap();
+    assert_eq!((r.status, r.body["facts"][0]["since"].as_str()), (200, Some("2026-10")));
+    assert_eq!(request(p, "GET", "/v1/memory/search?q=x", &h, None).unwrap().status, 409);
+    assert_eq!(request(p, "POST", "/v1/memory/open", &h, Some(&json!({}))).unwrap().body, json!({ "ok": true }));
+    drop(host);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn memory_cli_helpers_build_requests_and_one_line_facts() {
+    use super::memory::{cli_forget, cli_list, cli_remember, cli_search, fact_line, since_label, split_key};
+    assert_eq!(split_key("people:sister"), Ok(("people".into(), Some("sister".into()))));
+    assert_eq!(split_key("home_city"), Ok(("home_city".into(), None)));
+    assert!(split_key("").is_err() && split_key("a:").is_err() && split_key(":b").is_err());
+    assert_eq!(since_label("2026-10"), "Oct 2026");
+    assert_eq!(since_label("2026-01-15"), "Jan 2026");
+    assert_eq!(since_label("soon"), "soon");
+    assert_eq!(since_label("2026-13"), "2026-13");
+    assert_eq!(fact_line(&json!({ "id": 12, "text": "Lives in Hanoi", "since": "2026-10" })), "#12 Lives in Hanoi (since Oct 2026)");
+    assert_eq!(fact_line(&json!({ "id": 3, "text": "Likes tea", "since": null })), "#3 Likes tea");
+    assert_eq!(cli_remember(&["Lives", "in", "Hanoi", "--key", "home_city", "--importance=8", "--from", "2026-10"]).unwrap(), json!({ "text": "Lives in Hanoi", "key": "home_city", "importance": 8, "from": "2026-10" }));
+    for bad in [&[][..], &["--key", "k"], &["x", "--importance", "11"], &["x", "--importance", "z"], &["x", "--key"], &["x", "--nope"]] {
+        assert!(cli_remember(bad).is_err(), "{bad:?}");
+    }
+    assert_eq!(cli_forget(&["12"]).unwrap(), json!({ "id": 12 }));
+    assert_eq!(cli_forget(&["--key", "people:sister"]).unwrap(), json!({ "key": "people:sister" }));
+    for bad in [&[][..], &["0"], &["x"], &["1", "--key", "a"], &["1", "2"]] {
+        assert!(cli_forget(bad).is_err(), "{bad:?}");
+    }
+    assert_eq!(cli_list(&[]).unwrap(), "/v1/memory/list");
+    assert_eq!(cli_list(&["--kind", "pref erence"]).unwrap(), "/v1/memory/list?kind=pref%20erence");
+    assert_eq!(cli_search(&["hanoi", "food&x=1"]).unwrap(), "/v1/memory/search?q=hanoi%20food%26x%3D1");
+    assert_eq!(cli_search(&["a", "--limit", "7"]).unwrap(), "/v1/memory/search?q=a&limit=7");
+    for bad in [&[][..], &["--limit", "3"], &["a", "--limit", "0"], &["a", "--limit", "21"]] {
+        assert!(cli_search(bad).is_err(), "{bad:?}");
+    }
 }

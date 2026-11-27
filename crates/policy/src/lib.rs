@@ -4,6 +4,7 @@
 //! and the taint mark, kept per agent in `<state_dir>/policy.json`. 2market's
 //! spend allowances, `twomarket` tool and panel checks are not ported.
 
+pub mod memory;
 pub mod rules;
 
 use std::collections::{HashMap, HashSet};
@@ -71,6 +72,8 @@ pub struct AgentCtx {
     /// Files the agent never opens, by any tool (the host API's port file, with
     /// the person's token).
     pub secrets: Vec<PathBuf>,
+    /// Folders the agent never reaches by any tool or shell word (the memory store); see `memory::PRIVATE`.
+    pub private_dirs: Vec<PathBuf>,
 }
 
 impl AgentCtx {
@@ -127,7 +130,7 @@ pub const MODES: [&str; 4] = ["ask", "allowlist", "full", "skip"];
 
 /// The default rules: computed, never stored, shown with `origin: "default"`.
 /// The `buddy` commands that drive the bear's own body and reminders run without a card, marked or not.
-const DEFAULT_RULES: [(&str, &str, &str); 11] = [
+const DEFAULT_RULES: [(&str, &str, &str); 12] = [
     ("d1", "deny", "Write(.buddy/**)"),
     ("d2", "deny", "Edit(.buddy/**)"),
     ("d3", "ask", "Shell(curl:*)"),
@@ -139,6 +142,7 @@ const DEFAULT_RULES: [(&str, &str, &str); 11] = [
     ("d9", "allow", "Shell(buddy music:*)"),
     ("d10", "allow", "Shell(buddy widget list:*)"),
     ("d11", "allow", "Shell(buddy browser snapshot:*)"),
+    ("d12", "allow", "Shell(buddy memory:*)"),
 ];
 /// `buddy browser <these>` act on a page for the agent: while the conversation is marked they
 /// always ask, whatever the mode or the person's rules (design `## widgets`).
@@ -430,9 +434,15 @@ impl Production {
             if seg.words.iter().any(|w| at.is_secret(w.split_once('=').map_or(w, |(_, v)| v))) {
                 return Verdict::Deny(SECRET.into());
             }
+            if seg.words.iter().any(|w| at.is_private(w.split_once('=').map_or(w, |(_, v)| v))) {
+                return Verdict::Deny(memory::PRIVATE.into());
+            }
             if let Some((id, _)) = first(&rules.deny, |p| p.matches_segment(seg)) {
                 return Verdict::Deny(format!("A rule denies this command: {}.", pattern_text(id, f)));
             }
+        }
+        if tainted && memory::memory_write(command) {
+            return Verdict::Ask(memory::write_card(command), None);
         }
         if tainted && outbound(command) {
             return Verdict::Ask(
@@ -558,6 +568,9 @@ impl Production {
         }
         if at.is_secret(path) {
             return Verdict::Deny(SECRET.into());
+        }
+        if at.is_private(path) {
+            return Verdict::Deny(memory::PRIVATE.into());
         }
         let t = rules::target(&at.work_dir, at.home.as_deref(), path);
         // A repo's `.git` holds config whose programs `git status|diff|log` run.

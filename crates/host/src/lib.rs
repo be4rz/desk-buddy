@@ -102,6 +102,8 @@ pub enum Action {
     Widget(WidgetOp),
     /// `buddy screen look` (and the agent's `screen_look` tool): the app reads the screen text.
     Screen(ScreenOp),
+    /// `buddy memory …`: the app's store of what the bear remembers (design I4).
+    Memory(MemoryOp),
 }
 
 /// `POST /v1/screen/look {image}`. Reply `{text, truncated, noText, width, height, lines}` and, with
@@ -652,6 +654,7 @@ fn serve(sh: &Shared, mut req: Request) {
             };
             act(sh, req, HostEvent { caller, action: Action::Screen(ScreenOp::Look { image }), turn, after_turn }, Value::Null)
         }
+        (m, p) if p.starts_with("/v1/memory/") => memory::serve(sh, req, caller, turn, after_turn, &m, p, &body),
         (_, "/v1/status" | "/v1/say" | "/v1/screen/look" | "/v1/mascot/emote" | "/v1/mascot/do" | "/v1/mascot/stop" | "/v1/mascot/list" | "/v1/remind" | "/v1/reminders" | "/v1/remind/cancel" | "/v1/widget/open" | "/v1/widget/list" | "/v1/widget/commands" | "/v1/widget/close" | "/v1/widget/action") => refuse(req, 405, "method", "Wrong method."),
         _ => refuse(req, 404, "not_found", "No such endpoint."),
     }
@@ -676,6 +679,8 @@ fn read_body(req: &mut Request) -> Result<Value, String> {
 }
 
 pub mod client;
+pub mod memory;
+pub use memory::MemoryOp;
 
 #[cfg(test)]
 mod tests;

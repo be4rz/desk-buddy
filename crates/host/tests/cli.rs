@@ -338,3 +338,159 @@ fn a_refused_screen_look_prints_the_message_and_exits_1() {
         let _ = std::fs::remove_dir_all(dir);
     }
 }
+
+// ------------------------------------------------------------ buddy memory (design I4)
+
+/// A host whose sink plays the memory store: it records each op and answers like the app.
+fn memory_host(name: &str, store: bool) -> (Host, PathBuf, Arc<Mutex<Vec<host::MemoryOp>>>) {
+    let dir = std::env::temp_dir().join(format!("buddy-cli-{name}-{}-{}", std::process::id(), random_hex(3)));
+    let seen: Arc<Mutex<Vec<host::MemoryOp>>> = Arc::default();
+    let s2 = seen.clone();
+    let host = Host::start(&dir.join("host.json"), move |e| {
+        let Action::Memory(op) = e.action else { return Ok(json!({})) };
+        if !store {
+            return Err(Refusal::no_memory());
+        }
+        s2.lock().unwrap().push(op.clone());
+        let fact = |id: i64, text: &str, since: Value| json!({ "id": id, "kind": "profile", "text": text, "key": null, "value": null, "since": since, "source": "chat" });
+        match op {
+            host::MemoryOp::Remember { text, .. } if text.contains("sk-") => Err(Refusal::secret()),
+            host::MemoryOp::Remember { .. } => Ok(json!({ "id": 12, "outcome": "created" })),
+            host::MemoryOp::Forget { id: Some(99), .. } => Err(Refusal::new(404, "not_found", "Nothing like that to forget.")),
+            host::MemoryOp::Forget { id: Some(id), .. } => Ok(json!({ "forgotten": [id] })),
+            host::MemoryOp::Forget { .. } => Ok(json!({ "forgotten": [3, 4] })),
+            host::MemoryOp::List { kind: Some(k) } if k == "episode" => Ok(json!({ "facts": [] })),
+            host::MemoryOp::List { .. } => Ok(json!({ "facts": [fact(12, "Lives in Hanoi", json!("2026-10")), fact(13, "Likes tea", Value::Null)] })),
+            host::MemoryOp::Search { q, .. } if q == "nothing" => Ok(json!({ "facts": [] })),
+            host::MemoryOp::Search { .. } => Ok(json!({ "facts": [fact(12, "Lives in Hanoi", json!("2026-10"))] })),
+            _ => Ok(json!({})),
+        }
+    })
+    .unwrap();
+    (host, dir, seen)
+}
+
+fn out(o: &Output) -> String {
+    String::from_utf8_lossy(&o.stdout).into_owned()
+}
+
+fn err(o: &Output) -> String {
+    String::from_utf8_lossy(&o.stderr).into_owned()
+}
+
+#[test]
+fn memory_commands_print_one_line_per_fact_and_send_their_ops() {
+    use host::MemoryOp;
+    let (host, dir, seen) = memory_host("memory-ok", true);
+    let file = host.file().to_path_buf();
+    let o = buddy(&file, &["memory", "remember", "Lives", "in", "Hanoi", "--key", "home_city", "--importance", "8", "--from=2026-10"]);
+    assert_eq!((code(&o), out(&o).as_str()), (0, "#12 created\n"), "{}", err(&o));
+    assert_eq!(
+        seen.lock().unwrap().last(),
+        Some(&MemoryOp::Remember { text: "Lives in Hanoi".into(), key: Some("home_city".into()), qualifier: None, value: None, kind: None, importance: Some(8), from: Some("2026-10".into()) })
+    );
+    let o = buddy(&file, &["memory", "forget", "12"]);
+    assert_eq!((code(&o), out(&o).as_str()), (0, "forgot #12\n"));
+    assert_eq!(seen.lock().unwrap().last(), Some(&MemoryOp::Forget { id: Some(12), key: None, qualifier: None }));
+    let o = buddy(&file, &["memory", "forget", "--key", "people:sister"]);
+    assert_eq!((code(&o), out(&o).as_str()), (0, "forgot #3 #4\n"));
+    assert_eq!(seen.lock().unwrap().last(), Some(&MemoryOp::Forget { id: None, key: Some("people".into()), qualifier: Some("sister".into()) }));
+    let o = buddy(&file, &["memory", "list"]);
+    assert_eq!((code(&o), out(&o).as_str()), (0, "#12 Lives in Hanoi (since Oct 2026)\n#13 Likes tea\n"));
+    assert_eq!(buddy(&file, &["memory", "list", "--kind", "episode"]).stdout, b"nothing remembered yet\n");
+    assert_eq!(seen.lock().unwrap().last(), Some(&MemoryOp::List { kind: Some("episode".into()) }));
+    let o = buddy(&file, &["memory", "search", "where", "do", "I", "live", "--limit", "3"]);
+    assert_eq!((code(&o), out(&o).as_str()), (0, "#12 Lives in Hanoi (since Oct 2026)\n"));
+    assert_eq!(seen.lock().unwrap().last(), Some(&MemoryOp::Search { q: "where do I live".into(), limit: 3 }));
+    assert_eq!(out(&buddy(&file, &["memory", "search", "nothing"])), "no matches\n");
+    let o = buddy(&file, &["memory", "open"]);
+    assert_eq!((code(&o), out(&o).as_str()), (0, "opened\n"));
+    assert_eq!(seen.lock().unwrap().last(), Some(&MemoryOp::Open));
+    drop(host);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn memory_json_prints_the_reply_for_every_subcommand() {
+    let (host, dir, _) = memory_host("memory-json", true);
+    let file = host.file().to_path_buf();
+    let json_of = |args: &[&str]| {
+        let o = buddy(&file, args);
+        assert_eq!(code(&o), 0, "{args:?}: {}", err(&o));
+        serde_json::from_slice::<Value>(&o.stdout).unwrap_or_else(|e| panic!("{args:?}: {e}: {}", out(&o)))
+    };
+    assert_eq!(json_of(&["memory", "remember", "x", "--json"]), json!({ "ok": true, "id": 12, "outcome": "created" }));
+    assert_eq!(json_of(&["--json", "memory", "forget", "12"]), json!({ "ok": true, "forgotten": [12] }));
+    let v = json_of(&["memory", "list", "--json"]);
+    assert_eq!((v["facts"][0]["id"].as_i64(), v["facts"][0]["since"].as_str(), v["facts"][1]["since"].is_null()), (Some(12), Some("2026-10"), true));
+    assert_eq!(json_of(&["memory", "search", "hanoi", "--json"])["facts"][0]["text"], "Lives in Hanoi");
+    assert_eq!(json_of(&["memory", "open", "--json"]), json!({ "ok": true }));
+    drop(host);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn memory_refusals_exit_1_usage_exits_2_and_no_store_is_503() {
+    let (host, dir, seen) = memory_host("memory-bad", true);
+    let file = host.file().to_path_buf();
+    // refused by the app: exit 1, with its message
+    let o = buddy(&file, &["memory", "remember", "my key is sk-abc"]);
+    assert_eq!(code(&o), 1);
+    assert!(err(&o).contains("That looks like a password or key, so I won't keep it."), "{}", err(&o));
+    let o = buddy(&file, &["memory", "forget", "99"]);
+    assert_eq!(code(&o), 1);
+    assert!(err(&o).contains("Nothing like that to forget."));
+    // usage: exit 2, before or at the host, and nothing reaches the store
+    let before = seen.lock().unwrap().len();
+    for args in [
+        &["memory"][..],
+        &["memory", "nope"],
+        &["memory", "remember"],
+        &["memory", "remember", "x", "--importance", "11"],
+        &["memory", "remember", "x", "--bogus"],
+        &["memory", "remember", "x", "--key"],
+        &["memory", "remember", "x", "--key", "people:"],
+        &["memory", "remember", &"y".repeat(201)],
+        &["memory", "forget"],
+        &["memory", "forget", "abc"],
+        &["memory", "forget", "1", "--key", "a"],
+        &["memory", "list", "--bogus"],
+        &["memory", "search"],
+        &["memory", "search", "x", "--limit", "0"],
+        &["memory", "search", "x", "--limit", "21"],
+        &["memory", "open", "now"],
+    ] {
+        let o = buddy(&file, args);
+        assert_eq!(code(&o), 2, "{args:?}: {}", err(&o));
+    }
+    assert_eq!(seen.lock().unwrap().len(), before);
+    drop(host);
+    let _ = std::fs::remove_dir_all(dir);
+
+    // a sink with no store
+    let (host, dir, _) = memory_host("memory-none", false);
+    for args in [&["memory", "list"][..], &["memory", "search", "x"], &["memory", "remember", "x"], &["memory", "forget", "1"], &["memory", "open"]] {
+        let o = buddy(host.file(), args);
+        assert_eq!(code(&o), 1, "{args:?}");
+        assert!(err(&o).contains("desk-buddy's memory isn't available.") && err(&o).contains("503"), "{}", err(&o));
+    }
+    let o = buddy(host.file(), &["memory", "list", "--json"]);
+    assert_eq!(code(&o), 1);
+    drop(host);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn help_lists_the_memory_commands_and_marks_the_reads() {
+    let (host, dir, _) = memory_host("memory-help", true);
+    let o = buddy(host.file(), &["--help", "--json"]);
+    assert_eq!(code(&o), 0);
+    let v: Value = serde_json::from_slice(&o.stdout).unwrap();
+    let cmds = v["commands"].as_array().unwrap();
+    for (prefix, read_only) in [("buddy memory remember", false), ("buddy memory forget", false), ("buddy memory list", true), ("buddy memory search", true), ("buddy memory open", true)] {
+        let c = cmds.iter().find(|c| c["usage"].as_str().unwrap_or("").starts_with(prefix)).unwrap_or_else(|| panic!("{prefix} is missing from help"));
+        assert_eq!(c["readOnly"], read_only, "{prefix}");
+    }
+    drop(host);
+    let _ = std::fs::remove_dir_all(dir);
+}

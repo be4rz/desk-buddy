@@ -1,0 +1,12 @@
+// Memory (design memory-core): "What do you remember about me?" The agent answers by opening the window:
+// its `buddy memory open` reaches the host (MemoryOp::Open), which opens or focuses the What I remember window.
+// Replay with BUDDY_EVENTS and run `buddy memory open` against the same BUDDY_HOME at ~4 s: the log shows
+// `[buddy] memory: window open`. The bear thinks, works the tool, speaks and settles as in any turn.
+{"at_ms": 0, "poke": "click"}
+{"at_ms": 200, "poke": "prompt_open"}
+{"at_ms": 2500, "poke": "prompt_sent"}
+{"at_ms": 2500, "event": {"type": "thinking"}}
+{"at_ms": 4000, "event": {"type": "working", "kind": "buddy", "tool": "buddy memory open"}}
+{"at_ms": 4600, "event": {"type": "speaking", "text": "Here's what I keep. You can fix or forget anything in it."}}
+{"at_ms": 6500, "event": {"type": "idle"}}
+{"at_ms": 9000, "event": {"type": "settled"}}

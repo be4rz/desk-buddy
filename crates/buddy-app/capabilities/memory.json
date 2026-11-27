@@ -1,0 +1,20 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "memory",
+  "description": "The What I remember window (tray What I remember…, or buddy memory open): listen for memory://state and call the memory_* commands. Each command also checks its caller's window label (src/caller.rs). The agent's pages and the bubble get none of them.",
+  "windows": [
+    "memory"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-memory-state",
+    "allow-memory-add",
+    "allow-memory-edit",
+    "allow-memory-forget",
+    "allow-memory-resolve",
+    "allow-memory-forget-all",
+    "allow-memory-set-enabled",
+    "allow-memory-close"
+  ]
+}

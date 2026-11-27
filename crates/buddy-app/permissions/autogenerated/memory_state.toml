@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-memory-state"
+description = "Enables the memory_state command without any pre-configured scope."
+commands.allow = ["memory_state"]
+
+[[permission]]
+identifier = "deny-memory-state"
+description = "Denies the memory_state command without any pre-configured scope."
+commands.deny = ["memory_state"]

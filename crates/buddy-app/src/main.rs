@@ -25,6 +25,9 @@
 //! Personality: the tray's Personality ▸ picks a preset of the pack's persona, Customize… opens
 //! `persona/` (page `web/persona/`); `settings.persona` is the person's layer (v3).
 //!
+//! Memory: `memory/` owns the store at `BUDDY_HOME/memory` (`settings.memory`, v5; `BUDDY_MEMORY=0|1`),
+//! the tray's What I remember… (or `buddy memory open`) opens its window (page `web/memory/`).
+//!
 //! Studio (p6): the tray's Studio… opens `studio/` (page `web/studio/`) on the running pack.
 //! `buddy-app --studio [<pack-dir>]` runs the studio alone: no bear, agent, lock or host.json,
 //! so it can run next to the app on the same `BUDDY_HOME`; it writes only the mascot library
@@ -38,6 +41,7 @@ mod harness;
 mod idle_lines;
 mod instance;
 mod media_os;
+mod memory;
 mod panel;
 mod persona;
 mod screen;
@@ -295,6 +299,14 @@ fn main() {
             persona::persona_reset,
             persona::persona_open_studio,
             persona::persona_close,
+            memory::window::memory_state,
+            memory::window::memory_add,
+            memory::window::memory_edit,
+            memory::window::memory_forget,
+            memory::window::memory_resolve,
+            memory::window::memory_forget_all,
+            memory::window::memory_set_enabled,
+            memory::window::memory_close,
             widgets::widget_ready,
             widgets::widget_reply,
             widgets::widget_state,
@@ -349,6 +361,7 @@ fn main() {
                 persona: persona::tray(&pack, &settings.persona.user),
             };
             let wanted = settings.model.clone();
+            let memory_on = settings.memory.enabled_now();
             let home2 = home.clone();
             driver::start(driver::Init { pack, art, settings, home, panel, brain, t0 }, app.handle().clone());
             let win = bubble::window::BubbleWin::new(app, mtm)?;
@@ -357,9 +370,13 @@ fn main() {
             signin::window::init(app.handle().clone());
             persona::window::init(app.handle().clone());
             studio::window::init(app.handle().clone());
+            memory::window::init(app.handle().clone());
+            // before the harness: the agent starts with the memory section (a failed open is the window's error)
+            let mem = memory::start(&home2, memory_on);
             let mut host_port = None;
             match harness::Harness::start(&home2, &wanted) {
                 Ok(h) => {
+                    memory::jobs::start(mem);
                     host_port = h.host_port();
                     let view = h.policy_view();
                     driver::with_app(|a| a.policy_changed(&view));

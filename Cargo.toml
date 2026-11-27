@@ -22,6 +22,7 @@ bridge = { path = "crates/bridge" }
 host = { path = "crates/host" }
 widgets = { path = "crates/widgets" }
 studio = { path = "crates/studio" }
+memory = { path = "crates/memory" }
 
 # Lean dev builds (design §6.1): deps optimized as in S1, no full debuginfo.
 [profile.dev]

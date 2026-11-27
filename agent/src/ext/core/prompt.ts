@@ -1,7 +1,8 @@
 // The prefix sections, in a fixed order: preamble, the persona ("Who you are", when the app sends one), the body
-// (when the app sends one), then the skill index. The preamble and the skill index are fixed for a sidecar's life;
-// the persona can change with `set_persona` (the person picked another personality), and the next model request
-// carries it. Anything else that changes goes in as a message.
+// (when the app sends one), the skill index, then the memory ("What I know about you"), last so a change only
+// invalidates the tail of the cached prefix. The preamble and the skill index are fixed for a sidecar's life;
+// the persona can change with `set_persona` (the person picked another personality) and the memory with
+// `set_memory`, and the next model request carries it. Anything else that changes goes in as a message.
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -31,6 +32,18 @@ let persona: string | undefined;
  * over `PERSONA_MAX_CHARS` (an Init from a host that skipped the check) is dropped, never sent. */
 export function setPersona(text: string | null | undefined) {
   persona = typeof text === "string" && text.trim() && text.length <= PERSONA_MAX_CHARS ? text : undefined;
+}
+
+/** The longest memory section the sidecar takes (the app renders at most about 2,000 characters). */
+export const MEMORY_MAX_CHARS = 4000;
+
+/** The "What I know about you" section's text; `undefined` renders no text. Read at every model request. */
+let memory: string | undefined;
+
+/** Replace the memory text (`undefined`, null or blank empties it); the next model request carries it. A text
+ * over `MEMORY_MAX_CHARS` (an Init from a host that skipped the check) is dropped, never sent. */
+export function setMemory(text: string | null | undefined) {
+  memory = typeof text === "string" && text.trim() && text.length <= MEMORY_MAX_CHARS ? text : undefined;
 }
 
 const NO_SHELL = "There is no shell on this machine yet: work with read, write and edit.";
@@ -79,6 +92,7 @@ export function sections(init: Init): PromptSection[] {
     : undefined;
   const body = init.body?.trim() ? init.body : undefined;
   setPersona(init.persona);
+  setMemory(init.memory);
   return [
     section("preamble", () => (init.platform === "windows" && !init.shellPath ? `${PREAMBLE}\n${NO_SHELL}` : PREAMBLE), { tag: false }),
     // Rendered by the app (`mascot_core::persona::prompt_text`) with its own "## Who you are" heading; always listed,
@@ -87,5 +101,8 @@ export function sections(init: Init): PromptSection[] {
     // Rendered by the app (`mascot_core::body::prompt_text`) with its own "## Your body" heading.
     ...(body ? [section("body", () => body, { tag: false })] : []),
     section("skills", () => skillsText),
+    // Rendered by the app (`crates/memory` render.rs) with its own "## What I know about you" heading. Listed last and
+    // always present, empty until set, so a later `set_memory` has a section to fill.
+    section("memory", () => memory, { tag: false }),
   ];
 }

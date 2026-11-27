@@ -13,10 +13,11 @@ import { setCurrentModel, setModels } from "./current.ts";
 import { executionEnv } from "./env.ts";
 import { compactionSettings } from "./ext/context/index.ts";
 import { bindRoot, command, EVENT_KIND, INPUT_KIND, recordEvent } from "./ext/core/index.ts";
-import { PERSONA_MAX_CHARS, setPersona } from "./ext/core/prompt.ts";
+import { MEMORY_MAX_CHARS, PERSONA_MAX_CHARS, setMemory, setPersona } from "./ext/core/prompt.ts";
 import { currentTrigger, gate, markAsked, setTrigger, type Trigger } from "./ext/gate/index.ts";
 import { addFakeOAuth, rustInteraction } from "./ext/auth/index.ts";
 import { bindJobs } from "./ext/jobs/index.ts";
+import { bindMemory } from "./ext/memory/index.ts";
 import { bindHarness } from "./ext/task/index.ts";
 import { buildModels } from "./models.ts";
 import { CmdError, type Cmd, exit, type Init, type ModelRef, requestSource, send, type Status, V } from "./protocol.ts";
@@ -103,6 +104,7 @@ export async function host(init: Init, input: AsyncIterator<Record<string, unkno
   bindRoot(conv);
   bindHarness(harness);
   bindJobs(harness, conv);
+  bindMemory(conv);
   const agent = await conv.agent(ctx);
   const want = piModel(model);
   // The stored agent keeps the tools of the sidecar that created it: offer this build's.
@@ -252,6 +254,14 @@ export async function host(init: Init, input: AsyncIterator<Record<string, unkno
         if (cmd.persona != null && typeof cmd.persona !== "string") throw new CmdError("bad_request", "set_persona needs a persona text or null.");
         if (typeof cmd.persona === "string" && cmd.persona.length > PERSONA_MAX_CHARS) throw new CmdError("bad_request", `The persona text is over ${PERSONA_MAX_CHARS} characters.`);
         setPersona(cmd.persona as string | null | undefined);
+        return {};
+      }
+      case "set_memory": {
+        // The memory section changed (the app flushes it right before a prompt): the next model request carries it.
+        // Null or blank empties it.
+        if (cmd.memory != null && typeof cmd.memory !== "string") throw new CmdError("bad_request", "set_memory needs a memory text or null.");
+        if (typeof cmd.memory === "string" && cmd.memory.length > MEMORY_MAX_CHARS) throw new CmdError("bad_request", `The memory text is over ${MEMORY_MAX_CHARS} characters.`);
+        setMemory(cmd.memory as string | null | undefined);
         return {};
       }
       case "models": {

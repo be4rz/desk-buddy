@@ -51,6 +51,8 @@ export type DriverOptions = {
   models?: typeof FAKE_MODELS;
   /** `Init.persona`: the "Who you are" section text. */
   persona?: string;
+  /** `Init.memory`: the "What I know about you" section text. */
+  memory?: string;
 };
 
 export class Driver {
@@ -97,6 +99,7 @@ export class Driver {
       host: o.host ?? null,
       settings: { stepLimit: 50, shutdownMs: 3000, retryDelayMs: 50, ...o.settings, ...settings },
       ...(o.persona === undefined ? {} : { persona: o.persona }),
+      ...(o.memory === undefined ? {} : { memory: o.memory }),
     };
   }
 

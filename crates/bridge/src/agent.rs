@@ -30,6 +30,10 @@ const READY_WAIT: Duration = Duration::from_secs(20);
 const CMD_WAIT: Duration = Duration::from_secs(15);
 /// The longest persona text the sidecar takes, in UTF-16 units (`agent/src/ext/core/prompt.ts`).
 pub const PERSONA_MAX_CHARS: usize = 20_000;
+/// The longest memory section the sidecar takes, in UTF-16 units (`agent/src/ext/core/prompt.ts`).
+pub const MEMORY_MAX_CHARS: usize = 4_000;
+/// `memory.extract` makes one model call of up to 60 s in the sidecar.
+const EXTRACT_WAIT: Duration = Duration::from_secs(65);
 /// A sign-in waits for the person (a browser, a pasted code).
 const LOGIN_WAIT: Duration = Duration::from_secs(600);
 
@@ -92,6 +96,10 @@ pub struct AgentSpec {
     pub body: Option<String>,
     /// The prompt's "Who you are" section for the first start (`Init.persona`); `Agent::set_persona` changes it later.
     pub persona: Option<String>,
+    /// The prompt's "What I know about you" section for the first start (`Init.memory`); `Agent::set_memory` changes it later.
+    pub memory: Option<String>,
+    /// Folders the agent's file tools and shell words may not touch (`AgentCtx.private_dirs`): where memory lives.
+    pub private_dirs: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -132,6 +140,10 @@ pub struct Agent {
     model: Mutex<Option<ModelRef>>,
     /// The "Who you are" text the next start uses; `set_persona` changes it.
     persona: Mutex<Option<String>>,
+    /// The "What I know about you" text the next start and the next prompt use; `set_memory` changes it.
+    memory: Mutex<Option<String>>,
+    /// `memory` changed since the running sidecar last took it: the next prompt sends it once.
+    memory_dirty: AtomicBool,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -142,7 +154,8 @@ impl Agent {
     pub fn new(spec: AgentSpec, policy: Arc<Production>, host: Arc<Host>, creds: Arc<Credentials>, sink: impl Fn(AgentEvent) + Send + Sync + 'static) -> Arc<Agent> {
         let spec_model = spec.model.clone();
         let spec_persona = spec.persona.clone();
-        Arc::new(Agent { spec, policy, host, creds, sink: Box::new(sink), run: Mutex::new(None), gen: AtomicU64::new(0), exited: AtomicU64::new(0), readied: AtomicU64::new(0), mapper: Mutex::new(Mapper::new()), ready: Mutex::new(None), auth: Mutex::new(None), model: Mutex::new(spec_model), persona: Mutex::new(spec_persona) })
+        let spec_memory = spec.memory.clone();
+        Arc::new(Agent { spec, policy, host, creds, sink: Box::new(sink), run: Mutex::new(None), gen: AtomicU64::new(0), exited: AtomicU64::new(0), readied: AtomicU64::new(0), mapper: Mutex::new(Mapper::new()), ready: Mutex::new(None), auth: Mutex::new(None), model: Mutex::new(spec_model), persona: Mutex::new(spec_persona), memory: Mutex::new(spec_memory), memory_dirty: AtomicBool::new(false) })
     }
 
     pub fn id(&self) -> &str {
@@ -163,7 +176,7 @@ impl Agent {
     }
 
     pub fn ctx(&self, gen: u64) -> AgentCtx {
-        AgentCtx { agent_id: self.spec.agent_id.clone(), work_dir: self.spec.work_dir.clone(), state_dir: self.spec.state_dir.clone(), skills_dir: Some(self.spec.skills_dir.clone()), gen, home: Some(self.spec.home.clone()), secrets: vec![self.host.file().to_path_buf()] }
+        AgentCtx { agent_id: self.spec.agent_id.clone(), work_dir: self.spec.work_dir.clone(), state_dir: self.spec.state_dir.clone(), skills_dir: Some(self.spec.skills_dir.clone()), gen, home: Some(self.spec.home.clone()), secrets: vec![self.host.file().to_path_buf()], private_dirs: self.spec.private_dirs.clone() }
     }
 
     fn exit_file(&self) -> PathBuf {
@@ -226,6 +239,9 @@ impl Agent {
         fs::create_dir_all(&self.spec.state_dir).map_err(|e| BridgeError::new("io", e.to_string()))?;
         fs::create_dir_all(&self.spec.work_dir).map_err(|e| BridgeError::new("io", e.to_string()))?;
         let token = self.host.issue(&self.spec.agent_id, gen);
+        // This start takes the stored section as `Init.memory`. Clear first, then read: a `set_memory` that lands
+        // in between marks it dirty again and the next prompt sends the same text once more, never a stale one.
+        self.memory_dirty.store(false, Ordering::SeqCst);
         // Until its exit is recorded, a start that vanishes was a crash.
         let before = fs::read_to_string(self.exit_file()).ok();
         let _ = fs::write(self.exit_file(), "running");
@@ -245,6 +261,7 @@ impl Agent {
             settings,
             body: self.spec.body.clone(),
             persona: lock(&self.persona).clone(),
+            memory: lock(&self.memory).clone(),
         };
         // The sidecar's own environment: nothing of the app's, no key.
         let env = vec![
@@ -317,12 +334,45 @@ impl Agent {
         lock(&self.persona).clone()
     }
 
+    /// The "What I know about you" section of this and every later start. It only stores the text and marks it
+    /// dirty: nothing is sent now. The next `prompt` or `prompt_sense` sends a dirty section once, just before the
+    /// prompt, so several changes cost one prompt-cache miss and never land mid-turn. A text over the sidecar's cap
+    /// (`MEMORY_MAX_CHARS`) is refused here and never kept. `None` (or blank) empties the section.
+    pub fn set_memory(&self, text: Option<String>) -> Res<()> {
+        if text.as_ref().is_some_and(|t| t.encode_utf16().count() > MEMORY_MAX_CHARS) {
+            return Err(BridgeError::new("usage", format!("The memory text is over {MEMORY_MAX_CHARS} characters.")));
+        }
+        *lock(&self.memory) = text;
+        self.memory_dirty.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+
+    pub fn memory(&self) -> Option<String> {
+        lock(&self.memory).clone()
+    }
+
+    /// Send a dirty memory section to the running sidecar, once. A failed send stays dirty and fails the caller.
+    fn flush_memory(&self) -> Res<()> {
+        if !self.memory_dirty.swap(false, Ordering::SeqCst) {
+            return Ok(());
+        }
+        let text = lock(&self.memory).clone();
+        self.cmd("set_memory", json!({ "memory": text })).map(|_| ()).inspect_err(|_| self.memory_dirty.store(true, Ordering::SeqCst))
+    }
+
+    /// One batch of the memory extractor (`crates/memory` `Store::extract_args`): the sidecar reads the turns' words
+    /// and makes one model call outside the chat. Errors: `no_provider`, `timeout`, `bad_output`, `model_error`.
+    pub fn memory_extract(&self, args: Value) -> Res<Value> {
+        self.bridge()?.cmd("memory.extract", args, EXTRACT_WAIT)
+    }
+
     pub fn model(&self) -> Option<ModelRef> {
         lock(&self.model).clone()
     }
 
     /// Send the person's message; returns its request id.
     pub fn prompt(&self, text: &str) -> Res<String> {
+        self.flush_memory()?;
         let id = new_request_id();
         self.cmd("prompt", json!({ "requestId": id, "text": text, "source": "chat" }))?;
         Ok(id)
@@ -330,6 +380,7 @@ impl Agent {
 
     /// A sense-triggered turn (the attention budget allowed it); returns its `s:` request id.
     pub fn prompt_sense(&self, summary: &str) -> Res<String> {
+        self.flush_memory()?;
         let id = new_sense_id();
         self.cmd("prompt", json!({ "requestId": id, "text": summary, "source": "sense" }))?;
         Ok(id)

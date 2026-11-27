@@ -494,6 +494,26 @@ mod acl {
         }
     }
 
+    /// Only the What I remember window reaches the memory commands (the agent's pages, the bubble and
+    /// the other windows never), and it gets nothing else.
+    #[test]
+    fn only_the_memory_window_gets_the_memory_commands() {
+        let app = mock_builder().invoke_handler(|i| {
+            i.resolver.resolve(());
+            true
+        }).build(tauri::generate_context!(test = true)).unwrap();
+        let local = "tauri://localhost/memory/index.html";
+        for cmd in ["memory_state", "memory_add", "memory_edit", "memory_forget", "memory_resolve", "memory_forget_all", "memory_set_enabled", "memory_close"] {
+            assert_eq!(call(&app, "memory", local, cmd), Ok(()), "{cmd}");
+            for other in ["bubble", "signin", "persona", "studio", "widget-media"] {
+                assert!(call(&app, other, local, cmd).unwrap_err().contains("not allowed"), "{cmd} from {other}");
+            }
+        }
+        for cmd in ["signin_state", "card_answer", "persona_set", "studio_save", "widget_ready"] {
+            assert!(call(&app, "memory", local, cmd).unwrap_err().contains("not allowed"), "{cmd}");
+        }
+    }
+
     /// Every `"word"` in `text`.
     fn quoted(text: &str) -> std::collections::BTreeSet<String> {
         text.split('"').skip(1).step_by(2).map(str::to_string).collect()
@@ -506,7 +526,7 @@ mod acl {
     fn build_rs_capabilities_and_the_handler_list_the_same_commands() {
         let build: std::collections::BTreeSet<String> = include_str!("../build.rs").lines().filter(|l| l.starts_with("const ")).flat_map(quoted).collect();
         let mut granted = std::collections::BTreeSet::new();
-        for cap in [include_str!("../capabilities/bubble.json"), include_str!("../capabilities/signin.json"), include_str!("../capabilities/persona.json"), include_str!("../capabilities/studio.json")] {
+        for cap in [include_str!("../capabilities/bubble.json"), include_str!("../capabilities/signin.json"), include_str!("../capabilities/persona.json"), include_str!("../capabilities/memory.json"), include_str!("../capabilities/studio.json")] {
             let v: serde_json::Value = serde_json::from_str(cap).unwrap();
             for p in v["permissions"].as_array().unwrap().iter().filter_map(|p| p.as_str()?.strip_prefix("allow-")) {
                 assert!(granted.insert(p.replace('-', "_")), "{p} granted twice");
@@ -525,6 +545,6 @@ mod acl {
         let studio: std::collections::BTreeSet<String> = build.iter().filter(|c| c.starts_with("studio_")).cloned().collect();
         assert_eq!(studio.len(), 22);
         assert_eq!(studio, lists[1], "`--studio` registers exactly the studio commands");
-        assert_eq!(build.len(), 50);
+        assert_eq!(build.len(), 58);
     }
 }

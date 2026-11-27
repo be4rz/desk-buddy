@@ -1,0 +1,16 @@
+[package]
+name = "memory"
+description = "What the bear remembers about the person: the local fact store, reconcile, render, secret filter (D18)"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+rusqlite = { version = "0.32", features = ["bundled"] }
+jiff = "0.2"
+unicode-normalization = "0.1"
+regex = "1"

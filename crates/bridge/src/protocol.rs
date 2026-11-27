@@ -76,6 +76,9 @@ pub struct Init {
     /// The "Who you are" prompt section (`mascot_core::persona::prompt_text`); `set_persona` changes it later.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub persona: Option<String>,
+    /// The "What I know about you" prompt section (`memory::Store::section`); `set_memory` changes it later.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory: Option<String>,
 }
 
 pub fn platform() -> &'static str {
@@ -214,11 +217,17 @@ mod tests {
             settings: serde_json::json!({}),
             body: body.map(str::to_string),
             persona: persona.map(str::to_string),
+            memory: None,
         };
         assert_eq!(serde_json::to_value(init(Some("## Your body\n…"), None)).unwrap()["body"], "## Your body\n…");
         assert!(serde_json::to_value(init(None, None)).unwrap().get("body").is_none());
         // `Init.persona` (the "Who you are" section) is sent as `persona`, and left out when there is none.
         assert_eq!(serde_json::to_value(init(None, Some("## Who you are\n…"))).unwrap()["persona"], "## Who you are\n…");
         assert!(serde_json::to_value(init(None, None)).unwrap().get("persona").is_none());
+        // `Init.memory` is sent as `memory`, and left out when there is none.
+        let mut with = init(None, None);
+        with.memory = Some("## What I know about you\n…".into());
+        assert_eq!(serde_json::to_value(with).unwrap()["memory"], "## What I know about you\n…");
+        assert!(serde_json::to_value(init(None, None)).unwrap().get("memory").is_none());
     }
 }

@@ -3,11 +3,14 @@
 // streaming. Every request is recorded byte-exact. No paid call ever leaves it.
 //
 //   startFake({ script })                     in tests
-//   bun agent/test/support/fake.ts --port <p> --script <file.json>   for QA in the real app
+//   bun agent/test/support/fake.ts --port <p> --script <file.json> [--log <file.jsonl>]   for QA in the real app
+//     (--log appends {path, body} of every request as one JSON line, for tests in another process)
 //
 // A script entry matches the newest user or tool message (`match`: a substring
 // or RegExp; in a JSON file "/re/flags"); the first matching entry with `times`
 // left replies. No match: "OK.".
+
+import { appendFileSync } from "node:fs";
 
 export type Reply = {
   text?: string;
@@ -121,7 +124,7 @@ function matches(m: ScriptEntry["match"], s: string) {
   return typeof m === "string" ? s.includes(m) : m.test(s);
 }
 
-export function startFake({ script = [], port = 0 }: { script?: ScriptEntry[]; port?: number } = {}): Fake {
+export function startFake({ script = [], port = 0, log }: { script?: ScriptEntry[]; port?: number; log?: string } = {}): Fake {
   let entries = script.map((e) => ({ ...e }));
   const recorded: RecordedRequest[] = [];
   const server = Bun.serve({
@@ -132,6 +135,7 @@ export function startFake({ script = [], port = 0 }: { script?: ScriptEntry[]; p
       const body = await req.text();
       const path = new URL(req.url).pathname;
       recorded.push({ at: Date.now(), method: req.method, path, headers: Object.fromEntries(req.headers), body });
+      if (log) appendFileSync(log, `${JSON.stringify({ path, body })}\n`);
       if (req.method !== "POST") return new Response("not found", { status: 404 });
       let json: any;
       try {
@@ -181,6 +185,6 @@ if (import.meta.main) {
   };
   const file = arg("--script");
   const script = file ? parseScript(JSON.parse(await Bun.file(file).text())) : [];
-  const fake = startFake({ script, port: Number(arg("--port") ?? 0) });
+  const fake = startFake({ script, port: Number(arg("--port") ?? 0), log: arg("--log") });
   console.error(`fake provider on ${fake.url} (${script.length} script entries); OpenAI base ${fake.url}/v1`);
 }

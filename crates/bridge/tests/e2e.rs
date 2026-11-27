@@ -57,11 +57,14 @@ struct Fake {
 }
 
 impl Fake {
-    fn start(script: &Path) -> Fake {
+    /// Every request the fake gets is also appended to `log` as one `{path, body}` JSON line.
+    fn start(script: &Path, log: &Path) -> Fake {
         let mut child = Command::new("bun")
             .arg(repo().join("agent/test/support/fake.ts"))
             .args(["--port", "0", "--script"])
             .arg(script)
+            .arg("--log")
+            .arg(log)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
@@ -92,6 +95,8 @@ struct Fx {
     events: Arc<Mutex<Vec<AgentEvent>>>,
     said: Arc<Mutex<Vec<HostEvent>>>,
     policy: Arc<Production>,
+    /// The fake model's request log (JSONL).
+    log: PathBuf,
     _host: Arc<Host>,
     _fake: Fake,
 }
@@ -105,6 +110,9 @@ impl Drop for Fx {
 
 fn script() -> Value {
     json!([
+        // The memory extractor's own request (its user message lists "Exchanges:"): first, so no chat matcher wins.
+        { "match": "/Exchanges:[\\s\\S]*moved to Hanoi/", "reply": { "text": "{\"items\": [{\"exchange\": 1, \"kind\": \"profile\", \"predicate\": \"home_city\", \"qualifier\": null, \"value\": \"Hanoi\", \"text\": \"Lives in Hanoi\", \"importance\": 8, \"valid_from\": \"2026-10\", \"quote\": \"I moved to Hanoi last month\"}]}" } },
+        { "match": "/Exchanges:[\\s\\S]*live in Saigon/", "reply": { "text": "{\"items\": [{\"exchange\": 1, \"kind\": \"profile\", \"predicate\": \"home_city\", \"qualifier\": null, \"value\": \"Saigon\", \"text\": \"Lives in Saigon\", \"importance\": 7, \"valid_from\": null, \"quote\": \"I live in Saigon\"}]}" } },
         { "match": "said", "reply": { "text": "I said hi." } },
         { "match": "set for", "reply": { "text": "Reminder set." } },
         { "match": "remind me", "reply": { "toolCalls": [{ "name": "bash", "args": { "command": "buddy remind --in 2s stretch" } }] } },
@@ -130,11 +138,16 @@ fn fixture_with(name: &str, settings: Value) -> Fx {
 }
 
 fn fixture_full(name: &str, settings: Value, persona: Option<&str>) -> Fx {
+    fixture_mem(name, settings, persona, None)
+}
+
+fn fixture_mem(name: &str, settings: Value, persona: Option<&str>, memory: Option<&str>) -> Fx {
     let root = std::env::temp_dir().join(format!("buddy-e2e-{name}-{}-{}", std::process::id(), policy::random_hex(3)));
     std::fs::create_dir_all(root.join("home")).unwrap();
     let script_path = root.join("script.json");
     std::fs::write(&script_path, script().to_string()).unwrap();
-    let fake = Fake::start(&script_path);
+    let log = root.join("fake.jsonl");
+    let fake = Fake::start(&script_path, &log);
     let said = Arc::new(Mutex::new(Vec::new()));
     let s2 = said.clone();
     // The host's sink: reminders go to the agent (as the app does), the rest is recorded.
@@ -176,6 +189,8 @@ fn fixture_full(name: &str, settings: Value, persona: Option<&str>) -> Fx {
         },
         body: None,
         persona: persona.map(str::to_string),
+        memory: memory.map(str::to_string),
+        private_dirs: vec![],
     };
     let events = Arc::new(Mutex::new(Vec::new()));
     let e2 = events.clone();
@@ -183,7 +198,7 @@ fn fixture_full(name: &str, settings: Value, persona: Option<&str>) -> Fx {
     let agent = Agent::new(spec, policy.clone(), host.clone(), creds, move |e| e2.lock().unwrap().push(e));
     let _ = slot.set(Arc::downgrade(&agent));
     agent.start().expect("the sidecar starts");
-    Fx { root, agent, events, said, policy, _host: host, _fake: fake }
+    Fx { root, agent, events, said, policy, log, _host: host, _fake: fake }
 }
 
 impl Fx {
@@ -420,6 +435,8 @@ fn a_start_that_dies_before_ready_keeps_the_last_exit() {
         settings: json!({}),
         body: None,
         persona: None,
+        memory: None,
+        private_dirs: vec![],
     };
     let agent = Agent::new(spec, Arc::new(Production::new(|_, _| {})), host, Arc::new(Credentials::new()), |_| {});
     assert!(agent.start().is_err());
@@ -636,4 +653,160 @@ fn the_persona_section_reaches_the_model_and_set_persona_swaps_it_for_the_next_t
     // an oversized text is refused and never kept: the running persona and the next start's stay Mochi
     assert!(fx.agent.set_persona(Some("x".repeat(20_001))).is_err());
     assert_eq!(fx.agent.persona().as_deref(), Some(mochi));
+}
+
+// ---- memory (I1/I2): the core section in the system prompt, and the extractor op ----
+
+/// One chat turn, to its end: the request id.
+fn chat(fx: &Fx, text: &str) -> String {
+    let from = fx.len();
+    let id = fx.agent.prompt(text).unwrap();
+    assert_eq!(fx.run_end(from), MascotEvent::Idle);
+    id
+}
+
+/// Every request the fake model got, as `{path, body}` with `body` parsed.
+fn requests(fx: &Fx) -> Vec<Value> {
+    let lines: Vec<Value> = std::fs::read_to_string(&fx.log).unwrap_or_default().lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+    lines.into_iter().map(|mut r| {
+        r["body"] = r["body"].as_str().and_then(|b| serde_json::from_str(b).ok()).unwrap_or(Value::Null);
+        r
+    }).collect()
+}
+
+fn text_of(content: &Value) -> String {
+    match content {
+        Value::String(s) => s.clone(),
+        Value::Array(parts) => parts.iter().filter_map(|p| p["text"].as_str()).collect::<Vec<_>>().join("\n"),
+        _ => String::new(),
+    }
+}
+
+fn is_extract(req: &Value) -> bool {
+    req["body"]["messages"].as_array().and_then(|m| m.last()).is_some_and(|m| text_of(&m["content"]).contains("Exchanges:"))
+}
+
+/// The system prompt of every chat request (the extractor's own are left out), oldest first.
+fn system_prompts(fx: &Fx) -> Vec<String> {
+    requests(fx)
+        .iter()
+        .filter(|r| r["body"]["messages"].is_array() && !is_extract(r))
+        .filter_map(|r| r["body"]["messages"].as_array().and_then(|m| m.first()).filter(|m| m["role"] == "system").map(|m| text_of(&m["content"])))
+        .collect()
+}
+
+fn now() -> memory::Now {
+    memory::Now::new(jiff::civil::date(2026, 11, 27), "2026-11-27T10:00:00+07:00")
+}
+
+/// Ends the turn in the store, extracts it through the sidecar and applies the reply, as the app does.
+fn learn(fx: &Fx, store: &memory::Store, request_id: &str) -> memory::Applied {
+    store.add_pending(request_id, "2026-11-27T09:12:03+07:00").unwrap();
+    let args = store.extract_args(10, jiff::civil::date(2026, 11, 27)).expect("a turn is pending");
+    let reply = fx.agent.memory_extract(args.clone()).expect("the extractor answers");
+    assert_eq!(reply["missing"], json!([]), "{reply}");
+    let applied = store.apply_extract(&args, &reply, &now()).unwrap();
+    fx.agent.set_memory(Some(store.section())).unwrap();
+    applied
+}
+
+fn rows(store: &memory::Store) -> Vec<(String, String, Option<String>)> {
+    let c = rusqlite::Connection::open(store.dir().join("memory.sqlite")).unwrap();
+    let mut st = c.prepare("SELECT value, status, valid_to FROM facts WHERE predicate = 'home_city' ORDER BY id").unwrap();
+    st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().collect::<Result<Vec<_>, _>>().unwrap()
+}
+
+#[test]
+fn a_remembered_fact_is_in_the_next_start_s_first_system_prompt() {
+    let fx = fixture("mem-a1");
+    let store = memory::Store::open(&fx.root.join("memory")).unwrap();
+    let id = chat(&fx, "I live in Saigon");
+    let applied = learn(&fx, &store, &id);
+    assert_eq!(applied.created, 1, "{applied:?}");
+    let section = store.section();
+    assert!(section.contains("Lives in Saigon"), "{section}");
+    // The extractor read the person's words from the transcript, not from the app.
+    assert_eq!(rows(&store), vec![("Saigon".to_string(), "live".to_string(), None)]);
+
+    // A new start with that section: it is in the very first request's system prompt, last.
+    let fx2 = fixture_mem("mem-a1-restart", json!({}), None, Some(&section));
+    chat(&fx2, "hello there");
+    let first = &system_prompts(&fx2)[0];
+    assert!(first.contains("Lives in Saigon"), "{first}");
+    assert!(first.trim_end().ends_with(section.trim_end()), "the memory section is listed last:\n{first}");
+}
+
+#[test]
+fn a_move_supersedes_the_old_city_and_the_section_follows() {
+    let fx = fixture("mem-a2");
+    let store = memory::Store::open(&fx.root.join("memory")).unwrap();
+    let id = chat(&fx, "I live in Saigon");
+    learn(&fx, &store, &id);
+    let id = chat(&fx, "I moved to Hanoi last month");
+    let applied = learn(&fx, &store, &id);
+    assert_eq!(applied.superseded, 1, "{applied:?}");
+    let section = store.section();
+    assert!(section.contains("Hanoi") && !section.contains("Saigon"), "{section}");
+    assert_eq!(
+        rows(&store),
+        vec![
+            ("Saigon".to_string(), "superseded".to_string(), Some("2026-10-01".to_string())),
+            ("Hanoi".to_string(), "live".to_string(), None),
+        ]
+    );
+    // And the next prompt says so too.
+    chat(&fx, "hi again");
+    let last = system_prompts(&fx).pop().unwrap();
+    assert!(last.contains("Hanoi") && !last.contains("Saigon"), "{last}");
+}
+
+#[test]
+fn an_erased_fact_leaves_the_next_prompt() {
+    let fx = fixture("mem-a4");
+    let store = memory::Store::open(&fx.root.join("memory")).unwrap();
+    let id = chat(&fx, "I live in Saigon");
+    learn(&fx, &store, &id);
+    chat(&fx, "do you remember");
+    assert!(system_prompts(&fx).pop().unwrap().contains("Lives in Saigon"));
+
+    let fact = store.list(None).unwrap().into_iter().next().expect("one fact");
+    store.erase(fact.id).unwrap();
+    fx.agent.set_memory(Some(store.section())).unwrap();
+    chat(&fx, "and now");
+    let last = system_prompts(&fx).pop().unwrap();
+    assert!(!last.contains("Saigon") && !last.contains("What I know about you"), "{last}");
+}
+
+#[test]
+fn with_memory_off_no_extractor_request_is_made_and_the_prompt_has_no_section() {
+    let fx = fixture("mem-a5");
+    assert_eq!(fx.agent.memory(), None);
+    chat(&fx, "I live in Saigon");
+    chat(&fx, "I moved to Hanoi last month");
+    let all = requests(&fx);
+    assert!(!all.is_empty());
+    assert!(all.iter().all(|r| !is_extract(r)), "no memory.extract call without the app asking");
+    for p in system_prompts(&fx) {
+        assert!(!p.contains("What I know about you") && !p.contains("Saigon") && !p.contains("Hanoi"), "{p}");
+    }
+}
+
+#[test]
+fn several_memory_changes_between_turns_change_the_prompt_once() {
+    let fx = fixture("mem-a7");
+    chat(&fx, "first");
+    fx.agent.set_memory(Some("## What I know about you\n- Lives in Saigon".into())).unwrap();
+    fx.agent.set_memory(Some("## What I know about you\n- Lives in Hanoi".into())).unwrap();
+    // Nothing is sent until a prompt needs it.
+    assert_eq!(system_prompts(&fx).len(), 1);
+    chat(&fx, "second");
+    chat(&fx, "third");
+    let prompts = system_prompts(&fx);
+    assert_eq!(prompts.len(), 3, "one request per turn");
+    let mut distinct = prompts.clone();
+    distinct.dedup();
+    assert_eq!(distinct.len(), 2, "one change across three turns");
+    assert!(!prompts[0].contains("Hanoi"));
+    assert!(prompts[1].contains("Lives in Hanoi") && !prompts[1].contains("Saigon"), "{}", prompts[1]);
+    assert_eq!(prompts[1], prompts[2]);
 }

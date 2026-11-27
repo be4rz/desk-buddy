@@ -246,6 +246,8 @@ fn on_host(e: HostEvent, agent: Option<Arc<Agent>>, policy: Option<Arc<Productio
         }
         Action::Mascot(op) => body_call(who, op, e.after_turn),
         Action::Screen(ScreenOp::Look { image }) => screen_call(&e, who, image, agent, policy, crate::screen::host_look),
+        // the app's store (`memory/`); none started (a test sink) is 503
+        Action::Memory(op) => crate::memory::get().map_or_else(|| Err(Refusal::no_memory()), |m| m.on_op(op)),
         Action::Remind(op) => {
             eprintln!("[buddy] host remind {who}: {op:?}");
             agent.map_or_else(|| Err(Refusal::no_agent()), |a| a.remind(&op))
@@ -430,6 +432,9 @@ impl Harness {
             settings: agent_settings,
             body,
             persona,
+            // the "What I know about you" section; its folder is the agent's private dir (never read by its tools)
+            memory: crate::memory::get().and_then(|m| m.initial_section()),
+            private_dirs: vec![crate::memory::dir(home)],
         };
         let answer = auto_answer();
         let me: Arc<OnceLock<Weak<Harness>>> = Arc::default();
@@ -447,7 +452,9 @@ impl Harness {
                     post(Inbox::Call(Box::new(move |a| a.card_answer(id, ans.to_string()))));
                 }
             }
-            AgentEvent::Record { rec, .. } => {
+            AgentEvent::Record { gen, rec } => {
+                // status records: a chat turn that ended well joins memory's pending queue
+                crate::memory::on_record(gen, &rec);
                 let e = &rec["entry"];
                 if rec["kind"] == "entry" && e["kind"] == "buddy.event" && e["data"]["type"] == "approval_asked" {
                     if let Some(id) = e["data"]["callId"].as_str().map(str::to_string) {
@@ -479,6 +486,9 @@ impl Harness {
             closing: Default::default(),
         });
         let _ = me.set(Arc::downgrade(&h));
+        if let Some(m) = crate::memory::get() {
+            m.attach(h.agent.clone());
+        }
         Ok(h)
     }
 
@@ -661,6 +671,10 @@ impl Harness {
     pub fn prompt(&self, text: &str) -> Res<String> {
         if !self.has_model() {
             return Err(self.no_model());
+        }
+        // memory's extraction waits until the chat has been quiet a while
+        if let Some(m) = crate::memory::get() {
+            m.chat_sent();
         }
         self.agent.prompt(text)
     }

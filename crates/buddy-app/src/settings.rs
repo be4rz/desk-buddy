@@ -2,7 +2,8 @@
 //! is read with it off once, see `load`; v3 adds `persona`, the person's layer over the mascot's
 //! personality, and a v2 file reads with none: the pack's default; v4 adds `activity` (the activity
 //! sense, on) and `screen_look` (off, with its deny list), and a file older than v4 reads with both at
-//! their defaults: it cannot have meant them). Every key has a default; unknown keys
+//! their defaults: it cannot have meant them; v5 adds `memory`, and a file from before it reads as
+//! memory on, admission off). Every key has a default; unknown keys
 //! (top level and inside each object) are kept and written back. A file that does not
 //! parse is renamed `settings.json.bad` and defaults are used. A hand-edited persona value over its cap
 //! or out of 0..1 is cut or clamped on read (with a `[buddy]` line), never a reset. Writes are atomic.
@@ -13,7 +14,7 @@ use mascot_core::persona::{caps, UserPersona};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-pub const VERSION: u32 = 4;
+pub const VERSION: u32 = 5;
 
 type Extra = Map<String, Value>;
 
@@ -44,6 +45,8 @@ pub struct Settings {
     pub activity: Activity,
     /// v4: the agent may read the screen (`buddy screen look`). Off by default.
     pub screen_look: ScreenLook,
+    /// v5: memory (the "What I remember" window's switch; `BUDDY_MEMORY=0|1` overrides `enabled`).
+    pub memory: Memory,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -68,6 +71,7 @@ impl Default for Settings {
             persona: Persona::default(),
             activity: Activity::default(),
             screen_look: ScreenLook::default(),
+            memory: Memory::default(),
             extra: Extra::new(),
         }
     }
@@ -176,6 +180,38 @@ impl Persona {
             }
         }
         notes
+    }
+}
+
+/// `settings.memory` (v5): `enabled` is the window's "Remember new things" switch (on by default);
+/// `admission` is stored only (nothing reads it yet).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct Memory {
+    pub enabled: bool,
+    pub admission: bool,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+impl Default for Memory {
+    fn default() -> Self {
+        Memory { enabled: true, admission: false, extra: Extra::new() }
+    }
+}
+
+impl Memory {
+    /// `enabled`, unless `BUDDY_MEMORY=0|1` says otherwise.
+    pub fn enabled_now(&self) -> bool {
+        env_override(std::env::var("BUDDY_MEMORY").ok().as_deref()).unwrap_or(self.enabled)
+    }
+}
+
+/// `BUDDY_MEMORY`: "0" off, "1" on, anything else (or unset) no override.
+pub fn env_override(v: Option<&str>) -> Option<bool> {
+    match v.map(str::trim) {
+        Some("0") => Some(false),
+        Some("1") => Some(true),
+        _ => None,
     }
 }
 
@@ -342,6 +378,10 @@ pub fn read(home: &Path) -> Result<Option<Settings>, String> {
         s.activity = Activity::default();
         s.screen_look = ScreenLook::default();
     }
+    // v4 → v5: memory on, admission off (whatever a file from before memory says)
+    if s.settings_version < 5 {
+        s.memory = Memory::default();
+    }
     s.settings_version = s.settings_version.max(VERSION);
     for line in s.persona.sanitize() {
         eprintln!("[buddy] {line}");
@@ -386,7 +426,7 @@ mod tests {
         assert_eq!(note, None);
         let v = serde_json::to_value(&s).unwrap();
         let want: Value = serde_json::from_str(
-            r#"{"settings_version":4,"pack":"bear","zoom":1,"position":null,
+            r#"{"settings_version":5,"pack":"bear","zoom":1,"position":null,
             "dnd":{"action":"hide","fullscreen":false,"screen_share":true},
             "quiet_hours":{"enabled":true,"start":"22:30","end":"07:30"},
             "attention":{"per_hour":4},"model":{"provider":"anthropic","model":"claude-sonnet-5-5"},
@@ -398,7 +438,8 @@ mod tests {
             "screen_look":{"enabled":false,"deny":["com.1password.*","com.agilebits.*","com.bitwarden.desktop",
             "org.keepassxc.keepassxc","com.lastpass.*","com.dashlane.*","com.apple.Passwords",
             "com.apple.keychainaccess","com.apple.MobileSMS","com.apple.mail","net.whatsapp.WhatsApp",
-            "ru.keepcoder.Telegram","org.whispersystems.signal-desktop"]}}"#,
+            "ru.keepcoder.Telegram","org.whispersystems.signal-desktop"]},
+            "memory":{"enabled":true,"admission":false}}"#,
         )
         .unwrap();
         assert_eq!(v, want);
@@ -410,13 +451,13 @@ mod tests {
         std::fs::write(path(&h), r#"{"settings_version":1,"zoom":2,"dnd":{"action":"hide","fullscreen":true,"screen_share":true}}"#).unwrap();
         let (mut s, note) = load(&h);
         assert_eq!(note, None);
-        assert_eq!((s.settings_version, s.dnd.fullscreen, s.dnd.screen_share, s.zoom), (4, false, true, 2));
+        assert_eq!((s.settings_version, s.dnd.fullscreen, s.dnd.screen_share, s.zoom), (5, false, true, 2));
         assert_eq!(s.persona, Persona::default());
         // the person turns it back on: v2 and later keep it
         s.dnd.fullscreen = true;
         s.save(&h).unwrap();
         let (s, _) = load(&h);
-        assert_eq!((s.settings_version, s.dnd.fullscreen), (4, true));
+        assert_eq!((s.settings_version, s.dnd.fullscreen), (5, true));
     }
 
     #[test]
@@ -496,11 +537,11 @@ mod tests {
         std::fs::write(path(&h), r#"{"settings_version":2,"zoom":2,"dnd":{"action":"still","fullscreen":true}}"#).unwrap();
         let (s, note) = load(&h);
         assert_eq!(note, None);
-        assert_eq!((s.settings_version, s.zoom, s.dnd.action, s.dnd.fullscreen), (4, 2, DndAct::Still, true));
+        assert_eq!((s.settings_version, s.zoom, s.dnd.action, s.dnd.fullscreen), (5, 2, DndAct::Still, true));
         assert_eq!(s.persona.user, UserPersona::default());
         s.save(&h).unwrap();
         let v: Value = serde_json::from_str(&std::fs::read_to_string(path(&h)).unwrap()).unwrap();
-        assert_eq!(v["settings_version"], 4);
+        assert_eq!(v["settings_version"], 5);
         assert!(v["persona"].as_object().unwrap().values().all(Value::is_null), "{v}");
     }
 
@@ -576,7 +617,7 @@ mod tests {
     }
 
     #[test]
-    fn v1_v2_and_v3_files_read_as_v4_with_activity_on_and_screen_look_off() {
+    fn v1_v2_and_v3_files_read_as_v5_with_activity_on_and_screen_look_off() {
         for (i, text) in [
             r#"{"settings_version":1,"zoom":2}"#,
             r#"{"settings_version":2,"zoom":2}"#,
@@ -591,9 +632,44 @@ mod tests {
             std::fs::write(path(&h), text).unwrap();
             let (s, note) = load(&h);
             assert_eq!(note, None, "{text}");
-            assert_eq!((s.settings_version, s.zoom), (4, 2), "{text}");
+            assert_eq!((s.settings_version, s.zoom), (5, 2), "{text}");
             assert_eq!(s.activity, Activity { enabled: true, extra: Extra::new() }, "{text}");
             assert!(!s.screen_look.enabled && s.screen_look.deny.len() == 13 && s.screen_look.deny[0] == "com.1password.*", "{text}");
+        }
+    }
+
+    #[test]
+    fn a_v3_file_reads_as_memory_on_admission_off_and_v5_round_trips() {
+        let h = tmp_home("v5");
+        // a v3 file, even one with a stray memory key, starts at the v5 defaults
+        std::fs::write(path(&h), r#"{"settings_version":3,"zoom":2,"memory":{"enabled":false,"admission":true}}"#).unwrap();
+        let (mut s, note) = load(&h);
+        assert_eq!(note, None);
+        assert_eq!((s.settings_version, s.zoom, s.memory.enabled, s.memory.admission), (5, 2, true, false));
+        // the person's choice is kept from v5 on, with unknown keys
+        s.memory.enabled = false;
+        s.memory.admission = true;
+        s.memory.extra.insert("later".into(), Value::from(1));
+        s.save(&h).unwrap();
+        let (back, _) = load(&h);
+        assert_eq!(back, s);
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(path(&h)).unwrap()).unwrap();
+        assert_eq!((v["settings_version"].as_u64(), v["memory"]["enabled"].as_bool(), v["memory"]["later"].as_u64()), (Some(5), Some(false), Some(1)));
+        // a v5 file without the key is on
+        std::fs::write(path(&h), r#"{"settings_version":5}"#).unwrap();
+        assert_eq!(load(&h).0.memory, Memory::default());
+    }
+
+    #[test]
+    fn buddy_memory_overrides_the_switch() {
+        assert_eq!(env_override(Some("0")), Some(false));
+        assert_eq!(env_override(Some("1")), Some(true));
+        assert_eq!(env_override(Some("yes")), None);
+        assert_eq!(env_override(None), None);
+        // enabled_now with no override set in this test process follows the switch
+        if std::env::var_os("BUDDY_MEMORY").is_none() {
+            assert!(Memory::default().enabled_now());
+            assert!(!Memory { enabled: false, ..Default::default() }.enabled_now());
         }
     }
 
@@ -631,7 +707,7 @@ mod tests {
         let (s, _) = load(&h);
         assert!(!s.activity.enabled);
         let v: Value = serde_json::from_str(&std::fs::read_to_string(path(&h)).unwrap()).unwrap();
-        assert_eq!((v["settings_version"].clone(), v["activity"]["enabled"].clone()), (4.into(), false.into()));
+        assert_eq!((v["settings_version"].clone(), v["activity"]["enabled"].clone()), (5.into(), false.into()));
     }
 
     #[test]

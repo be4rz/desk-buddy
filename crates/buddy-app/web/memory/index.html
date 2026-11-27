@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What I remember</title>
+<link rel="stylesheet" href="memory.css">
+<!-- mock.js only acts in a plain browser with ?mock=<state> (design parity checks) -->
+<script src="mock.js"></script>
+<script src="memory.js" defer></script>
+</head>
+<body>
+<main id="root" class="body" aria-busy="true">
+  <!-- the shape of the page until the first state arrives (skeleton: nothing jumps) -->
+  <div class="content">
+    <div class="skel" aria-hidden="true">
+      <div class="sk h1"></div><div class="sk p"></div>
+      <div class="sk g"></div><div class="sk line"></div><div class="sk line"></div><div class="sk line"></div>
+      <div class="sk g"></div><div class="sk line"></div><div class="sk line"></div>
+    </div>
+  </div>
+  <footer class="bar"><span class="status"></span><button type="button" class="btn small quiet danger-text" disabled>Forget everything…</button></footer>
+</main>
+</body>
+</html>

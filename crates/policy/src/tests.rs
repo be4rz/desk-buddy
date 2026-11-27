@@ -14,7 +14,7 @@ impl Fixture {
         let root = std::env::temp_dir().join(format!("buddy-policy-{name}-{}-{}", std::process::id(), random_hex(3)));
         let work = root.join("work");
         fs::create_dir_all(work.join("notes")).unwrap();
-        let at = AgentCtx { agent_id: "a1".into(), work_dir: work.clone(), state_dir: work.join(".buddy").join("agents").join("a1"), skills_dir: None, gen: 1, home: None, secrets: vec![] };
+        let at = AgentCtx { agent_id: "a1".into(), work_dir: work.clone(), state_dir: work.join(".buddy").join("agents").join("a1"), skills_dir: None, gen: 1, home: None, secrets: vec![], private_dirs: vec![] };
         Fixture { root, at }
     }
 }
@@ -585,4 +585,111 @@ fn the_screen_look_token_scan_finds_the_command_however_it_is_spelled_and_nothin
     for no in ["buddy say \"take a look at your $TASK\"", "buddy say \"a screen look $X\"", "echo \"look at the screen $HOME\"", "cp $A $B $C", "buddy say screen look", "buddy status", "buddy mascot do read", "echo hello", "ls screen look", "buddy browser snapshot", "buddy screenshot", "look at the screen"] {
         assert!(!rules::screen_look(no), "{no}");
     }
+}
+
+// ------------------------------------------------------------ memory (I3)
+
+fn memory_fixture(name: &str) -> (Fixture, PathBuf) {
+    let mut fx = Fixture::new(name);
+    let home = fx.root.join("home");
+    let dir = home.join("memory");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("memory.sqlite"), "x").unwrap();
+    fs::create_dir_all(home.join("memoryx")).unwrap();
+    fs::write(home.join("memoryx").join("a.txt"), "x").unwrap();
+    fx.at.home = Some(home);
+    fx.at.private_dirs = vec![dir.clone()];
+    (fx, dir)
+}
+
+fn denied_private(d: &Decision) -> bool {
+    matches!(d, Decision::Deny { reason } if reason == "That folder holds what the bear remembers about the person: reach it only with buddy memory.")
+}
+
+#[test]
+fn the_memory_folder_is_private_to_every_tool_and_shell_word_even_in_skip_mode() {
+    let (fx, dir) = memory_fixture("private");
+    let p = policy();
+    p.ui(&fx.at, &json!({ "op": "set_mode", "mode": "skip" })).unwrap();
+    let db = dir.join("memory.sqlite").display().to_string();
+    let dirs = dir.display().to_string();
+    for tool in ["read", "write", "edit", "look"] {
+        for path in [db.as_str(), dirs.as_str(), "~/memory/memory.sqlite", "~/memory", "~/memory/../memory/x.db"] {
+            let d = p.decide(&fx.at, &file("f", tool, path));
+            assert!(denied_private(&d), "{tool} {path}: {d:?}");
+        }
+    }
+    if cfg!(target_os = "macos") {
+        for path in [db.to_uppercase(), dirs.to_uppercase(), "~/MEMORY/Memory.SQLite".to_string()] {
+            let d = p.decide(&fx.at, &file("f", "read", &path));
+            assert!(denied_private(&d), "{path}: {d:?}");
+        }
+    }
+    for cmd in [format!("cat {db}"), format!("sqlite3 {db} .tables"), format!("X={db} env"), format!("cd {dirs} && ls"), format!("ls '{dirs}'"), "cat ~/memory/memory.sqlite".to_string()] {
+        let d = p.decide(&fx.at, &bash("b", &cmd));
+        assert!(denied_private(&d), "{cmd}: {d:?}");
+    }
+    // A sibling whose name only starts the same is not inside it.
+    let sibling = fx.root.join("home").join("memoryx").join("a.txt").display().to_string();
+    assert_eq!(p.decide(&fx.at, &file("s1", "read", &sibling)), Decision::Allow);
+    assert_eq!(p.decide(&fx.at, &file("s2", "read", "~/memoryx/a.txt")), Decision::Allow);
+    assert_eq!(p.decide(&fx.at, &bash("s3", &format!("cat {sibling}"))), Decision::Allow);
+    // Nothing changes without private dirs.
+    let none = AgentCtx { private_dirs: vec![], ..fx.at.clone() };
+    assert_eq!(p.decide(&none, &file("n1", "read", &db)), Decision::Allow);
+    // A private dir that doesn't exist yet is still guarded.
+    let later = fx.root.join("home").join("later");
+    let ahead = AgentCtx { private_dirs: vec![later.clone()], ..fx.at.clone() };
+    assert!(denied_private(&p.decide(&ahead, &file("a1", "write", &later.join("memory.sqlite").display().to_string()))));
+}
+
+#[test]
+fn buddy_memory_reads_run_and_writes_ask_only_while_marked_and_never_offer_always() {
+    let (fx, _) = memory_fixture("memory-verbs");
+    let p = policy();
+    let reads = ["buddy memory list", "buddy memory list --kind fact --json", "buddy memory search \"sister\" --limit 3", "buddy memory open --json", "buddy memory open"];
+    let writes = ["buddy memory remember \"I live in Hanoi\" --key home_city", "buddy memory forget 3", "buddy memory forget --key people:sister"];
+    for (i, cmd) in reads.iter().chain(writes.iter()).enumerate() {
+        assert_eq!(p.decide(&fx.at, &bash(&format!("u{i}"), cmd)), Decision::Allow, "untainted {cmd}");
+    }
+    assert!(p.taint(&fx.at, "web_fetch", "https://example.com"));
+    for (i, cmd) in reads.iter().enumerate() {
+        assert_eq!(p.decide(&fx.at, &bash(&format!("r{i}"), cmd)), Decision::Allow, "tainted read {cmd}");
+    }
+    let spelled = [
+        "buddy memory remember x",
+        "buddy memory forget 3",
+        "buddy memory remember \"I live in Hanoi\" --json",
+        "buddy --json memory remember x",
+        "buddy memory --json forget 3",
+        "sh -c 'buddy memory remember x'",
+        "bu''ddy memory remember x",
+        "bu\\ddy mem\"\"ory for'g'et 3",
+        "echo $(buddy memory forget 3)",
+        "m=memory; buddy $m remember x",
+        "eval buddy memory remember x",
+        "env buddy memory forget 3",
+    ];
+    for (i, cmd) in spelled.iter().chain(writes.iter()).enumerate() {
+        let d = p.decide(&fx.at, &bash(&format!("w{i}"), cmd));
+        let a = asks(&d);
+        assert_eq!(a["title"], "Let the bear change what it remembers?", "{cmd}");
+        assert_eq!(a["detail"], "This conversation read a web page, so changing memory asks every time.", "{cmd}");
+        assert_eq!(a["kind"], "command");
+        assert_eq!(a["command"], *cmd);
+        assert_eq!(a["offerAlways"], false, "{cmd}");
+        assert!(a["suggestedRule"].is_null(), "{cmd}");
+        p.ui(&fx.at, &json!({ "op": "approval_answer", "callId": format!("w{i}"), "answer": "deny" })).unwrap();
+    }
+    // full access pauses while marked, skip still asks for a memory write
+    for mode in ["full", "skip"] {
+        p.ui(&fx.at, &json!({ "op": "set_mode", "mode": mode })).unwrap();
+        let d = p.decide(&fx.at, &bash(&format!("m-{mode}"), "buddy memory remember x"));
+        assert_eq!(asks(&d)["title"], "Let the bear change what it remembers?", "{mode}");
+        assert_eq!(p.decide(&fx.at, &bash(&format!("l-{mode}"), "buddy memory list")), Decision::Allow, "{mode}");
+    }
+    // d12 is a default rule, the twelfth
+    let rules = p.view(&fx.at)["rules"].as_array().unwrap().clone();
+    assert_eq!(rules.iter().filter(|r| r["origin"] == "default").count(), 12);
+    assert!(rules.iter().any(|r| r["id"] == "d12" && r["effect"] == "allow" && r["pattern"] == "Shell(buddy memory:*)"));
 }

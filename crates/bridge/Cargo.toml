@@ -17,3 +17,8 @@ keyring = { version = "3.6.3", features = ["apple-native", "windows-native"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3"
+
+[dev-dependencies]
+memory.workspace = true
+jiff = "0.2"
+rusqlite = { version = "0.32", features = ["bundled"] }

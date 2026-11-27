@@ -18,6 +18,7 @@
 //! (`persona_customize`, the Personality window); a pack with no persona has a disabled "No
 //! personality in this mascot" line instead of the presets. The title reads "Personality: Biscuit",
 //! "… (customized)", or the new name when renamed.
+//! Memory: "What I remember…" (`memory_open`, right after Personality ▸) opens the memory window.
 
 use mascot_core::{Dir, EyeState, Intent, MouthState, Show, Visibility};
 use mascot_render::{Art, View};
@@ -267,6 +268,8 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
     let budget = MenuItem::with_id(app, "budget", "Check-ins: 0 of 4 this hour", false, None::<&str>)?;
     let signin = MenuItem::with_id(app, "signin", "Accounts…", true, None::<&str>)?;
     let studio = MenuItem::with_id(app, "studio", "Studio…", true, None::<&str>)?;
+    // the memory window (`memory/`): what the bear remembers, its switch and erasing
+    let memory_open = MenuItem::with_id(app, "memory_open", "What I remember…", true, None::<&str>)?;
     let sep5 = PredefinedMenuItem::separator(app)?;
     let status = MenuItem::with_id(app, "status", "", false, None::<&str>)?;
     let dnd = CheckMenuItem::with_id(app, "dnd", "Do not disturb", true, false, None::<&str>)?;
@@ -287,7 +290,7 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
     items.extend([&sep1 as &dyn IsMenuItem<Wry>, &ask, &agent]);
     // "Reset web caution" goes in under the agent line while tainted
     let taint_at = items.len();
-    items.extend([&sep4 as &dyn IsMenuItem<Wry>, &size, &floor, &scenes, &hide, &next, &sep2, &dnd, &quiet, &busy, &fs_hide, &activity, &screen_look, &budget, &sep5, &personality, &model, &approvals, &signin, &studio, &sep3, &quit]);
+    items.extend([&sep4 as &dyn IsMenuItem<Wry>, &size, &floor, &scenes, &hide, &next, &sep2, &dnd, &quiet, &busy, &fs_hide, &activity, &screen_look, &budget, &sep5, &personality, &memory_open, &model, &approvals, &signin, &studio, &sep3, &quit]);
     let menu = Menu::with_items(app, &items)?;
 
     let hide2 = hide.clone();
@@ -403,6 +406,7 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
                 }
                 "studio" => crate::studio::window::open(false),
                 "persona_customize" => crate::persona::window::open(),
+                "memory_open" => crate::memory::window::open(),
                 p if p.starts_with("persona:") => {
                     let id = p["persona:".len()..].to_string();
                     // a refusal is logged there, and the checkmarks go back

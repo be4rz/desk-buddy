@@ -1,6 +1,6 @@
 ---
 name: buddy
-description: Drive desk-buddy's body and keep reminders with the `buddy` command (say, mascot, remind, status).
+description: Drive desk-buddy's body, keep reminders and remember the person with the `buddy` command (say, mascot, remind, memory, status).
 ---
 
 # buddy
@@ -33,3 +33,23 @@ need to do anything then.
 
 Write the reminder text as the person should read it later ("Stretch your legs"), not as an instruction to you.
 Tell the person what you set and when it fires. If the agent isn't running, `buddy remind` says so; don't retry in a loop.
+
+## Memory
+
+The app remembers the person across chats on its own: after a chat it notes what matters, and the "What I know
+about you" section of your prompt shows the core of it. You don't need to save every fact yourself.
+
+- `buddy memory remember "<text>"` when the person asks you to remember something, or states a clear, lasting fact
+  the notes may miss. Write one short third-person sentence ("Has a cat, Mochi"). For a known kind of fact add
+  `--key <predicate>[:<qualifier>] --value <value>` (`--key home_city --value Hanoi`, `--key pets:cat --value Mochi`);
+  `--kind preference|promise` for how they like help or something you promised without a time.
+- A promise with a time is a reminder: use `buddy remind`, not memory.
+- `buddy memory list` and `buddy memory search "<words>"` (`--json` for ids) before asking the person something
+  you may already know.
+- `buddy memory forget <id>` (or `--key <predicate>[:<qualifier>]`) when the person says a fact is wrong or asks you
+  to forget it. Only the person can erase completely, in the window.
+- `buddy memory open` opens the "What I remember" window when they want to see, fix or erase what you know.
+
+Never recite what you remember unprompted, never store passwords, keys or codes (they are refused anyway), and
+believe the person over your notes when they differ. If a command says memory is off, don't retry: the person
+turned it off.

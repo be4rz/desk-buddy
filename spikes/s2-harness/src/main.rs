@@ -98,6 +98,7 @@ fn main() -> ExitCode {
             Action::Widget(op) => ("widget", json!({ "op": format!("{op:?}") }), Err(Refusal::no_agent())),
             // the spike has no screen to look at (D18's screen look lives in buddy-app)
             Action::Screen(op) => ("screen", json!({ "op": format!("{op:?}") }), Err(Refusal::new(403, "screen_look_off", "Screen look is turned off."))),
+            Action::Memory(op) => ("memory", json!({ "op": format!("{op:?}") }), Err(Refusal::no_memory())),
         };
         p2(json!({ "host": kind, "detail": detail, "turn": e.turn, "afterTurn": e.after_turn }));
         reply
@@ -128,6 +129,8 @@ fn main() -> ExitCode {
         settings: json!({}),
         body: None,
         persona: None,
+        memory: None,
+        private_dirs: vec![],
     };
     let _ = std::fs::create_dir_all(&spec.home);
     let (tx, rx) = mpsc::channel::<MascotEvent>();
