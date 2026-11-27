@@ -26,6 +26,7 @@ use crate::bubble::{Bubble, Mode, Out};
 use crate::harness::{self, AgentState};
 use crate::idle_lines::{self, IdleLines, Line};
 use crate::panel::Panel;
+use crate::screen;
 use crate::senses::{self, Ring};
 use crate::settings::{self, DndAct, Settings};
 use crate::stats::Stats;
@@ -313,6 +314,8 @@ pub fn start(init: Init, handle: tauri::AppHandle) {
     forward(rx, handle);
     with_app(|a| {
         a.persona_voice();
+        a.activity_cfg();
+        a.unprompted.set_activity_thresholds(unprompted::thresholds_from_env());
         a.edges_cfg();
         a.wake()
     });
@@ -359,6 +362,14 @@ impl App {
                 }
             }
             Inbox::Senses(mut patch) => {
+                // the front app's display name goes to the activity sense alone (never the brain,
+                // the log or the ring); dropped while activity is off
+                let named = take_front_name(&mut patch);
+                if let Some(n) = &named {
+                    if self.settings.activity.enabled {
+                        self.unprompted.observe_front(now, n.as_deref());
+                    }
+                }
                 // a replay's cursor goes the cursor's own way (never the log or the ring)
                 if let Some(c) = take_cursor(&mut patch) {
                     self.cursor(c, now);
@@ -366,6 +377,12 @@ impl App {
                         self.wake();
                         return;
                     }
+                }
+                if named.is_some() && patch == SensesPatch::default() {
+                    // only a name: nothing to log or keep, but the sense turn may now have a moment
+                    self.sense_turn(now);
+                    self.wake();
+                    return;
                 }
                 // a patch merges over the raw senses; the brain always sees them whole, gated
                 if self.senses_log {
@@ -552,6 +569,12 @@ impl App {
         if let Some(line) = step.line {
             self.idle_say(line, now);
         }
+        // `BUDDY_SENSES_LOG=1`: the kinds of activity moments, never a name
+        for kind in self.unprompted.take_kinds() {
+            if self.senses_log {
+                eprintln!("[buddy] activity {kind}");
+            }
+        }
         self.refresh_budget(now);
     }
 
@@ -661,6 +684,25 @@ impl App {
         serde_json::to_value(r).unwrap_or_default()
     }
 
+    /// What a screen look needs from the main thread: the setting, the app in front (its bundle id; the
+    /// sensor keeps the app the person was in when a menu click made us front), the bear's display and
+    /// the running apps. Read-only.
+    pub fn screen_snapshot(&self) -> screen::look::Snapshot {
+        screen::look::Snapshot {
+            enabled: self.settings.screen_look.enabled,
+            deny: self.settings.screen_look.deny.clone(),
+            front: self.raw.frontmost.as_ref().map(|f| f.bundle_id.clone()).filter(|id| !id.is_empty()),
+            display: senses::fullscreen::bear_display(),
+            running: screen::running_bundles(),
+        }
+    }
+
+    /// The visible cue of a screen look: the bear peeks (`look_up` when its pack has no `peek`).
+    /// Returns what played, or says why nothing did.
+    pub fn screen_cue(&mut self) -> &'static str {
+        screen::play_cue(|name| self.body(&mascot_core::body::BodyReq::Emote { name: name.to_string() })).unwrap_or("none")
+    }
+
     pub fn user_hidden(&self) -> bool {
         self.user_hidden
     }
@@ -685,6 +727,34 @@ impl App {
         self.view.scenes = on;
         eprintln!("[buddy] scenes {}", if on { "on" } else { "off" });
         self.wake();
+    }
+
+    /// Tray "Activity awareness" (persisted as `activity.enabled`): the sense's log and the sensor's
+    /// name lookup follow it. Off forgets the log; on asks the observer for the app in front now.
+    pub fn set_activity(&mut self, on: bool) {
+        self.settings.activity.enabled = on;
+        self.save_settings();
+        self.activity_cfg();
+        eprintln!("[buddy] activity {}", if on { "on" } else { "off" });
+        if on {
+            senses::refresh_front();
+        }
+    }
+
+    /// Tray "Screen look" (persisted as `screen_look.enabled`): whether `buddy screen look` may read the
+    /// screen at all. Asking macOS for the permission is the tray's job (`screen::request_access`), so
+    /// this stays free of prompts.
+    pub fn set_screen_look(&mut self, on: bool) {
+        self.settings.screen_look.enabled = on;
+        self.save_settings();
+        eprintln!("[buddy] screen look {}", if on { "on" } else { "off" });
+    }
+
+    /// The settings' activity switch to the sensor and the unprompted turns.
+    fn activity_cfg(&mut self) {
+        let on = self.settings.activity.enabled;
+        senses::set_activity_on(on);
+        self.unprompted.set_activity(on);
     }
 
     /// One wake: tick the brain, present if changed, arm the next timer.
@@ -1131,6 +1201,12 @@ fn take_cursor(p: &mut SensesPatch) -> Option<Option<mascot_core::Cursor>> {
     p.cursor.take()
 }
 
+/// Takes a patch's front app display name out (`Some(name)` when it had one, `Some(None)` for an
+/// unnamed app), so the brain, the log and the ring never see it.
+fn take_front_name(p: &mut SensesPatch) -> Option<Option<String>> {
+    p.front_name.take()
+}
+
 pub fn dnd_action(a: DndAct) -> DndAction {
     match a {
         DndAct::Hide => DndAction::Hide,
@@ -1222,6 +1298,34 @@ mod tests {
         let g = senses::gate(&raw, &Settings::default(), false, true);
         assert!(g.cursor.is_some());
         assert!(!serde_json::to_string(&g).unwrap().contains("cursor"));
+    }
+
+    #[test]
+    fn a_front_app_name_never_reaches_the_log_the_ring_or_serialized_senses() {
+        // the sensor's patch: frontmost (bundle id + category) and the display name
+        let mut p: SensesPatch = serde_json::from_str(r#"{"front_name": "Secret Notes", "user_idle_ms": 5}"#).unwrap();
+        assert!(!serde_json::to_string(&p).unwrap().contains("Secret Notes"), "never serialized, even before it is taken");
+        let n = take_front_name(&mut p);
+        assert_eq!(n, Some(Some("Secret Notes".to_string())), "it goes the activity sense's own way");
+        assert_eq!(p.front_name, None);
+        // what `BUDDY_SENSES_LOG` prints and the ring keeps
+        let logged = serde_json::to_string(&p).unwrap();
+        assert!(!logged.contains("Secret") && !logged.contains("front_name"), "{logged}");
+        let mut ring = Ring::new();
+        ring.push(0, p.clone());
+        ring.push(1, serde_json::from_str(r#"{"front_name": "Other App"}"#).unwrap());
+        assert!(ring.iter().all(|e| e.patch.front_name.is_none()));
+        assert!(ring.iter().all(|e| !serde_json::to_string(&e.patch).unwrap().contains("App")));
+        // unnamed (`null`) is taken too; a name-only patch leaves nothing to log or keep
+        let mut gone: SensesPatch = serde_json::from_str(r#"{"front_name": null}"#).unwrap();
+        assert_eq!(take_front_name(&mut gone), Some(None));
+        assert_eq!(gone, SensesPatch::default());
+        // the gated senses the brain sees have no place for it
+        let mut raw = Senses::default();
+        let q: SensesPatch = serde_json::from_str(r#"{"front_name": "Secret Notes", "user_idle_ms": 9}"#).unwrap();
+        q.apply(&mut raw);
+        let g = senses::gate(&raw, &Settings::default(), false, true);
+        assert!(!serde_json::to_string(&g).unwrap().contains("Secret"));
     }
 
     #[test]

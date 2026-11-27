@@ -13,8 +13,8 @@ import type { Init, ModelRef } from "../../protocol.ts";
 import { rootId } from "../core/index.ts";
 import { currentTrigger } from "../gate/index.ts";
 
-/** The tools the model is offered, in order. `look` only while the model takes images. */
-export const MODEL_TOOLS = ["bash", "read", "write", "edit", "look", "web_fetch", "web_search", "task"];
+/** The tools the model is offered, in order. `look` only while the model takes images; `screen_look` always (its picture only then). */
+export const MODEL_TOOLS = ["bash", "read", "write", "edit", "look", "screen_look", "web_fetch", "web_search", "task"];
 
 /** No `bash` on Windows until a shell (busybox-w32, D10) is configured through `shellPath`. */
 export const hasBash = (init: Init) => !(init.platform === "windows" && !init.shellPath);

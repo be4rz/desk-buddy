@@ -73,6 +73,12 @@ pub struct SensesPatch {
     /// serialized, so a patch that is logged or kept in the app's sense ring cannot carry it.
     #[serde(default, deserialize_with = "double", skip_serializing)]
     pub cursor: Option<Option<crate::reaction::Cursor>>,
+    /// The frontmost app's display name (activity sense, never a title or bundle id): a string
+    /// or `null` (unnamed). It is not a `Senses` field: the app takes it out of the patch before
+    /// the brain sees it (`apply` ignores it) and never serializes it, so a patch that is logged
+    /// or kept in the sense ring cannot carry it. Replays and the sensor only.
+    #[serde(default, deserialize_with = "double", skip_serializing)]
+    pub front_name: Option<Option<String>>,
 }
 
 /// `null` = clear (`Some(None)`); an absent key stays `None` via `default`.
@@ -210,4 +216,27 @@ pub fn to_jsonl(lines: &[LogLine]) -> String {
         s.push('\n');
     }
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn front_name_parses_is_never_serialized_and_never_reaches_senses() {
+        let named: SensesPatch = serde_json::from_str(r#"{"front_name":"VS Code"}"#).unwrap();
+        assert_eq!(named.front_name, Some(Some("VS Code".to_string())));
+        let cleared: SensesPatch = serde_json::from_str(r#"{"front_name":null}"#).unwrap();
+        assert_eq!(cleared.front_name, Some(None));
+        let absent: SensesPatch = serde_json::from_str("{}").unwrap();
+        assert_eq!(absent.front_name, None);
+
+        let json = serde_json::to_string(&named).unwrap();
+        assert!(!json.contains("VS Code") && !json.contains("front_name"), "never serialized: {json}");
+
+        let mut s = Senses::default();
+        let before = s.clone();
+        named.apply(&mut s);
+        assert_eq!(s, before, "apply ignores the name");
+    }
 }

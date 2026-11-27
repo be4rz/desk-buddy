@@ -9,6 +9,7 @@ import { createCore } from "./ext/core/index.ts";
 import { GateExt, setDecideMs } from "./ext/gate/index.ts";
 import { JobsExt } from "./ext/jobs/index.ts";
 import { createLook } from "./ext/look/index.ts";
+import { createScreen } from "./ext/screen/index.ts";
 import { createTask } from "./ext/task/index.ts";
 import { createTools, modelToolNames } from "./ext/tools/index.ts";
 import { createWeb } from "./ext/web/index.ts";
@@ -23,6 +24,7 @@ export function buildRegistry(init: Init) {
     createTools(init),
     web,
     createLook(init),
+    createScreen(init),
     createTask(init, (web.tools ?? []) as ToolRegistration[]),
     JobsExt,
     createContext(init),

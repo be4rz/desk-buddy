@@ -1,0 +1,116 @@
+// Design D18 (activity sense): about an hour and three quarters of someone's afternoon, in virtual time (Replay Items,
+// at_ms after launch; `front_name` is the front app's display name, taken out by the driver and never logged or kept).
+// 14:00 Tue, quiet hours 22:30-07:30 (default). Expected check-ins (crates/buddy-app/src/unprompted.rs
+// `activity_sense_fixture_...`, driven through `Unprompted::sample`): long_dwell at 45 min (VS Code), flip_loop at
+// 64 min (the 6th app switch of 6 in 4 min 10 s: VS Code/Chrome/Slack), ONE back_from_idle at 87 min, enriched with the app before the break (never a
+// second turn for the same return), and, only with quiet hours turned off, one late_hour at 100 min (the clock jumps
+// to 23:10). With activity off the same lines give the plain back_from_idle and nothing else.
+// Live: `BUDDY_EVENTS=<this file> cargo run -p buddy-app` (sensors are off under it) plays it in real time (~103 min). In a debug
+// build BUDDY_ACTIVITY_SCALE=<n> divides the activity thresholds (long_dwell, flip window, back_after_away) by n, for a
+// copy of this file with the at_ms of the app lines divided by n; BUDDY_SENSES_LOG=1 prints `[buddy] activity <kind>`.
+{"at_ms": 0, "senses": {"front_name": "VS Code", "local": {"minutes": 840, "weekday": 2}, "user_idle_ms": 0, "month": 11}}
+{"at_ms": 60000, "senses": {"local": {"minutes": 841, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 120000, "senses": {"local": {"minutes": 842, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 180000, "senses": {"local": {"minutes": 843, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 240000, "senses": {"local": {"minutes": 844, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 300000, "senses": {"local": {"minutes": 845, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 360000, "senses": {"local": {"minutes": 846, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 420000, "senses": {"local": {"minutes": 847, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 480000, "senses": {"local": {"minutes": 848, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 540000, "senses": {"local": {"minutes": 849, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 600000, "senses": {"local": {"minutes": 850, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 660000, "senses": {"local": {"minutes": 851, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 720000, "senses": {"local": {"minutes": 852, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 780000, "senses": {"local": {"minutes": 853, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 840000, "senses": {"local": {"minutes": 854, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 900000, "senses": {"local": {"minutes": 855, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 960000, "senses": {"local": {"minutes": 856, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 1020000, "senses": {"local": {"minutes": 857, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 1080000, "senses": {"local": {"minutes": 858, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 1140000, "senses": {"local": {"minutes": 859, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 1200000, "senses": {"local": {"minutes": 860, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 1260000, "senses": {"local": {"minutes": 861, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 1320000, "senses": {"local": {"minutes": 862, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 1380000, "senses": {"local": {"minutes": 863, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 1440000, "senses": {"local": {"minutes": 864, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 1500000, "senses": {"local": {"minutes": 865, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 1560000, "senses": {"local": {"minutes": 866, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 1620000, "senses": {"local": {"minutes": 867, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 1680000, "senses": {"local": {"minutes": 868, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 1740000, "senses": {"local": {"minutes": 869, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 1800000, "senses": {"local": {"minutes": 870, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 1860000, "senses": {"local": {"minutes": 871, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 1920000, "senses": {"local": {"minutes": 872, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 1980000, "senses": {"local": {"minutes": 873, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 2040000, "senses": {"local": {"minutes": 874, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 2100000, "senses": {"local": {"minutes": 875, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 2160000, "senses": {"local": {"minutes": 876, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 2220000, "senses": {"local": {"minutes": 877, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 2280000, "senses": {"local": {"minutes": 878, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 2340000, "senses": {"local": {"minutes": 879, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 2400000, "senses": {"local": {"minutes": 880, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 2460000, "senses": {"local": {"minutes": 881, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 2520000, "senses": {"local": {"minutes": 882, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 2580000, "senses": {"local": {"minutes": 883, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 2640000, "senses": {"local": {"minutes": 884, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 2700000, "senses": {"local": {"minutes": 885, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 2760000, "senses": {"local": {"minutes": 886, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 2820000, "senses": {"local": {"minutes": 887, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 2880000, "senses": {"local": {"minutes": 888, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 2940000, "senses": {"local": {"minutes": 889, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 3000000, "senses": {"local": {"minutes": 890, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 3060000, "senses": {"local": {"minutes": 891, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 3120000, "senses": {"local": {"minutes": 892, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 3180000, "senses": {"local": {"minutes": 893, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 3240000, "senses": {"local": {"minutes": 894, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 3300000, "senses": {"local": {"minutes": 895, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 3360000, "senses": {"local": {"minutes": 896, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 3420000, "senses": {"local": {"minutes": 897, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 3480000, "senses": {"local": {"minutes": 898, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 3540000, "senses": {"local": {"minutes": 899, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 3600000, "senses": {"front_name": "Chrome", "local": {"minutes": 900, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 3650000, "senses": {"front_name": "Slack", "local": {"minutes": 900, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 3700000, "senses": {"front_name": "VS Code", "local": {"minutes": 901, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 3750000, "senses": {"front_name": "Chrome", "local": {"minutes": 902, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 3800000, "senses": {"front_name": "Slack", "local": {"minutes": 903, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 3850000, "senses": {"front_name": "VS Code", "local": {"minutes": 904, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 3840000, "senses": {"local": {"minutes": 904, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 3900000, "senses": {"local": {"minutes": 905, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 3960000, "senses": {"local": {"minutes": 906, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 4020000, "senses": {"local": {"minutes": 907, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 4080000, "senses": {"local": {"minutes": 908, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 4140000, "senses": {"local": {"minutes": 909, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 4200000, "senses": {"local": {"minutes": 910, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 4260000, "senses": {"local": {"minutes": 911, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 4320000, "senses": {"local": {"minutes": 912, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 4380000, "senses": {"local": {"minutes": 913, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 4440000, "senses": {"local": {"minutes": 914, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 4500000, "senses": {"local": {"minutes": 915, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 4560000, "senses": {"local": {"minutes": 916, "weekday": 2}, "user_idle_ms": 60000}}
+{"at_ms": 4620000, "senses": {"local": {"minutes": 917, "weekday": 2}, "user_idle_ms": 120000}}
+{"at_ms": 4680000, "senses": {"local": {"minutes": 918, "weekday": 2}, "user_idle_ms": 180000}}
+{"at_ms": 4740000, "senses": {"local": {"minutes": 919, "weekday": 2}, "user_idle_ms": 240000}}
+{"at_ms": 4800000, "senses": {"local": {"minutes": 920, "weekday": 2}, "user_idle_ms": 300000}}
+{"at_ms": 4860000, "senses": {"local": {"minutes": 921, "weekday": 2}, "user_idle_ms": 360000}}
+{"at_ms": 4920000, "senses": {"local": {"minutes": 922, "weekday": 2}, "user_idle_ms": 420000}}
+{"at_ms": 4980000, "senses": {"local": {"minutes": 923, "weekday": 2}, "user_idle_ms": 480000}}
+{"at_ms": 5040000, "senses": {"local": {"minutes": 924, "weekday": 2}, "user_idle_ms": 540000}}
+{"at_ms": 5100000, "senses": {"local": {"minutes": 925, "weekday": 2}, "user_idle_ms": 600000}}
+{"at_ms": 5160000, "senses": {"local": {"minutes": 926, "weekday": 2}, "user_idle_ms": 660000}}
+{"at_ms": 5221000, "senses": {"local": {"minutes": 927, "weekday": 2}, "user_idle_ms": 1000}}
+{"at_ms": 5280000, "senses": {"local": {"minutes": 928, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 5340000, "senses": {"local": {"minutes": 929, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 5400000, "senses": {"local": {"minutes": 930, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 5460000, "senses": {"local": {"minutes": 931, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 5520000, "senses": {"local": {"minutes": 932, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 5580000, "senses": {"local": {"minutes": 933, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 5640000, "senses": {"local": {"minutes": 934, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 5700000, "senses": {"local": {"minutes": 935, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 5760000, "senses": {"local": {"minutes": 936, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 5820000, "senses": {"local": {"minutes": 937, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 5880000, "senses": {"local": {"minutes": 938, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 5940000, "senses": {"local": {"minutes": 939, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 6000000, "senses": {"local": {"minutes": 1390, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 6060000, "senses": {"local": {"minutes": 1391, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 6120000, "senses": {"local": {"minutes": 1392, "weekday": 2}, "user_idle_ms": 0}}
+{"at_ms": 6180000, "senses": {"local": {"minutes": 1393, "weekday": 2}, "user_idle_ms": 0}}

@@ -100,6 +100,17 @@ pub enum Action {
     Remind(RemindOp),
     /// `buddy widget …` and `buddy <widget> <action> …` (design §4.9).
     Widget(WidgetOp),
+    /// `buddy screen look` (and the agent's `screen_look` tool): the app reads the screen text.
+    Screen(ScreenOp),
+}
+
+/// `POST /v1/screen/look {image}`. Reply `{text, truncated, noText, width, height, lines}` and, with
+/// `image: true`, `image: {mimeType, base64, width, height}` (a downscaled PNG). A refusal is an
+/// ordinary error reply (403 `screen_look_off` / `permission` / `denied_app` / `sense_turn`, 503
+/// `no_display` / `busy`, 502 `capture_failed`).
+#[derive(Clone, Debug, PartialEq)]
+pub enum ScreenOp {
+    Look { image: bool },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -623,7 +634,25 @@ fn serve(sh: &Shared, mut req: Request) {
             };
             act(sh, req, HostEvent { caller, action: Action::Widget(WidgetOp::Action { widget, action, args }), turn, after_turn }, Value::Null)
         }
-        (_, "/v1/status" | "/v1/say" | "/v1/mascot/emote" | "/v1/mascot/do" | "/v1/mascot/stop" | "/v1/mascot/list" | "/v1/remind" | "/v1/reminders" | "/v1/remind/cancel" | "/v1/widget/open" | "/v1/widget/list" | "/v1/widget/commands" | "/v1/widget/close" | "/v1/widget/action") => refuse(req, 405, "method", "Wrong method."),
+        (Method::Post, "/v1/screen/look") => {
+            let image = match body.get("image").filter(|v| !v.is_null()) {
+                None => false,
+                Some(Value::Bool(b)) => *b,
+                Some(_) => return refuse(req, 400, "usage", "image is true or false."),
+            };
+            // A look goes by the host's own record of the agent's turn, not only the header: a command that
+            // dropped `BUDDY_TURN` is judged by the turn that is running, and is late when none is.
+            let (turn, after_turn) = match (&caller, turn) {
+                (Caller::Agent { agent_id, .. }, None) => {
+                    let current = sh.state.lock().unwrap_or_else(|e| e.into_inner()).turns.get(agent_id).cloned();
+                    let late = current.is_none();
+                    (current, late)
+                }
+                (_, t) => (t, after_turn),
+            };
+            act(sh, req, HostEvent { caller, action: Action::Screen(ScreenOp::Look { image }), turn, after_turn }, Value::Null)
+        }
+        (_, "/v1/status" | "/v1/say" | "/v1/screen/look" | "/v1/mascot/emote" | "/v1/mascot/do" | "/v1/mascot/stop" | "/v1/mascot/list" | "/v1/remind" | "/v1/reminders" | "/v1/remind/cancel" | "/v1/widget/open" | "/v1/widget/list" | "/v1/widget/commands" | "/v1/widget/close" | "/v1/widget/action") => refuse(req, 405, "method", "Wrong method."),
         _ => refuse(req, 404, "not_found", "No such endpoint."),
     }
 }

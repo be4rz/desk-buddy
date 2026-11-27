@@ -412,3 +412,177 @@ fn widget_reads_run_and_browser_actions_ask_while_marked() {
     assert_eq!(p.decide(&fx.at, &bash("r2", "buddy music pause")), Decision::Allow);
     assert_eq!(p.decide(&fx.at, &bash("r3", "buddy widget list")), Decision::Allow);
 }
+
+fn tool(call: &str, name: &str, args: Value) -> Decide {
+    Decide { call_id: call.into(), tool: name.into(), args, conversation: "root".into(), ..Default::default() }
+}
+
+fn from_check_in(mut d: Decide) -> Decide {
+    d.trigger = json!({ "requestId": "s:0f8fad5b-d9cb-469f-a165-70867728950e", "source": "sense" });
+    d
+}
+
+fn denied_with(d: &Decision) -> &str {
+    match d {
+        Decision::Deny { reason } => reason,
+        other => panic!("expected deny, got {other:?}"),
+    }
+}
+
+const SCREEN_CARD: (&str, &str) = ("Let the bear look at your screen?", "It reads the text on the display the bear is on. Nothing is saved. Password managers and messengers are never read.");
+
+#[test]
+fn the_first_screen_look_asks_with_the_screen_card_and_an_always_rule_then_runs() {
+    let fx = Fixture::new("screen-ask");
+    let p = policy();
+    // not in the default rules: it asks, in the allowlist mode that is the default
+    let d = p.decide(&fx.at, &bash("s1", "buddy screen look"));
+    let a = asks(&d);
+    assert_eq!((a["title"].as_str(), a["detail"].as_str()), (Some(SCREEN_CARD.0), Some(SCREEN_CARD.1)));
+    assert_eq!((a["suggestedRule"].as_str(), a["offerAlways"].clone()), (Some("Shell(buddy screen look:*)"), json!(true)));
+    // the tool form (with and without a picture) is the same card and the same rule
+    for (i, args) in [json!({}), json!({ "image": true }), json!({ "image": false })].into_iter().enumerate() {
+        let d = p.decide(&fx.at, &tool(&format!("t{i}"), "screen_look", args));
+        let a = asks(&d);
+        assert_eq!((a["title"].as_str(), a["detail"].as_str(), a["suggestedRule"].as_str()), (Some(SCREEN_CARD.0), Some(SCREEN_CARD.1), Some("Shell(buddy screen look:*)")), "tool form {i}");
+        assert_eq!(a["tool"], "screen_look");
+    }
+    // the person's Always answer makes the next look run
+    p.ui(&fx.at, &json!({ "op": "approval_answer", "callId": "s1", "answer": "allow_always" })).unwrap();
+    assert_eq!(p.wait(&fx.at, "s1")["decision"], "allow");
+    assert_eq!(p.decide(&fx.at, &bash("s2", "buddy screen look --json")), Decision::Allow);
+    assert_eq!(p.decide(&fx.at, &tool("s3", "screen_look", json!({ "image": true }))), Decision::Allow);
+    // other buddy verbs are not affected
+    for (i, cmd) in ["buddy say hi", "buddy status", "buddy mascot list --json", "buddy browser snapshot", "echo screen look"].iter().enumerate() {
+        assert_eq!(p.decide(&fx.at, &bash(&format!("o{i}"), cmd)), Decision::Allow, "{cmd}");
+    }
+}
+
+#[test]
+fn full_access_still_asks_for_a_screen_look_even_after_an_always_rule() {
+    let fx = Fixture::new("screen-full");
+    let p = policy();
+    p.ui(&fx.at, &json!({ "op": "set_mode", "mode": "allowlist" })).unwrap();
+    let _ = p.decide(&fx.at, &bash("s0", "buddy screen look"));
+    p.ui(&fx.at, &json!({ "op": "approval_answer", "callId": "s0", "answer": "allow_always" })).unwrap();
+    let _ = p.wait(&fx.at, "s0");
+    p.ui(&fx.at, &json!({ "op": "set_mode", "mode": "full" })).unwrap();
+    for (i, d) in [bash("f1", "buddy screen look"), bash("f2", "buddy screen look --json"), tool("f3", "screen_look", json!({})), tool("f4", "screen_look", json!({ "image": true }))].iter().enumerate() {
+        let r = p.decide(&fx.at, d);
+        let a = asks(&r);
+        assert_eq!(a["title"], SCREEN_CARD.0, "{i}");
+        assert_eq!(a["detail"], SCREEN_CARD.1, "{i}");
+    }
+    // and the skip mode (policy.json only, never asks) still asks for a look, on both paths
+    p.ui(&fx.at, &json!({ "op": "set_mode", "mode": "skip" })).unwrap();
+    for (i, d) in [bash("g1", "buddy screen look"), tool("g2", "screen_look", json!({ "image": true })), bash("g3", "echo $(buddy screen look)")].iter().enumerate() {
+        assert!(matches!(p.decide(&fx.at, d), Decision::Ask(_)), "skip #{i}");
+    }
+    assert_eq!(p.decide(&fx.at, &bash("g4", "rm -rf build")), Decision::Allow, "skip still skips everything else");
+}
+
+#[test]
+fn a_look_inside_a_longer_command_keeps_the_commands_own_card() {
+    let fx = Fixture::new("screen-compound");
+    let p = policy();
+    for mode in ["allowlist", "full", "ask"] {
+        p.ui(&fx.at, &json!({ "op": "set_mode", "mode": mode })).unwrap();
+        for (i, cmd) in ["buddy screen look && rm -rf ~/Documents", "sudo true; buddy screen look"].iter().enumerate() {
+            let r = p.decide(&fx.at, &bash(&format!("{mode}{i}"), cmd));
+            let a = asks(&r);
+            assert_ne!(a["title"], SCREEN_CARD.0, "{mode} {cmd}");
+            let detail = a["detail"].as_str().unwrap();
+            assert!(detail.ends_with("It also looks at your screen."), "{mode} {cmd}: {detail}");
+            if mode == "full" {
+                // the riskier command is the reason, not the look
+                assert!(!detail.contains("reads the screen"), "{mode} {cmd}: {detail}");
+            }
+            assert_eq!(a["command"], *cmd);
+        }
+    }
+}
+
+#[test]
+fn a_tainted_conversation_asks_for_a_screen_look_with_no_always() {
+    let fx = Fixture::new("screen-taint");
+    let p = policy();
+    p.taint(&fx.at, "browser", "https://example.com/");
+    for (i, d) in [bash("t1", "buddy screen look"), tool("t2", "screen_look", json!({ "image": true }))].iter().enumerate() {
+        let r = p.decide(&fx.at, d);
+        let a = asks(&r);
+        assert_eq!((a["title"].as_str(), a["detail"].as_str(), a["offerAlways"].clone()), (Some(SCREEN_CARD.0), Some(SCREEN_CARD.1), json!(false)), "{i}");
+        assert!(a["suggestedRule"].is_null() || a["suggestedRule"] == "", "{i}: no rule to save while marked: {}", a["suggestedRule"]);
+    }
+    // a look from the screen itself marks it too, and the next one asks again
+    let fx = Fixture::new("screen-taint2");
+    let p = policy();
+    assert!(p.taint(&fx.at, "screen", "screen look"));
+    assert!(matches!(p.decide(&fx.at, &bash("t3", "buddy screen look")), Decision::Ask(_)));
+}
+
+#[test]
+fn a_check_in_turn_never_looks_at_the_screen() {
+    let fx = Fixture::new("screen-sense");
+    let p = policy();
+    let msg = "Screen look only runs when the person asked in chat, not during a check-in";
+    // even with an Always rule, and in full access
+    for mode in ["allowlist", "full", "ask"] {
+        p.ui(&fx.at, &json!({ "op": "set_mode", "mode": mode })).unwrap();
+        for (i, d) in [
+            bash("c1", "buddy screen look"),
+            bash("c2", "buddy screen look --image"),
+            tool("c3", "screen_look", json!({})),
+            tool("c4", "screen_look", json!({ "image": true })),
+            bash("c5", "echo $(buddy screen look)"),
+            bash("c6", "buddy  \"screen\"  look"),
+            bash("c7", "eval buddy screen look"),
+            bash("c8", "x=look; buddy screen $x"),
+            bash("c9", "sh -c 'buddy screen look'"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let r = p.decide(&fx.at, &from_check_in(d));
+            assert_eq!(denied_with(&r), msg, "{mode} #{i}");
+        }
+        // ordinary check-in work is unchanged (ask mode asks for everything)
+        if mode != "ask" {
+            assert_eq!(p.decide(&fx.at, &from_check_in(bash("ok", "buddy say hi"))), Decision::Allow, "{mode}");
+            assert_eq!(p.decide(&fx.at, &from_check_in(bash("ok2", "buddy say \"a screen look\""))), Decision::Allow, "{mode}");
+            assert_eq!(p.decide(&fx.at, &from_check_in(bash("ok3", "buddy say \"take a look at your $TASK\""))), Decision::Allow, "{mode}");
+        }
+    }
+    // in chat, the same call is only an ask
+    assert!(matches!(p.decide(&fx.at, &bash("chat", "buddy screen look")), Decision::Ask(_)));
+    let mut d = bash("chat2", "buddy screen look");
+    d.trigger = json!({ "requestId": "u:0f8fad5b-d9cb-469f-a165-70867728950e", "source": "user" });
+    assert!(matches!(p.decide(&fx.at, &d), Decision::Ask(_)));
+}
+
+#[test]
+fn the_screen_look_token_scan_finds_the_command_however_it_is_spelled_and_nothing_else() {
+    for yes in [
+        "buddy screen look",
+        "buddy screen look --image",
+        "  buddy   screen   look  --json",
+        "ls && buddy screen look",
+        "FOO=1 buddy screen look",
+        "env buddy screen look",
+        "echo $(buddy screen look)",
+        "echo `buddy screen look`",
+        "sh -c 'buddy screen look'",
+        "buddy 'screen' \"look\"",
+        "buddy scr\\een look",
+        "eval buddy screen look",
+        "v=look; buddy screen ${v}",
+        "b=screen; buddy $b look",
+        "s=scr; l=lo; buddy ${s}een ${l}ok",
+        "$(echo buddy) screen look",
+        "$B screen look",
+    ] {
+        assert!(rules::screen_look(yes), "{yes}");
+    }
+    for no in ["buddy say \"take a look at your $TASK\"", "buddy say \"a screen look $X\"", "echo \"look at the screen $HOME\"", "cp $A $B $C", "buddy say screen look", "buddy status", "buddy mascot do read", "echo hello", "ls screen look", "buddy browser snapshot", "buddy screenshot", "look at the screen"] {
+        assert!(!rules::screen_look(no), "{no}");
+    }
+}

@@ -22,6 +22,13 @@ services:
     # sensors (frontmost, idle, clock, fullscreen, screen share), reflexes, DND/quiet hours (AC4)
     check: cargo test -p mascot-core -p buddy-app && test -z "$(rg -n 'std::fs|File::' crates/buddy-app/src/senses)"
     start: BUDDY_STATS=1 BUDDY_SENSES_LOG=1 cargo run -p buddy-app   # "[buddy] senses …" on stderr only
+  screen:
+    cwd: .
+    # screen awareness (D18): activity sense (front-app names + minutes, RAM only) and `buddy screen look` (fakes only:
+    # never call the real capture from an agent run, and never screenshot the desktop)
+    check: cargo test -p mascot-core -p buddy-app -p host -p policy && (cd agent && bun test test/scenarios/screen.test.ts) && test -z "$(rg -n 'std::fs|File::|fs::write' crates/buddy-app/src/screen crates/buddy-app/src/senses)"
+    # scripted capture + OCR, no Screen Recording permission (debug builds only)
+    start: cargo build -p host --bin buddy && BUDDY_HOME=<tmp> BUDDY_SCREEN_FAKE=1 BUDDY_ACTIVITY_SCALE=15 BUDDY_SENSES_LOG=1 cargo run -p buddy-app
   harness:
     cwd: .
     # root Cargo workspace (crates/* + spikes/s2-harness); bridge's e2e needs bun

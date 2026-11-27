@@ -1,6 +1,8 @@
-//! `settings.json` v3 (design §3.2; v2 only changes a default: `dnd.fullscreen` is off, and a v1 file
+//! `settings.json` v4 (design §3.2; v2 only changes a default: `dnd.fullscreen` is off, and a v1 file
 //! is read with it off once, see `load`; v3 adds `persona`, the person's layer over the mascot's
-//! personality, and a v2 file reads with none: the pack's default). Every key has a default; unknown keys
+//! personality, and a v2 file reads with none: the pack's default; v4 adds `activity` (the activity
+//! sense, on) and `screen_look` (off, with its deny list), and a file older than v4 reads with both at
+//! their defaults: it cannot have meant them). Every key has a default; unknown keys
 //! (top level and inside each object) are kept and written back. A file that does not
 //! parse is renamed `settings.json.bad` and defaults are used. A hand-edited persona value over its cap
 //! or out of 0..1 is cut or clamped on read (with a `[buddy]` line), never a reset. Writes are atomic.
@@ -11,7 +13,7 @@ use mascot_core::persona::{caps, UserPersona};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 
 type Extra = Map<String, Value>;
 
@@ -38,6 +40,10 @@ pub struct Settings {
     pub onboarded: bool,
     /// v3: the person's layer over the mascot's personality (tray Personality ▸, the Personality window).
     pub persona: Persona,
+    /// v4: the activity sense (which app is in front, for how long; D18). On by default.
+    pub activity: Activity,
+    /// v4: the agent may read the screen (`buddy screen look`). Off by default.
+    pub screen_look: ScreenLook,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -60,8 +66,60 @@ impl Default for Settings {
             scenes: true,
             onboarded: false,
             persona: Persona::default(),
+            activity: Activity::default(),
+            screen_look: ScreenLook::default(),
             extra: Extra::new(),
         }
+    }
+}
+
+/// `settings.activity`: the tray's "Activity awareness".
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct Activity {
+    pub enabled: bool,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+impl Default for Activity {
+    fn default() -> Self {
+        Activity { enabled: true, extra: Extra::new() }
+    }
+}
+
+/// The apps the agent never reads the screen in front of (bundle ids; an exact id or a trailing `*`):
+/// password managers, messengers, Mail, Keychain. A missing `deny` key means this list; an explicit
+/// `[]` is the person's choice and is kept.
+pub const DEFAULT_SCREEN_DENY: &[&str] = &[
+    "com.1password.*",
+    "com.agilebits.*",
+    "com.bitwarden.desktop",
+    "org.keepassxc.keepassxc",
+    "com.lastpass.*",
+    "com.dashlane.*",
+    "com.apple.Passwords",
+    "com.apple.keychainaccess",
+    "com.apple.MobileSMS",
+    "com.apple.mail",
+    "net.whatsapp.WhatsApp",
+    "ru.keepcoder.Telegram",
+    "org.whispersystems.signal-desktop",
+];
+
+/// `settings.screen_look`: read by the host's screen look (`screen::look`: off by default, then the
+/// don't-look list); the tray item **Screen look** toggles `enabled` and asks for Screen Recording when
+/// it is turned on.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct ScreenLook {
+    pub enabled: bool,
+    pub deny: Vec<String>,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+impl Default for ScreenLook {
+    fn default() -> Self {
+        ScreenLook { enabled: false, deny: DEFAULT_SCREEN_DENY.iter().map(|s| s.to_string()).collect(), extra: Extra::new() }
     }
 }
 
@@ -278,6 +336,12 @@ pub fn read(home: &Path) -> Result<Option<Settings>, String> {
         s.dnd.fullscreen = false;
     }
     // v2 → v3: no `persona` yet, which reads as the pack's default personality
+    // v3 → v4: `activity` and `screen_look` start at their defaults (an older file cannot have meant
+    // them, whatever a hand edit put there)
+    if s.settings_version < 4 {
+        s.activity = Activity::default();
+        s.screen_look = ScreenLook::default();
+    }
     s.settings_version = s.settings_version.max(VERSION);
     for line in s.persona.sanitize() {
         eprintln!("[buddy] {line}");
@@ -322,14 +386,19 @@ mod tests {
         assert_eq!(note, None);
         let v = serde_json::to_value(&s).unwrap();
         let want: Value = serde_json::from_str(
-            r#"{"settings_version":3,"pack":"bear","zoom":1,"position":null,
+            r#"{"settings_version":4,"pack":"bear","zoom":1,"position":null,
             "dnd":{"action":"hide","fullscreen":false,"screen_share":true},
             "quiet_hours":{"enabled":true,"start":"22:30","end":"07:30"},
             "attention":{"per_hour":4},"model":{"provider":"anthropic","model":"claude-sonnet-5-5"},
             "edges":{"enabled":true},"studio":{"packs_dir":null},
             "room":"starter","floor":"grid","scenes":true,"onboarded":false,
             "persona":{"preset":null,"name":null,"call_me":null,"catchphrase":null,
-            "chattiness":null,"playfulness":null,"emotes":null,"notes":null}}"#,
+            "chattiness":null,"playfulness":null,"emotes":null,"notes":null},
+            "activity":{"enabled":true},
+            "screen_look":{"enabled":false,"deny":["com.1password.*","com.agilebits.*","com.bitwarden.desktop",
+            "org.keepassxc.keepassxc","com.lastpass.*","com.dashlane.*","com.apple.Passwords",
+            "com.apple.keychainaccess","com.apple.MobileSMS","com.apple.mail","net.whatsapp.WhatsApp",
+            "ru.keepcoder.Telegram","org.whispersystems.signal-desktop"]}}"#,
         )
         .unwrap();
         assert_eq!(v, want);
@@ -341,13 +410,13 @@ mod tests {
         std::fs::write(path(&h), r#"{"settings_version":1,"zoom":2,"dnd":{"action":"hide","fullscreen":true,"screen_share":true}}"#).unwrap();
         let (mut s, note) = load(&h);
         assert_eq!(note, None);
-        assert_eq!((s.settings_version, s.dnd.fullscreen, s.dnd.screen_share, s.zoom), (3, false, true, 2));
+        assert_eq!((s.settings_version, s.dnd.fullscreen, s.dnd.screen_share, s.zoom), (4, false, true, 2));
         assert_eq!(s.persona, Persona::default());
         // the person turns it back on: v2 and later keep it
         s.dnd.fullscreen = true;
         s.save(&h).unwrap();
         let (s, _) = load(&h);
-        assert_eq!((s.settings_version, s.dnd.fullscreen), (3, true));
+        assert_eq!((s.settings_version, s.dnd.fullscreen), (4, true));
     }
 
     #[test]
@@ -422,16 +491,16 @@ mod tests {
     }
 
     #[test]
-    fn a_v2_file_reads_as_the_pack_default_personality_and_saves_as_v3() {
+    fn a_v2_file_reads_as_the_pack_default_personality_and_saves_as_v4() {
         let h = tmp_home("v2v3");
         std::fs::write(path(&h), r#"{"settings_version":2,"zoom":2,"dnd":{"action":"still","fullscreen":true}}"#).unwrap();
         let (s, note) = load(&h);
         assert_eq!(note, None);
-        assert_eq!((s.settings_version, s.zoom, s.dnd.action, s.dnd.fullscreen), (3, 2, DndAct::Still, true));
+        assert_eq!((s.settings_version, s.zoom, s.dnd.action, s.dnd.fullscreen), (4, 2, DndAct::Still, true));
         assert_eq!(s.persona.user, UserPersona::default());
         s.save(&h).unwrap();
         let v: Value = serde_json::from_str(&std::fs::read_to_string(path(&h)).unwrap()).unwrap();
-        assert_eq!(v["settings_version"], 3);
+        assert_eq!(v["settings_version"], 4);
         assert!(v["persona"].as_object().unwrap().values().all(Value::is_null), "{v}");
     }
 
@@ -504,6 +573,65 @@ mod tests {
         s.persona.pack = Some("bear".into());
         s.save(&h).unwrap();
         assert_eq!(load(&h).0.persona.pack.as_deref(), Some("bear"));
+    }
+
+    #[test]
+    fn v1_v2_and_v3_files_read_as_v4_with_activity_on_and_screen_look_off() {
+        for (i, text) in [
+            r#"{"settings_version":1,"zoom":2}"#,
+            r#"{"settings_version":2,"zoom":2}"#,
+            r#"{"settings_version":3,"zoom":2,"persona":{"preset":"mochi"}}"#,
+            // a v3 file cannot have meant these: they read as the defaults
+            r#"{"settings_version":3,"zoom":2,"activity":{"enabled":false},"screen_look":{"enabled":true,"deny":[]}}"#,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let h = tmp_home(&format!("tov4-{i}"));
+            std::fs::write(path(&h), text).unwrap();
+            let (s, note) = load(&h);
+            assert_eq!(note, None, "{text}");
+            assert_eq!((s.settings_version, s.zoom), (4, 2), "{text}");
+            assert_eq!(s.activity, Activity { enabled: true, extra: Extra::new() }, "{text}");
+            assert!(!s.screen_look.enabled && s.screen_look.deny.len() == 13 && s.screen_look.deny[0] == "com.1password.*", "{text}");
+        }
+    }
+
+    #[test]
+    fn a_v4_file_keeps_its_choices_unknown_keys_and_an_explicit_empty_deny_list() {
+        let h = tmp_home("v4");
+        std::fs::write(
+            path(&h),
+            r#"{"settings_version":4,"activity":{"enabled":false,"later":1},
+               "screen_look":{"enabled":true,"deny":[],"note":{"x":2}},"future":true}"#,
+        )
+        .unwrap();
+        let (mut s, note) = load(&h);
+        assert_eq!(note, None);
+        assert!(!s.activity.enabled);
+        assert!(s.screen_look.enabled && s.screen_look.deny.is_empty(), "an explicit [] is honored");
+        s.zoom = 3;
+        s.save(&h).unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(path(&h)).unwrap()).unwrap();
+        assert_eq!((v["activity"]["later"].clone(), v["screen_look"]["note"]["x"].clone(), v["future"].clone()), (1.into(), 2.into(), true.into()));
+        assert_eq!(v["screen_look"]["deny"], serde_json::json!([]));
+        // a v4 file with no `deny` key means the default list; with no activity key, on
+        std::fs::write(path(&h), r#"{"settings_version":4,"screen_look":{"enabled":true}}"#).unwrap();
+        let (s, _) = load(&h);
+        assert!(s.screen_look.enabled && s.screen_look.deny == ScreenLook::default().deny && s.activity.enabled);
+    }
+
+    #[test]
+    fn the_activity_toggle_is_written_and_read_back() {
+        let h = tmp_home("toggle");
+        let (mut s, _) = load(&h);
+        assert!(s.activity.enabled);
+        s.activity.enabled = false;
+        s.save(&h).unwrap();
+        let (s, _) = load(&h);
+        assert!(!s.activity.enabled);
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(path(&h)).unwrap()).unwrap();
+        assert_eq!((v["settings_version"].clone(), v["activity"]["enabled"].clone()), (4.into(), false.into()));
     }
 
     #[test]

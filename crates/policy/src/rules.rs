@@ -313,6 +313,8 @@ pub fn attention(seg: &Segment) -> Option<&'static str> {
     let flag = |short: char, long: &str| args.iter().any(|a| *a == long || (a.starts_with('-') && !a.starts_with("--") && a.contains(short)));
     let sub = args.iter().find(|a| !a.starts_with('-')).copied().unwrap_or("");
     match cmd {
+        // reading the screen is the person's call every time, whatever the mode (`screen_look`)
+        "buddy" if screen_look_args(&args) => Some(SCREEN_REASON),
         "sudo" | "su" | "doas" => Some("it runs as administrator"),
         "rm" if flag('r', "--recursive") || flag('R', "--recursive") => Some("it deletes whole folders"),
         "find" if args.contains(&"-delete") => Some("it deletes files"),
@@ -340,7 +342,45 @@ pub fn attention(seg: &Segment) -> Option<&'static str> {
 pub fn attention_raw(command: &str) -> Option<&'static str> {
     const NAMES: [&str; 22] = ["sudo", "su", "doas", "rm", "dd", "diskutil", "fdisk", "shutdown", "reboot", "halt", "launchctl", "csrutil", "spctl", "nvram", "systemsetup", "dscl", "crontab", "security", "osascript", "killall", "pkill", "eval"];
     let risky = command.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')).any(|w| NAMES.contains(&w) || w.starts_with("mkfs") || w.starts_with("newfs"));
-    (risky || sensitive_path(command)).then_some("it runs a risky command inside another, which can’t be checked")
+    if risky || sensitive_path(command) {
+        return Some("it runs a risky command inside another, which can’t be checked");
+    }
+    screen_look(command).then_some("it reads the screen inside another command, which can’t be checked")
+}
+
+/// `attention`'s reason for a plain `buddy screen look`.
+pub const SCREEN_REASON: &str = "it reads the screen";
+
+/// `buddy`'s arguments name `screen look` (flags, like `--json`, may sit anywhere).
+fn screen_look_args(args: &[&str]) -> bool {
+    let mut words = args.iter().filter(|a| !a.starts_with('-'));
+    words.next() == Some(&"screen") && words.next() == Some(&"look")
+}
+
+/// Whether `command` may run `buddy screen look` anywhere in it: as a plain segment, behind
+/// `env`/`sh -c`/`eval`, inside `$(…)`, with flags or quotes between the words, or built from a
+/// variable (`b=screen; buddy $b look`). A token scan like `outbound`: it errs toward asking, and
+/// toward denying in a check-in.
+pub fn screen_look(command: &str) -> bool {
+    let plain: String = command.chars().filter(|c| !matches!(c, '\'' | '"' | '\\')).collect();
+    let w: Vec<&str> = plain.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-')).filter(|w| !w.is_empty() && !w.starts_with('-')).collect();
+    // the three words in a row (flags and quotes aside): `buddy say "screen look"` is only a sentence
+    if w.windows(3).any(|t| t == ["buddy", "screen", "look"]) {
+        return true;
+    }
+    let built = plain.contains('$') || plain.contains('`') || w.contains(&"eval");
+    if !built {
+        return false;
+    }
+    // Built from a variable or a substitution: three shell words in a row, each the literal word or one that may
+    // expand to anything (`b=screen; buddy $b look`, `buddy ${s}een ${l}ok`), at least one of them literal. A
+    // sentence that only mentions a look (`buddy say "take a look at your $TASK"`) is not one.
+    let toks: Vec<&str> = plain.split(|c: char| c.is_whitespace() || matches!(c, ';' | '|' | '&' | '<' | '>')).filter(|t| !t.is_empty() && !t.starts_with('-')).collect();
+    let wild = |t: &str| t.contains(['$', '`', '(', ')', '{', '}']);
+    toks.windows(3).any(|t| {
+        let lit = [t[0] == "buddy", t[1] == "screen", t[2] == "look"];
+        lit.iter().any(|l| *l) && (0..3).all(|i| lit[i] || wild(t[i]))
+    })
 }
 
 /// A path that holds keys, passwords or scripts the system runs by itself.
@@ -368,6 +408,8 @@ pub fn suggest(seg: &Segment) -> Option<String> {
         return None;
     }
     let prefix = match seg.words.get(1) {
+        // "from now on" for a look names the look, not every `buddy screen …`
+        Some(sub) if first == "buddy" && sub == "screen" && seg.words.get(2).is_some_and(|w| w == "look") => "buddy screen look".to_string(),
         Some(sub) if TWO_WORD.contains(&first.as_str()) && !sub.starts_with('-') => format!("{first} {sub}"),
         _ => first.clone(),
     };

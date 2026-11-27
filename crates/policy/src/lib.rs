@@ -176,6 +176,12 @@ const MAX_TAINT_SOURCES: usize = 20;
 /// The `task` card in ask mode: its helper then searches and reads the web without a card.
 pub const TASK_CARD_DETAIL: &str = "Ask every time is on. Its helper can search and read the web without asking.";
 
+/// The approval card for `buddy screen look` / `screen_look`.
+pub const SCREEN_CARD_TITLE: &str = "Let the bear look at your screen?";
+pub const SCREEN_CARD_DETAIL: &str = "It reads the text on the display the bear is on. Nothing is saved. Password managers and messengers are never read.";
+/// A check-in turn (`trigger.source == "sense"`) never looks at the screen.
+pub const SCREEN_SENSE_DENIED: &str = "Screen look only runs when the person asked in chat, not during a check-in";
+
 pub const DECLINED: &str = "The person declined this call. Don’t retry it; try another way or ask them what to do.";
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -380,12 +386,29 @@ impl Production {
         if child && !CHILD_TOOLS.contains(&req.tool.as_str()) {
             return Verdict::Deny(format!("A helper conversation can’t use “{}”.", req.tool));
         }
+        // Looking at the screen is only ever the person's ask in chat: a check-in turn never does it.
+        let looks = req.tool == "screen_look" || (req.tool == "bash" && rules::screen_look(req.args["command"].as_str().unwrap_or("")));
+        if looks && req.trigger["source"] == "sense" {
+            return Verdict::Deny(SCREEN_SENSE_DENIED.into());
+        }
         let tainted = f.taint.is_some();
         let rules = Rules::of(f, !tainted);
         // Full access pauses while the conversation is marked: a web page must not steer a bear that runs anything.
         let mode = if f.mode == "full" && tainted { "allowlist" } else { f.mode.as_str() };
         match req.tool.as_str() {
             "bash" => Self::shell(at, f, &rules, mode, tainted, req.args["command"].as_str().unwrap_or("")),
+            // The sidecar's typed tool is judged as the command it stands for, so modes, allow rules and the
+            // "Always" rule `Shell(buddy screen look:*)` act the same on both paths.
+            "screen_look" => {
+                let command = if req.args["image"] == true { "buddy screen look --image" } else { "buddy screen look" };
+                match Self::shell(at, f, &rules, mode, tainted, command) {
+                    Verdict::Ask(mut a, t) => {
+                        a["tool"] = json!("screen_look");
+                        Verdict::Ask(a, t)
+                    }
+                    v => v,
+                }
+            }
             "read" | "write" | "edit" => {
                 let tool = FileTool::of(&req.tool).unwrap();
                 Self::file(at, &rules, mode, tainted, tool, req.args["path"].as_str().unwrap_or(""))
@@ -425,14 +448,22 @@ impl Production {
                 None,
             );
         }
-        if mode == "skip" {
+        // `skip` (policy.json only) never asks, except for a look at the screen: D18 asks every time.
+        let looks = rules::screen_look(command);
+        if mode == "skip" && !looks {
             return Verdict::Allow;
         }
         // Every ask rule a segment matches.
         let hits: Vec<&String> = line.segments.iter().flat_map(|s| rules.ask.iter().filter(|(_, p)| p.matches_segment(s)).map(|(id, _)| id)).collect();
         let asked = hits.first().map(|id| (*id).clone());
         // Full access: only an ask rule or a risky command (`rules::attention`) asks.
-        let risky = (mode == "full").then(|| line.segments.iter().find_map(|s| rules::attention(s).map(|why| (Some(s), why))).or_else(|| if line.complex { rules::attention_raw(command).map(|why| (None, why)) } else { None })).flatten();
+        // A look beside a riskier command names the riskier one (`buddy screen look && rm -rf …` is about the `rm`).
+        let risky = (mode == "full")
+            .then(|| {
+                let found: Vec<(Option<&Segment>, &str)> = line.segments.iter().filter_map(|s| rules::attention(s).map(|why| (Some(s), why))).collect();
+                found.iter().find(|(_, why)| *why != rules::SCREEN_REASON).or(found.first()).copied().or_else(|| if line.complex { rules::attention_raw(command).map(|why| (None, why)) } else { None })
+            })
+            .flatten();
         if mode == "full" && asked.is_none() && risky.is_none() {
             return Verdict::Allow;
         }
@@ -471,10 +502,20 @@ impl Production {
         // A fetch the split can't see as its own segment (`"$(curl …)"`) marks too.
         let fetches = hits.iter().any(|id| FETCH_RULES.contains(&id.as_str())) || (line.complex && command.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-')).any(|w| w == "curl" || w == "wget"));
         let taint = fetches.then(|| TaintSource { source: "shell".into(), detail: command.to_string(), at: 0 });
+        // A look on its own has its own card, whatever made it ask (mode, a rule, the web mark, Full access's
+        // attention list). A look inside a longer line keeps the line's card and says it also reads the screen,
+        // so a harmless-looking card never stands for `buddy screen look && rm -rf …`.
+        let (title, detail) = if looks && !line.complex && line.segments.len() == 1 {
+            (SCREEN_CARD_TITLE.to_string(), SCREEN_CARD_DETAIL.to_string())
+        } else if looks {
+            (format!("Run {name}?"), format!("{detail} It also looks at your screen."))
+        } else {
+            (format!("Run {name}?"), detail)
+        };
         let approval = json!({
             "kind": "command",
             "tool": "bash",
-            "title": format!("Run {name}?"),
+            "title": title,
             "detail": detail,
             "command": command,
             "suggestedRule": suggested,

@@ -31,6 +31,7 @@ shows what is done and what comes next.
 | D15 | **S3 is dropped, 2026-11-10.** D13 moved all art to Blender, so the bear ships as PNG strips + JSON from `experiments/mascot/bear3d/`, not `.aseprite`. That removes S3's open question (`asefile` vs `aseprite-io`), and S1 already loads and composites the pipeline output, so no spike is left to run. The versioned **pack format** (manifest + loader over the pipeline output, intent → clip map) is built in P1a. Headless composite, `lint` and `diff` move to P4 with the studio; P1b may pull the composite forward. `.aseprite` import for user-made mascots also waits for P4. §3 and §5 were updated to match. |
 | D16 | **Face layers for blinking and talking; no eye look-at in v1, 2026-11-10.** The Blender pipeline renders the bear as whole-body frames, so the eyes and mouth come as separate small **face layers** per direction (eyes open/closed, a few mouth shapes), drawn over the body at a **per-frame face position** that Blender exports with each clip (as it does `root_px`), so the face follows head bobs. The brain then picks blink timing at random (jittered timers) and flaps the mouth while `Speaking` streams. Faces are rendered only for the directions where the face shows (not N, NE, NW). A pipeline check, like `verify_b.py`, requires body + open-eyes/closed-mouth layer to match the original render pixel for pixel. Baking blinks and talking into the clips was rejected: blinks would repeat on the idle loop's fixed beat (30 frames, 2.5 s), and a baked mouth can't follow streamed speech. **Look-at in v1 = turning the body** toward the target in the 8 directions. Moving the eyes within the face waits until blinking and talking have been judged on the desktop. P1a's pack format carries the face layers and positions; the art round renders them. |
 | D17 | **Personality is pack data and changes tone only, 2026-11-26.** A pack's optional `persona` block holds presets (name, identity, voice rules, examples, idle lines, temperament); the user picks one and tunes it in `settings.persona` (tray **Personality ▸**, **Customize…**). It shapes the prompt's "Who you are" section, the brain's temperament, check-in wording and canned idle lines. It never changes tools, approvals or the policy, and the agent has no command to change it. The bear ships four original presets: Biscuit (default, cheeky sidekick), Mochi, Pip and Tofu. |
+| D18 | **Screen awareness is two opt-in levels with fixed privacy rules, 2026-11-27.** **Level A, activity sense** (on by default, tray **Activity awareness**, no permission): the bear knows which app is in front, for how long and how often it changes, from signals it already senses (NSWorkspace activation, the app's display name, idle time). A short summary of app display names and whole minutes (`Last 20 min: VS Code 14m → Chrome 4m`; never window titles, document names, URLs or bundle ids) may ride in a budgeted check-in, under D4's budget, debounce, DND and quiet hours; moments are `long_dwell`, `flip_loop`, `late_hour` (own check-ins) and `back_after_away` (enriches the return greeting). This replaces p4's "no app name in a sense turn" for that summary only. The log is RAM-only (30 min), never written or logged, and turning the toggle off clears it. **Level C, screen look** (off by default, tray **Screen look**): `buddy screen look` / the typed `screen_look` tool reads the text on the display the bear is on (ScreenCaptureKit + on-device Vision OCR; the tool can also show the model a downscaled picture). Screen Recording permission is asked only when the person turns it on. Every use asks (policy card; Full access still asks), the bear peeks first, it is refused while a deny-listed app (password managers, Keychain, Messages, Mail, chat apps; `settings.screen_look.deny`) is in front, deny-listed apps' windows are left out of the capture, and it never runs in a check-in. The app saves and logs no capture. What it returns is untrusted input and marks the conversation like a web page. The OCR text stays in that conversation's history like any tool result; the picture is used for the asking turn only and is not stored. `screen_look` is the one typed tool beside the CLI, because a shell result can't carry a picture. **Level B** (window titles, accessibility text) is out. |
 
 ## 0. Goals (from the request)
 
@@ -110,6 +111,8 @@ shows what is done and what comes next.
   There are no extra tool schemas, so the cached prompt prefix stays stable.
 - A typed tool is a later option, only if something needs streamed structured
   output.
+- D18 added the first one: `screen_look`, because a shell result can't carry a
+  picture. `buddy screen look` is its text-only CLI twin, under the same policy.
 
 ### Host API auth and loopback hygiene
 
@@ -192,6 +195,9 @@ shows what is done and what comes next.
 - **Privacy.** Sense events live in a short in-memory ring buffer. They are
   never written to disk unless the user opts into a log. They leave the machine
   only as the summarized event inside a budgeted turn.
+  Since D18 that summary may name the apps in front and their minutes (activity
+  sense, never titles); the screen itself is read only on request (`buddy screen
+  look`, D18).
 
 ### Context
 
@@ -262,7 +268,8 @@ Harness ──MascotEvent + params──▶ Brain (shared, Rust) ──Intent─
     the pixel grid and to the clip fps (12).
 - **Later:** a smooth `rig` backend through the same trait, only if a
   non-pixel mascot is ever wanted.
-- **Screen awareness** (walking along window edges, sitting on title bars)
+- **Window geometry** (walking along window edges, sitting on title bars; built in p5
+  as edge sitting, bounds only). Reading what is on the screen is D18. It
   needs other apps' window geometry, which brings permission prompts:
   - macOS: CGWindowList (titles need Screen Recording permission; bounds don't)
   - Windows: EnumWindows + DwmGetWindowAttribute

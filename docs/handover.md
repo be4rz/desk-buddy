@@ -198,6 +198,46 @@ need eyes on the real window.
   (`{pack, minutes, seeds, pass, runs[]}`, exit 0 pass / 1 findings); for the bear,
   `buddy studio audit --pack mascots/bear --minutes 30 --seeds 1,2,3` exits 0.
 
+## 9. Screen awareness (D18)
+
+The agent tested both levels with fakes only: nothing here ever captured a real screen. These need your desktop.
+
+**Activity sense (on by default).** Debug builds can shrink its thresholds:
+`BUDDY_ACTIVITY_SCALE=15 BUDDY_SENSES_LOG=1 cargo run -p buddy-app` turns 45 minutes into 3.
+
+- [ ] **Long stay.** Work in one app (for example your editor) past the threshold, with quiet hours off or outside them.
+  **Expect:** stderr shows `[buddy] activity long_dwell` (a kind, never an app name). Within the 4-an-hour budget the
+  bear says one line that may name the app, in its persona's voice.
+- [ ] **Flipping.** Switch quickly between two or three apps (6 switches in 5 minutes, unscaled).
+  **Expect:** `[buddy] activity flip_loop`, and at most one check-in about it.
+- [ ] **Coming back.** Step away for more than 10 minutes, then come back.
+  **Expect:** one greeting, not two. It may mention what you were in before the break.
+- [ ] **Toggle off.** Untick **Activity awareness** in the tray and repeat the long stay.
+  **Expect:** no activity check-in and no app name in any line. The setting survives a relaunch.
+
+**Screen look (off by default).** Use a signed-in account and a model that takes images for the picture step.
+
+- [ ] **Turning it on.** Tick **Screen look** in the tray.
+  **Expect:** macOS asks once for Screen Recording. Until you allow it and relaunch, the item reads
+  "Screen look (needs Screen Recording permission)". Under `cargo run` the permission belongs to the terminal or IDE
+  that started the app, so allow that.
+- [ ] **A look.** Ask the bear "what's on my screen?".
+  **Expect:** the card "Let the bear look at your screen?" appears. After you allow it, the bear peeks, and the reply
+  reflects text that is really on the display the bear is on. The bear itself isn't in the picture.
+- [ ] **Don't-look list.** Bring a password manager, Keychain Access or Messages to the front and ask again.
+  **Expect:** the look is refused ("the app in front is on the don't-look list") and nothing is read. With one of those
+  open *behind* another app, a look leaves its window out of the text and the picture.
+- [ ] **Picture for one turn.** With a vision model, ask about something only visible as an image, then ask a follow-up.
+  **Expect:** the first answer uses the picture; the follow-up only has the text and the "not saved" note.
+- [ ] **Never in a check-in.** Leave it on through a few check-ins.
+  **Expect:** no check-in ever shows the card or peeks.
+- [ ] **Nothing on disk.** After a large look, check `~/.desk-buddy/` (or your `BUDDY_HOME`).
+  **Expect:** no capture file and no new `.buddy/outputs/` file from the look.
+- [ ] **Turning it off.** Untick **Screen look** and ask again.
+  **Expect:** "Screen look is turned off…". The setting survives a relaunch.
+- [ ] **Killed mid-look.** Quit the app with `kill -9` while a look runs, then relaunch.
+  **Expect:** the chat shows the look as interrupted, and no second capture happens.
+
 ## Known limitations to judge
 
 These are known and unfixed. Each needs your call, not more QA. Some are design changes, others are
@@ -215,6 +255,15 @@ small follow-ups.
 - Widgets: tainted agent browser actions are gated only by the policy's shell-command scan (L1). The
   agent can drive the browser widget while it's hidden (L2). Music and now-playing titles reach the
   agent without marking the chat (L3).
+
+**Screen awareness (D18)**
+- Private browser windows and web banking can't be told apart without window titles (level B, out of scope). Only
+  the per-use card and the peek cover them.
+- The OCR text of a look stays in that conversation's history like any tool result; only the picture is turn-only.
+- A Screen Recording grant may need a relaunch, and `cargo run` builds get it through the terminal or IDE.
+- Screen look needs macOS 14 or later; older systems get a clear tool error.
+- If the bear can't play the peek (hidden, Do Not Disturb), the look still runs after the card.
+- `late_hour` (still at the computer past 23:00) never speaks under the default quiet hours (22:30 to 07:30).
 
 **Accounts**
 - Fixed in p5, each with a unit test:

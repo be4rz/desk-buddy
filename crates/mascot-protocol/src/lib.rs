@@ -103,7 +103,8 @@ pub fn classify_command(command: &str) -> WorkKind {
 /// The kind of work a tool call does.
 pub fn classify(tool: &str, command: Option<&str>) -> WorkKind {
     match tool {
-        "read" | "write" | "edit" | "look" => WorkKind::Files,
+        // `screen_look` reads the screen's text: the reading work, like `look` on an image file
+        "read" | "write" | "edit" | "look" | "screen_look" => WorkKind::Files,
         "web_fetch" | "web_search" => WorkKind::Web,
         "bash" => classify_command(command.unwrap_or("")),
         _ => WorkKind::Shell,
@@ -123,6 +124,7 @@ mod tests {
         assert_eq!(classify_command("curl -s x"), WorkKind::Web);
         assert_eq!(classify_command("ls -la"), WorkKind::Shell);
         assert_eq!(classify("edit", None), WorkKind::Files);
+        assert_eq!(classify("screen_look", None), WorkKind::Files);
     }
 
     #[test]

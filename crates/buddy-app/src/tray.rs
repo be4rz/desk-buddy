@@ -109,6 +109,12 @@ pub struct TrayInit {
     pub floor: String,
     /// `settings.scenes`; `None` when the room has no scenes (the item is then disabled)
     pub scenes: Option<bool>,
+    /// `settings.activity.enabled`: "Activity awareness"
+    pub activity: bool,
+    /// `settings.screen_look.enabled`: "Screen look"
+    pub screen_look: bool,
+    /// Screen look is on but macOS has not granted Screen Recording: the label says so
+    pub screen_look_missing: bool,
     /// the Personality submenu (`persona::tray`)
     pub persona: crate::persona::TrayView,
 }
@@ -140,6 +146,15 @@ const SIZES: [&str; 3] = ["Small", "Medium", "Large"];
 
 fn size_label(zoom: u32) -> String {
     format!("Size: {}", SIZES[(zoom.clamp(1, 3) - 1) as usize])
+}
+
+/// The "Screen look" item's text: it says when macOS has not granted Screen Recording.
+pub fn screen_look_label(permission_missing: bool) -> &'static str {
+    if permission_missing {
+        "Screen look (needs Screen Recording permission)"
+    } else {
+        "Screen look"
+    }
 }
 
 /// The Approvals submenu's title for a policy mode (`skip` can only be set by editing policy.json).
@@ -241,6 +256,8 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
     let floor_refs: Vec<&dyn IsMenuItem<Wry>> = floor_items.iter().map(|i| i as &dyn IsMenuItem<Wry>).collect();
     let floor = Submenu::with_id_and_items(app, "floor", floor_label(&floors, &t.floor), true, &floor_refs)?;
     let scenes = CheckMenuItem::with_id(app, "scenes", "Scenes around activities", t.scenes.is_some(), t.scenes == Some(true), None::<&str>)?;
+    let activity = CheckMenuItem::with_id(app, "activity", "Activity awareness", true, t.activity, None::<&str>)?;
+    let screen_look = CheckMenuItem::with_id(app, "screen_look", screen_look_label(t.screen_look && t.screen_look_missing), true, t.screen_look, None::<&str>)?;
     let ask = MenuItem::with_id(app, "ask", "Ask…", true, None::<&str>)?;
     let agent = MenuItem::with_id(app, "agent", harness::AgentState::Starting.line(), false, None::<&str>)?;
     let taint = MenuItem::with_id(app, "taint", "Reset web caution", true, None::<&str>)?;
@@ -270,7 +287,7 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
     items.extend([&sep1 as &dyn IsMenuItem<Wry>, &ask, &agent]);
     // "Reset web caution" goes in under the agent line while tainted
     let taint_at = items.len();
-    items.extend([&sep4 as &dyn IsMenuItem<Wry>, &size, &floor, &scenes, &hide, &next, &sep2, &dnd, &quiet, &busy, &fs_hide, &budget, &sep5, &personality, &model, &approvals, &signin, &studio, &sep3, &quit]);
+    items.extend([&sep4 as &dyn IsMenuItem<Wry>, &size, &floor, &scenes, &hide, &next, &sep2, &dnd, &quiet, &busy, &fs_hide, &activity, &screen_look, &budget, &sep5, &personality, &model, &approvals, &signin, &studio, &sep3, &quit]);
     let menu = Menu::with_items(app, &items)?;
 
     let hide2 = hide.clone();
@@ -431,6 +448,19 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
                     a.set_scenes(on);
                     let _ = scenes.set_checked(on);
                 }),
+                "activity" => with_app(|a| {
+                    let on = !a.settings.activity.enabled;
+                    a.set_activity(on);
+                    let _ = activity.set_checked(on);
+                }),
+                "screen_look" => with_app(|a| {
+                    let on = !a.settings.screen_look.enabled;
+                    a.set_screen_look(on);
+                    // the one place macOS is asked for Screen Recording: the person just turned the item on
+                    let missing = on && crate::screen::request_access();
+                    let _ = screen_look.set_checked(on);
+                    let _ = screen_look.set_text(screen_look_label(missing));
+                }),
                 f if f.starts_with("floor:") => {
                     let pick = &f[6..];
                     for (i, it) in floor_items.iter().enumerate() {
@@ -472,4 +502,15 @@ pub fn build(app: &TauriApp<Wry>, t: TrayInit) -> tauri::Result<()> {
     };
     b.build(app)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_screen_look_label_names_the_missing_permission() {
+        assert_eq!(screen_look_label(false), "Screen look");
+        assert_eq!(screen_look_label(true), "Screen look (needs Screen Recording permission)");
+    }
 }

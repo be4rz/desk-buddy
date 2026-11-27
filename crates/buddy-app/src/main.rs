@@ -7,7 +7,8 @@
 //! repo's `mascots/` in debug builds; a settings pack found nowhere runs the bear), `BUDDY_ZOOM=1|2|3`, `BUDDY_STATS=1`, `BUDDY_DUMP=<dir>`
 //! (+ `BUDDY_DUMP_EVERY=<n>`), `BUDDY_EVENTS=<file.jsonl>`, `BUDDY_SCREEN=<n>`,
 //! `BUDDY_VERBOSE=1`, `BUDDY_SENSES=0` (sensors off; also off under `BUDDY_EVENTS` unless
-//! `BUDDY_SENSES=1`), `BUDDY_SENSES_LOG=1` (sense changes to stderr).
+//! `BUDDY_SENSES=1`), `BUDDY_SENSES_LOG=1` (sense changes to stderr, activity moments as kinds only).
+//! Debug builds only: `BUDDY_ACTIVITY_SCALE=<n>` divides the activity thresholds by `n`.
 //!
 //! Talk (p3): the speech bubble (`bubble/`, page `web/bubble/`) and the agent harness
 //! (`harness.rs`: host API at `BUDDY_HOME/host.json`, policy gate, one agent). Debug builds
@@ -39,6 +40,7 @@ mod instance;
 mod media_os;
 mod panel;
 mod persona;
+mod screen;
 mod senses;
 mod settings;
 mod signin;
@@ -341,6 +343,9 @@ fn main() {
                 floors: art.room().map(|r| r.floors.iter().map(|f| (f.id.clone(), f.name.clone())).collect()).unwrap_or_default(),
                 floor: driver::floor_choice(&art, &settings.floor).to_string(),
                 scenes: art.room().is_some_and(|r| !r.scenes.is_empty()).then_some(settings.scenes),
+                activity: settings.activity.enabled,
+                screen_look: settings.screen_look.enabled,
+                screen_look_missing: settings.screen_look.enabled && screen::permission_missing(),
                 persona: persona::tray(&pack, &settings.persona.user),
             };
             let wanted = settings.model.clone();

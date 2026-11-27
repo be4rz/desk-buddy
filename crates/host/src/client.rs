@@ -22,7 +22,8 @@ pub fn request(port: u16, method: &str, path: &str, headers: Headers, body: Opti
     let mut s = TcpStream::connect(("127.0.0.1", port))?;
     // a widget action waits for its pages: `music play` worst case is the search, the media page
     // (8 s ready + 15 s reply) and, on embed error 150, the browser page (8 s + 15 s load)
-    let wait = if path.starts_with("/v1/widget") { 75 } else { 10 };
+    // a screen look waits for the capture and the on-device text recognition
+    let wait = if path.starts_with("/v1/widget") { 75 } else if path.starts_with("/v1/screen") { 30 } else { 10 };
     s.set_read_timeout(Some(Duration::from_secs(wait)))?;
     s.set_write_timeout(Some(Duration::from_secs(10)))?;
     let payload = body.map(|b| b.to_string()).unwrap_or_default();

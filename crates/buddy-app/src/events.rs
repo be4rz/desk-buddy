@@ -152,6 +152,24 @@ mod tests {
         assert_eq!(after.intent, Intent::Idle);
     }
 
+    /// D18: the activity fixture parses in time order, names ride only on the app lines, and the brain's
+    /// replay (which ignores a name: it is not a `Senses` field) plays it through.
+    #[test]
+    fn the_activity_sense_fixture_parses_and_plays_through_the_brain_without_names() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let items = load(&dir.join("tests/fixtures/activity_sense.jsonl")).unwrap();
+        assert!(items.windows(2).all(|w| w[0].at_ms <= w[1].at_ms));
+        let named: Vec<&str> = items.iter().filter_map(|i| i.senses.as_ref()?.front_name.as_ref()?.as_deref()).collect();
+        assert_eq!(named, ["VS Code", "Chrome", "Slack", "VS Code", "Chrome", "Slack", "VS Code"]);
+        assert_eq!(items.last().map(|i| i.at_ms), Some(103 * 60_000));
+        assert!(items.iter().all(|i| !serde_json::to_string(&i.senses).unwrap().contains("VS Code")), "a patch never serializes its name");
+        let p = std::sync::Arc::new(mascot_core::pack::load(&dir.join(BEAR)).unwrap());
+        let tl = mascot_core::replay::Timeline { timeline_version: mascot_core::replay::TIMELINE_VERSION, seed: 3, duration_ms: 104 * 60_000, start_local: "14:00".into(), weekday: 2, items };
+        let log = mascot_core::replay::run(p, &tl);
+        assert!(!log.is_empty());
+        assert!(!format!("{log:?}").contains("VS Code"));
+    }
+
     fn desk_replay(file: &str, pack_dir: &str, seed: u64, until: u64) -> Vec<mascot_core::replay::LogLine> {
         use mascot_core::{pack, replay};
         let dir = Path::new(env!("CARGO_MANIFEST_DIR"));

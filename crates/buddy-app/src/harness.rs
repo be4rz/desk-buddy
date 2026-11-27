@@ -23,7 +23,7 @@ use bridge::credentials::Credentials;
 use bridge::store::{CredentialStore, KeychainStore};
 use bridge::protocol::{ModelRef, ProviderDef, ProviderModel};
 use bridge::{Agent, AgentEvent, AgentSpec, BridgeError, Res};
-use host::{Action, Caller, Host, HostEvent, MascotOp, Refusal, RemindOp, WidgetOp};
+use host::{Action, Caller, Host, HostEvent, MascotOp, Refusal, RemindOp, ScreenOp, WidgetOp};
 use mascot_core::body::BodyReq;
 use mascot_protocol::{Emotion, MascotEvent};
 use policy::Production;
@@ -245,6 +245,7 @@ fn on_host(e: HostEvent, agent: Option<Arc<Agent>>, policy: Option<Arc<Productio
             Ok(json!({}))
         }
         Action::Mascot(op) => body_call(who, op, e.after_turn),
+        Action::Screen(ScreenOp::Look { image }) => screen_call(&e, who, image, agent, policy, crate::screen::host_look),
         Action::Remind(op) => {
             eprintln!("[buddy] host remind {who}: {op:?}");
             agent.map_or_else(|| Err(Refusal::no_agent()), |a| a.remind(&op))
@@ -272,6 +273,31 @@ fn on_host(e: HostEvent, agent: Option<Arc<Agent>>, policy: Option<Arc<Productio
             }
         }
     }
+}
+
+/// `buddy screen look` (D18): refused in a check-in turn, else `look` (the host's capture path); an
+/// agent's successful look marks the conversation like a browser read does, before the reply carries
+/// the text (the mark's detail names the source, never the content). The person's own terminal
+/// is not marked.
+fn screen_call(e: &HostEvent, who: &str, image: bool, agent: Option<Arc<Agent>>, policy: Option<Arc<Production>>, look: impl FnOnce(bool) -> host::Reply) -> host::Reply {
+    // the policy denies this already; a command that reaches the host from a check-in is refused here too
+    if crate::screen::is_sense_turn(e.turn.as_deref()) {
+        eprintln!("[buddy] screen look refused: sense_turn");
+        return Err(Refusal::new(403, "sense_turn", policy::SCREEN_SENSE_DENIED));
+    }
+    // each look is approved inside a running turn: a loop left running after it (`while …; do buddy screen look`) is not
+    if e.after_turn && matches!(e.caller, Caller::Agent { .. }) {
+        eprintln!("[buddy] screen look refused: turn_ended");
+        return Err(Refusal::new(403, "turn_ended", "Screen look only runs while the turn that asked for it is running."));
+    }
+    eprintln!("[buddy] host screen look {who}{}", if image { " +image" } else { "" });
+    let done = look(image)?;
+    if let (Caller::Agent { gen, .. }, Some(a), Some(p)) = (&e.caller, &agent, &policy) {
+        if p.taint(&a.ctx(*gen), "screen", "screen look") {
+            eprintln!("[buddy] marked: the agent looked at the screen");
+        }
+    }
+    Ok(done)
 }
 
 /// How long a `buddy mascot …` waits for the main thread before it answers busy (design `#host-api`).
@@ -813,6 +839,80 @@ mod tests {
             let _ = self.1.lock().unwrap().recv();
             self.0.list()
         }
+    }
+
+    fn look_event(caller: host::Caller, turn: Option<&str>) -> HostEvent {
+        HostEvent { caller, action: host::Action::Screen(host::ScreenOp::Look { image: false }), turn: turn.map(String::from), after_turn: false }
+    }
+
+    #[test]
+    fn a_screen_look_marks_the_conversation_only_when_an_agent_got_text_back() {
+        let home = home("screen");
+        let h = built(&home, Config::memory(MemoryStore::new()), None);
+        let gen = h.agent.gen();
+        let agent = || host::Caller::Agent { agent_id: "main".into(), gen };
+        let ok = |_: bool| -> host::Reply { Ok(json!({ "text": "[screen]", "truncated": false })) };
+        let taint = |h: &Harness| h.policy_view()["taint"].clone();
+        let before = taint(&h);
+
+        // the person's terminal: the text comes back, nothing is marked
+        let r = screen_call(&look_event(host::Caller::User, None), "user", false, Some(h.agent.clone()), Some(h.policy.clone()), ok).unwrap();
+        assert_eq!(r["text"], "[screen]");
+        assert_eq!(taint(&h), before, "the person's own look marks nothing");
+
+        // a refused look (off, permission, deny-listed) marks nothing
+        let refuse = |_: bool| -> host::Reply { Err(Refusal::new(403, "screen_look_off", "Screen look is turned off.")) };
+        let e = screen_call(&look_event(agent(), Some("u:a")), "agent", false, Some(h.agent.clone()), Some(h.policy.clone()), refuse).unwrap_err();
+        assert_eq!((e.status, e.code), (403, "screen_look_off"));
+        assert_eq!(taint(&h), before, "no text came back");
+
+        // an agent's look marks it, source screen, and the detail never holds what was read
+        screen_call(&look_event(agent(), Some("u:a")), "agent", true, Some(h.agent.clone()), Some(h.policy.clone()), ok).unwrap();
+        let t = taint(&h);
+        let marks = serde_json::to_string(&t).unwrap();
+        assert!(marks.contains("\"source\":\"screen\"") && marks.contains("\"detail\":\"screen look\""), "{marks}");
+        assert!(!marks.contains("[screen]"));
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_screen_look_from_a_check_in_turn_is_refused_before_it_looks() {
+        let home = home("screen-sense");
+        let h = built(&home, Config::memory(MemoryStore::new()), None);
+        let gen = h.agent.gen();
+        let called = std::cell::Cell::new(false);
+        let look = |_: bool| -> host::Reply {
+            called.set(true);
+            Ok(json!({}))
+        };
+        let e = look_event(host::Caller::Agent { agent_id: "main".into(), gen }, Some("s:0f8fad5b-d9cb-469f-a165-70867728950e"));
+        let err = screen_call(&e, "agent", false, Some(h.agent.clone()), Some(h.policy.clone()), look).unwrap_err();
+        assert_eq!((err.status, err.code, err.message.as_str()), (403, "sense_turn", "Screen look only runs when the person asked in chat, not during a check-in"));
+        assert!(!called.get(), "nothing was captured");
+        assert!(!serde_json::to_string(&h.policy_view()["taint"]).unwrap().contains("screen"), "nothing was marked");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_screen_look_after_its_turn_ended_is_refused_before_it_looks() {
+        let home = home("screen-late");
+        let h = built(&home, Config::memory(MemoryStore::new()), None);
+        let gen = h.agent.gen();
+        let called = std::cell::Cell::new(false);
+        let look = |_: bool| -> host::Reply {
+            called.set(true);
+            Ok(json!({}))
+        };
+        let mut e = look_event(host::Caller::Agent { agent_id: "main".into(), gen }, Some("u:0f8fad5b-d9cb-469f-a165-70867728950e"));
+        e.after_turn = true;
+        let err = screen_call(&e, "agent", false, Some(h.agent.clone()), Some(h.policy.clone()), look).unwrap_err();
+        assert_eq!((err.status, err.code), (403, "turn_ended"));
+        assert!(!called.get(), "nothing was captured");
+        // the person's own terminal has no turn to end
+        let mut e = look_event(host::Caller::User, None);
+        e.after_turn = true;
+        assert!(screen_call(&e, "you", false, None, None, |_| Ok(json!({}))).is_ok());
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

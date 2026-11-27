@@ -25,7 +25,10 @@ impl Ring {
         Ring { buf: VecDeque::with_capacity(CAPACITY) }
     }
 
-    pub fn push(&mut self, t_ms: u64, patch: SensesPatch) {
+    /// The driver takes a patch's `front_name` out first; the ring drops it too, so no path can
+    /// leave an app's display name here.
+    pub fn push(&mut self, t_ms: u64, mut patch: SensesPatch) {
+        patch.front_name = None;
         if self.buf.len() == CAPACITY {
             self.buf.pop_front();
         }
@@ -63,5 +66,14 @@ mod tests {
         assert_eq!(r.len(), CAPACITY);
         assert_eq!(r.iter().next().unwrap().t_ms, 300 - CAPACITY as u64);
         assert_eq!(r.last().unwrap().t_ms, 299);
+    }
+
+    #[test]
+    fn never_holds_an_app_name() {
+        let mut r = Ring::new();
+        r.push(0, serde_json::from_str(r#"{"front_name": "Secret Notes", "user_idle_ms": 3}"#).unwrap());
+        let e = r.last().unwrap();
+        assert_eq!((e.patch.front_name.clone(), e.patch.user_idle_ms), (None, Some(3)));
+        assert!(!format!("{:?}", r).contains("Secret"));
     }
 }

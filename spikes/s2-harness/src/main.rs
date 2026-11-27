@@ -96,6 +96,8 @@ fn main() -> ExitCode {
                 ("remind", json!({ "op": format!("{op:?}") }), reply)
             }
             Action::Widget(op) => ("widget", json!({ "op": format!("{op:?}") }), Err(Refusal::no_agent())),
+            // the spike has no screen to look at (D18's screen look lives in buddy-app)
+            Action::Screen(op) => ("screen", json!({ "op": format!("{op:?}") }), Err(Refusal::new(403, "screen_look_off", "Screen look is turned off."))),
         };
         p2(json!({ "host": kind, "detail": detail, "turn": e.turn, "afterTurn": e.after_turn }));
         reply

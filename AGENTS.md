@@ -87,6 +87,16 @@ and talks through speech bubbles, powered by an LLM. The repo is public and open
   polls window bounds only while it sits (never window names). Debug only: `BUDDY_MEDIA_FAKE=1` (local stand-in for
   YouTube). Real-window browser test: `cargo build -p host --bin buddy && cargo test -p buddy-app --test browser_widget -- --ignored`.
   Spike record: `docs/spikes/media.md`.
+  Screen awareness (D18): activity sense `src/senses/activity.rs` (pure RAM log of front-app display names + minutes, 30 min;
+  moments `long_dwell` `flip_loop` `late_hour` become check-ins in `unprompted.rs`, `back_after_away` enriches `back_from_idle`;
+  names ride `SensesPatch.front_name`, taken out in the driver: never the brain, ring, log or disk; tray **Activity awareness**,
+  `settings.activity.enabled`, settings.json v4; debug `BUDDY_ACTIVITY_SCALE=<n>`; `BUDDY_SENSES_LOG=1` prints kinds only;
+  replay `crates/buddy-app/tests/fixtures/activity_sense.jsonl`). Screen look `src/screen/` (ScreenCaptureKit + Vision OCR behind
+  `Capture`/`Ocr` traits with fakes; tests never call the real `grab`): `buddy screen look [--json]` (text only; `--image` is a
+  usage error) and the sidecar's typed `screen_look` tool (`agent/src/ext/screen/`, picture for the asking turn only,
+  `replay: "unsafe"`), host `POST /v1/screen/look`; tray **Screen look** (off; asks for Screen Recording when ticked),
+  `settings.screen_look.{enabled,deny}`; every use asks, Full access too, denied in sense turns, taints the chat (source `screen`),
+  the bear peeks first; skill `agent/skills/screen/SKILL.md`. Debug only: `BUDDY_SCREEN_FAKE=1`. Desktop checks: handover §9.
   Studio (p6): `crates/studio` (headless, pixel-stable: `buddy studio render|sheet|gif|diff|lint|audit|comments|import-aseprite`,
   also the `buddy-studio` binary; `--json` everywhere, exit 0 ok / 1 findings or error / 2 usage;
   `audit --pack <dir> [--minutes 10] [--seed N | --seeds 1,2,3] [--start 2026-11-16T10:00] [--temperament energy=1.0,…]`

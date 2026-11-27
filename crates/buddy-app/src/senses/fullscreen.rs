@@ -47,6 +47,11 @@ pub fn set_bear_display(d: Option<Rect>) {
     *BEAR_DISPLAY.lock().unwrap_or_else(|e| e.into_inner()) = d;
 }
 
+/// The display the bear is on, as the panel last set it (screen look captures this one).
+pub fn bear_display() -> Option<Rect> {
+    *BEAR_DISPLAY.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// The displays a fullscreen app must cover to count for the bear: its own display when that is known
 /// and still attached, else every display.
 pub fn watched(displays: &[Rect], bear: Option<Rect>) -> Vec<Rect> {
@@ -59,7 +64,7 @@ pub fn watched(displays: &[Rect], bear: Option<Rect>) -> Vec<Rect> {
 
 /// `watched` for the bear's display now.
 pub fn bear_displays(displays: &[Rect]) -> Vec<Rect> {
-    watched(displays, *BEAR_DISPLAY.lock().unwrap_or_else(|e| e.into_inner()))
+    watched(displays, bear_display())
 }
 
 /// Does `w` cover display `d` exactly (within a point)?

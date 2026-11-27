@@ -10,7 +10,13 @@
 //!
 //! `BUDDY_SENSES=0` turns the sensors off (headless replays); `BUDDY_SENSES_LOG=1` prints
 //! every sense change to stderr.
+//!
+//! Activity (D18): while `settings.activity.enabled` the frontmost observer also reads the app's
+//! display name (`localizedName`, no permission) and posts it as `SensesPatch.front_name`. The
+//! driver takes it out of the patch first (`take_front_name`) and hands it to `activity` alone: it
+//! never reaches the brain, `BUDDY_SENSES_LOG` or the `Ring`. Never a window title.
 
+pub mod activity;
 pub mod clock;
 pub mod cursor;
 pub mod frontmost;
@@ -45,6 +51,27 @@ pub const POLL: Duration = Duration::from_secs(2);
 
 /// pid of the frontmost app, kept by the main-thread observer for the poll thread.
 static FRONT_PID: AtomicI32 = AtomicI32::new(-1);
+
+/// `settings.activity.enabled`, for the sensor: while false the observer does not even read the
+/// app's display name. The driver sets it (`set_activity_on`) before the sensors start and when the
+/// tray toggles it.
+static ACTIVITY_ON: AtomicBool = AtomicBool::new(false);
+
+pub fn set_activity_on(on: bool) {
+    ACTIVITY_ON.store(on, Ordering::Relaxed);
+}
+
+pub fn activity_on() -> bool {
+    ACTIVITY_ON.load(Ordering::Relaxed)
+}
+
+/// Report the frontmost app again, name included (main thread), so turning the activity sense on
+/// knows the app in front at once. A no-op while the sensors are off (`BUDDY_SENSES=0`, replays).
+pub fn refresh_front() {
+    if cursor_on() {
+        report_frontmost();
+    }
+}
 
 /// One on-screen window from CGWindowList (owner name, never the window title).
 #[derive(Clone, Debug, PartialEq, serde::Deserialize)]
@@ -216,6 +243,8 @@ fn report_frontmost() {
         let id = a.bundleIdentifier().map(|s| s.to_string()).unwrap_or_default();
         (a.processIdentifier(), frontmost::front_app(&id))
     });
+    // the display name for the activity sense: only while it is on, and only the localized name
+    let name = activity_on().then(|| app.as_ref().and_then(|a| a.localizedName()).map(|n| n.to_string()));
     // our own panel never activates (non-activating), but a menu click can: keep the
     // app the user was in, for the fullscreen check and the reflexes
     if front.as_ref().is_some_and(|(pid, _)| *pid == std::process::id() as i32) {
@@ -223,7 +252,7 @@ fn report_frontmost() {
     }
     FRONT_PID.store(front.as_ref().map_or(-1, |(pid, _)| *pid), Ordering::Relaxed);
     // with the clock, so no sample (reflexes, `late`) ever sees the default 00:00
-    post(Inbox::Senses(SensesPatch { frontmost: Some(front.map(|(_, f)| f)), local: Some(clock::now()), ..SensesPatch::default() }));
+    post(Inbox::Senses(SensesPatch { frontmost: Some(front.map(|(_, f)| f)), local: Some(clock::now()), front_name: name, ..SensesPatch::default() }));
 }
 
 fn observe_frontmost(nudge: Sender<()>) {

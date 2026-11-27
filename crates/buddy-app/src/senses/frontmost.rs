@@ -61,14 +61,17 @@ const TABLE: &[(&str, AppCategory)] = &[
     ("com.apple.Chess", AppCategory::Game),
 ];
 
+/// A bundle-id pattern: an exact id, or a prefix with a trailing `*`. The table's syntax, and the
+/// screen look deny list's (`settings.screen_look.deny`).
+pub fn bundle_matches(pattern: &str, bundle_id: &str) -> bool {
+    match pattern.strip_suffix('*') {
+        Some(prefix) => bundle_id.starts_with(prefix),
+        None => pattern == bundle_id,
+    }
+}
+
 pub fn category(bundle_id: &str) -> AppCategory {
-    TABLE
-        .iter()
-        .find(|(k, _)| match k.strip_suffix('*') {
-            Some(prefix) => bundle_id.starts_with(prefix),
-            None => *k == bundle_id,
-        })
-        .map_or(AppCategory::Other, |(_, c)| *c)
+    TABLE.iter().find(|(k, _)| bundle_matches(k, bundle_id)).map_or(AppCategory::Other, |(_, c)| *c)
 }
 
 pub fn front_app(bundle_id: &str) -> FrontApp {
@@ -78,6 +81,17 @@ pub fn front_app(bundle_id: &str) -> FrontApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bundle_patterns_are_exact_or_a_trailing_star() {
+        assert!(bundle_matches("com.1password.*", "com.1password.1password"));
+        assert!(bundle_matches("com.apple.mail", "com.apple.mail"));
+        assert!(!bundle_matches("com.apple.mail", "com.apple.mail.extra"), "no star: exact");
+        assert!(!bundle_matches("com.apple.mail", "com.apple.Mail"), "case counts, as in the table");
+        assert!(!bundle_matches("com.1password.*", "com.1password"), "the star stands for what follows the dot");
+        assert!(!bundle_matches("com.apple.mail", ""));
+        assert!(!bundle_matches("com.dashlane.*", ""));
+    }
 
     #[test]
     fn table() {

@@ -426,3 +426,58 @@ fn mascot_routes_follow_says_after_turn_rule() {
     drop(host);
     let _ = fs::remove_dir_all(dir);
 }
+
+#[test]
+fn screen_look_reaches_the_sink_with_its_image_flag_and_refusals_keep_the_envelope() {
+    let dir = std::env::temp_dir().join(format!("buddy-host-screen-{}-{}", std::process::id(), random_hex(3)));
+    let (tx, rx) = mpsc::channel();
+    let tx = Mutex::new(tx);
+    let host = Host::start(&dir.join("host.json"), move |e| {
+        let _ = tx.lock().unwrap().send(e.clone());
+        match e.action {
+            Action::Screen(ScreenOp::Look { image: true }) => Ok(json!({ "text": "t", "truncated": false, "noText": false, "width": 4, "height": 2, "lines": 1, "image": { "mimeType": "image/png", "base64": "AAAA", "width": 4, "height": 2 } })),
+            Action::Screen(ScreenOp::Look { image: false }) => Ok(json!({ "text": "t", "truncated": false, "noText": false, "width": 4, "height": 2, "lines": 1 })),
+            _ => Ok(json!({})),
+        }
+    })
+    .unwrap();
+    let auth = format!("Bearer {}", host.user_token());
+    let h = [("Authorization", auth.as_str())];
+    let p = host.port();
+    let look = |body: Option<Value>| request(p, "POST", "/v1/screen/look", &h, body.as_ref()).unwrap();
+    for (body, want) in [(Some(json!({ "image": true })), true), (Some(json!({ "image": false })), false), (Some(json!({})), false), (Some(json!({ "image": null })), false), (None, false)] {
+        let r = look(body.clone());
+        assert_eq!((r.status, r.body["ok"].clone()), (200, json!(true)), "{body:?}");
+        assert_eq!(r.body["image"].is_object(), want);
+        let e = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(e.action, Action::Screen(ScreenOp::Look { image: want }), "{body:?}");
+        assert_eq!(e.caller, Caller::User);
+    }
+    let r = look(Some(json!({ "image": true })));
+    assert_eq!(r.body["image"]["mimeType"], "image/png");
+    let _ = rx.recv_timeout(Duration::from_secs(2));
+    // a bad flag is a usage error and never reaches the sink
+    for body in [json!({ "image": "yes" }), json!({ "image": 1 })] {
+        let r = look(Some(body));
+        assert_eq!((r.status, r.body["error"]["code"].as_str(), r.body["error"]["message"].as_str()), (400, Some("usage"), Some("image is true or false.")));
+    }
+    assert!(rx.try_recv().is_err());
+    assert_eq!(request(p, "GET", "/v1/screen/look", &h, None).unwrap().status, 405);
+    assert_eq!(request(p, "POST", "/v1/screen/look", &[], Some(&json!({}))).unwrap().status, 401);
+    // an agent's look goes by the host's record of its turn when the command sent none
+    let agent = format!("Bearer {}", host.issue("a1", 1));
+    let ah = [("Authorization", agent.as_str())];
+    let _ = request(p, "POST", "/v1/screen/look", &ah, None).unwrap();
+    let e = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert_eq!((e.turn.as_deref(), e.after_turn), (None, true), "no turn running: late");
+    host.set_turn("a1", Some("s:turn-9"));
+    let _ = request(p, "POST", "/v1/screen/look", &ah, None).unwrap();
+    let e = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert_eq!((e.turn.as_deref(), e.after_turn), (Some("s:turn-9"), false), "the running turn stands in for the missing header");
+    let th = [("Authorization", agent.as_str()), ("X-Buddy-Turn", "u:old")];
+    let _ = request(p, "POST", "/v1/screen/look", &th, None).unwrap();
+    let e = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert_eq!((e.turn.as_deref(), e.after_turn), (Some("u:old"), true), "a stale header is late");
+    drop(host);
+    let _ = fs::remove_dir_all(&dir);
+}
