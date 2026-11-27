@@ -71,8 +71,14 @@ and talks through speech bubbles, powered by an LLM. The repo is public and open
   the sidecar's `memory.extract` (`agent/src/ext/memory/`) runs on the next 30 s tick; the window `memory`, page
   `web/memory/index.html?mock=<state>`, only it may call `memory_*`). Tray **What I remember…**; `settings.memory.{enabled,
   admission}`, settings.json v5; `BUDDY_MEMORY=0|1` overrides `enabled` (off: no turns kept, no section, CLI 409 except
-  forget). CLI `buddy memory remember|list|search|forget|open` (host `/v1/memory/*`; a store that won't open is 503
-  `no_memory`, retried at most every 5 s). The memory folder is private to every tool and shell word (`policy::memory`).
+  forget). CLI `buddy memory remember|list|search|recall|forget|open` (host `/v1/memory/*`; a store that won't open is 503
+  `no_memory`, retried at most every 5 s). History (p2): episodes from the extractor (importance ≥ 3), FTS5 search
+  (schema v2 `facts_fts`), date words EN + VI (`memory::dates`), recall on each chat message (`Store::recall`, ≤ 3 lines /
+  600 chars, `Harness::prompt` → `prompt_with`, never sense turns; the model sees a notes block, the transcript `said` the
+  typed words), `buddy memory recall <YYYY-MM-DD|today|yesterday|last-week>`, reflection on the jobs thread every 10 min
+  after 30 min away (`memory.reflect`, `agent/src/ext/memory/reflect.ts`; one tx, the 30% guard, retention inside; log
+  `[buddy] memory reflect <batch8> done|failed|rejected (<pct>% changed)`), `BUDDY_HOME/memory/notes/YYYY-MM-DD.md`, and
+  the window's History (`memory_history {before}`, `?mock=history`); replay `crates/buddy-app/tests/fixtures/memory_history.jsonl`. The memory folder is private to every tool and shell word (`policy::memory`).
   Logs carry ids, counts and outcome words only, never fact text, quotes or what was said. Replay
   `crates/buddy-app/tests/fixtures/memory.jsonl`; live eval `BUDDY_EVAL=1 bun run agent/scripts/memory-eval.ts` (real key,
   never in CI).

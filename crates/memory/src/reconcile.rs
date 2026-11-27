@@ -21,7 +21,11 @@ pub(crate) fn reconcile(tx: &Transaction, it: &Item, now: &Now) -> Result<Outcom
 fn keyless(tx: &Transaction, it: &Item, now: &Now) -> Result<Outcome> {
     let want = fold(&it.text);
     let rows = schema::query(tx, "WHERE status = 'live' AND predicate IS NULL AND kind = ?1", [&it.kind])?;
-    match rows.iter().find(|r| fold(&r.text) == want && recent(&r.observed_at, now.today)) {
+    // An episode is a moment of one day: the same words on another day are another moment (and moving
+    // the old one to today would take it out of its day's History, notes and recall).
+    let today = now.today.to_string();
+    let same_day = |r: &schema::Row| it.kind != "episode" || r.observed_at.get(..10) == Some(today.as_str());
+    match rows.iter().find(|r| fold(&r.text) == want && recent(&r.observed_at, now.today) && same_day(r)) {
         Some(r) => {
             extend(tx, r.id, it, now)?;
             Ok(Outcome::Extended(r.id))

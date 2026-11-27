@@ -503,7 +503,7 @@ mod acl {
             true
         }).build(tauri::generate_context!(test = true)).unwrap();
         let local = "tauri://localhost/memory/index.html";
-        for cmd in ["memory_state", "memory_add", "memory_edit", "memory_forget", "memory_resolve", "memory_forget_all", "memory_set_enabled", "memory_close"] {
+        for cmd in ["memory_state", "memory_history", "memory_add", "memory_edit", "memory_forget", "memory_resolve", "memory_forget_all", "memory_set_enabled", "memory_close"] {
             assert_eq!(call(&app, "memory", local, cmd), Ok(()), "{cmd}");
             for other in ["bubble", "signin", "persona", "studio", "widget-media"] {
                 assert!(call(&app, other, local, cmd).unwrap_err().contains("not allowed"), "{cmd} from {other}");
@@ -545,6 +545,6 @@ mod acl {
         let studio: std::collections::BTreeSet<String> = build.iter().filter(|c| c.starts_with("studio_")).cloned().collect();
         assert_eq!(studio.len(), 22);
         assert_eq!(studio, lists[1], "`--studio` registers exactly the studio commands");
-        assert_eq!(build.len(), 58);
+        assert_eq!(build.len(), 59);
     }
 }

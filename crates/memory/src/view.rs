@@ -2,7 +2,7 @@
 
 use crate::predicates;
 use crate::render::{disputes, live_core};
-use crate::schema::Row;
+use crate::schema::{self, Row, LIVE_HISTORY};
 use crate::{Fact, Result};
 use jiff::civil::Date;
 use rusqlite::Connection;
@@ -34,6 +34,7 @@ impl From<&Row> for Fact {
             value: r.value.clone(),
             since: since(r).map(str::to_string),
             source: source(r.authority),
+            day: None,
         }
     }
 }
@@ -69,16 +70,57 @@ pub(crate) fn view(conn: &Connection, today: Date) -> Result<Value> {
             })
         })
         .collect();
+    let (history, more) = history(conn, None)?;
     Ok(json!({
         "v": 1,
         "today": today.to_string(),
         "phrase": "forget everything",
         "groups": groups,
         "disputes": asks,
-        "history": null,
-        "historyMore": false,
-        "counts": {"live": core.len(), "disputes": asks.len(), "hidden": hidden(conn, core.len() + asks.len())?},
+        "history": history,
+        "historyMore": more,
+        "counts": {
+            "live": core.len(), "disputes": asks.len(), "hidden": hidden(conn, core.len() + asks.len())?,
+            "days": conn.query_row(&format!("SELECT count(DISTINCT substr(observed_at, 1, 10)) FROM facts WHERE {LIVE_HISTORY}"), [], |r| r.get::<_, i64>(0))?,
+        },
     }))
+}
+
+/// Days shown at once.
+const DAYS: usize = 14;
+
+/// One History row: a group row's shape plus the kind and, for an insight, how many episodes back it.
+fn item(conn: &Connection, r: &Row) -> Result<Value> {
+    let mut v = json!(Fact::from(r));
+    v["label"] = Value::Null;
+    v["disputed"] = json!(false);
+    if r.kind == "insight" {
+        let n: i64 = conn.query_row("SELECT count(*) FROM insight_sources WHERE insight_id = ?1", [r.id], |r| r.get(0))?;
+        v["sources"] = json!(n);
+    }
+    Ok(v)
+}
+
+/// The 14 newest days with live episodes or insights (strictly before `before`, when given), newest
+/// first, each `{"day": "2026-11-26", "items": [...]}` with its items in observed order; and whether
+/// older days remain.
+pub(crate) fn history(conn: &Connection, before: Option<Date>) -> Result<(Vec<Value>, bool)> {
+    let bound = before.map_or_else(|| "9999-12-31".to_string(), |d| d.to_string());
+    let mut days: Vec<String> = conn
+        .prepare(&format!(
+            "SELECT DISTINCT substr(observed_at, 1, 10) AS d FROM facts WHERE {LIVE_HISTORY} AND d < ?1 ORDER BY d DESC LIMIT ?2"
+        ))?
+        .query_map(rusqlite::params![bound, DAYS + 1], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    let more = days.len() > DAYS;
+    days.truncate(DAYS);
+    let mut out = Vec::new();
+    for day in days {
+        let rows = schema::query(conn, &format!("WHERE {LIVE_HISTORY} AND substr(observed_at, 1, 10) = ?1 ORDER BY observed_at, id"), [&day])?;
+        let items = rows.iter().map(|r| item(conn, r)).collect::<Result<Vec<_>>>()?;
+        out.push(json!({"day": day, "items": items}));
+    }
+    Ok((out, more))
 }
 
 /// The state with nothing in it, for a store that can't be read.
@@ -86,7 +128,7 @@ pub(crate) fn empty(today: Date) -> Value {
     json!({
         "v": 1, "today": today.to_string(), "phrase": "forget everything",
         "groups": {"about": [], "help": [], "promises": []}, "disputes": [],
-        "history": null, "historyMore": false, "counts": {"live": 0, "disputes": 0, "hidden": 0},
+        "history": null, "historyMore": false, "counts": {"live": 0, "disputes": 0, "hidden": 0, "days": 0},
     })
 }
 

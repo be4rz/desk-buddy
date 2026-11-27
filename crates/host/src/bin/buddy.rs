@@ -16,7 +16,7 @@
 //!                                        buddy browser snapshot); listed by --help once the app runs
 //!   buddy screen look [--json]           read the text on the display the bear is on (off by default;
 //!                                        asks first; a picture is the agent's screen_look tool)
-//!   buddy memory remember|forget|list|search|open   what the bear remembers (buddy --help)
+//!   buddy memory remember|forget|list|search|recall|open   what the bear remembers (buddy --help)
 //!   buddy status [--json]                who the API sees, and the turn
 //!   buddy --help [--json]                this list; `--json` for agents
 //!
@@ -60,6 +60,7 @@ fn help() -> Value {
             { "usage": "buddy memory forget <id> | --key pred[:qualifier]", "about": "Forget a fact, by its id or its key. Prints the ids.", "readOnly": false },
             { "usage": "buddy memory list [--kind K] [--json]", "about": "What the bear remembers: one line per fact, with its id.", "readOnly": true },
             { "usage": "buddy memory search \"<words>\" [--limit N] [--json]", "about": "The facts that match the words, best first (default 5, at most 20).", "readOnly": true },
+            { "usage": "buddy memory recall <YYYY-MM-DD|today|yesterday|last-week> [--json]", "about": "What happened and what you talked about on a day (or the last 7 days): its moments and patterns, oldest first.", "readOnly": true },
             { "usage": "buddy memory open", "about": "Open the window where the person sees and edits what the bear remembers.", "readOnly": true },
             { "usage": "buddy studio <cmd> …", "about": "The headless art studio: render, sheet, gif, diff, lint, audit, comments, import-aseprite (buddy studio --help). Most write files (renders, comments, imported clips).", "readOnly": false },
             { "usage": "buddy status [--json]", "about": "Check the connection.", "readOnly": true },

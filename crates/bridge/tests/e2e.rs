@@ -113,6 +113,12 @@ fn script() -> Value {
         // The memory extractor's own request (its user message lists "Exchanges:"): first, so no chat matcher wins.
         { "match": "/Exchanges:[\\s\\S]*moved to Hanoi/", "reply": { "text": "{\"items\": [{\"exchange\": 1, \"kind\": \"profile\", \"predicate\": \"home_city\", \"qualifier\": null, \"value\": \"Hanoi\", \"text\": \"Lives in Hanoi\", \"importance\": 8, \"valid_from\": \"2026-10\", \"quote\": \"I moved to Hanoi last month\"}]}" } },
         { "match": "/Exchanges:[\\s\\S]*live in Saigon/", "reply": { "text": "{\"items\": [{\"exchange\": 1, \"kind\": \"profile\", \"predicate\": \"home_city\", \"qualifier\": null, \"value\": \"Saigon\", \"text\": \"Lives in Saigon\", \"importance\": 7, \"valid_from\": null, \"quote\": \"I live in Saigon\"}]}" } },
+        // p2: episodes from a chat (A11), four moments for a reflection (A13), and the reflection itself:
+        // the first one is slow (the test kills the sidecar while it streams), the retry answers at once.
+        { "match": "/Exchanges:[\\s\\S]*ramen place/", "reply": { "text": "{\"items\": [{\"exchange\": 1, \"kind\": \"episode\", \"predicate\": null, \"qualifier\": null, \"value\": null, \"text\": \"Tried a new ramen place with Lan\", \"importance\": 6, \"valid_from\": null, \"quote\": \"We tried the new ramen place with Lan\"}]}" } },
+        { "match": "/Exchanges:[\\s\\S]*launch week/", "reply": { "text": "{\"items\": [{\"exchange\": 1, \"kind\": \"episode\", \"predicate\": null, \"qualifier\": null, \"value\": null, \"text\": \"Stayed late at Lanternfish Labs for the launch\", \"importance\": 6, \"valid_from\": null, \"quote\": \"launch week\"}, {\"exchange\": 1, \"kind\": \"episode\", \"predicate\": null, \"qualifier\": null, \"value\": null, \"text\": \"Skipped lunch to fix the launch build\", \"importance\": 5, \"valid_from\": null, \"quote\": \"launch week\"}, {\"exchange\": 1, \"kind\": \"episode\", \"predicate\": null, \"qualifier\": null, \"value\": null, \"text\": \"Walked Mochi after the late shift\", \"importance\": 4, \"valid_from\": null, \"quote\": \"launch week\"}, {\"exchange\": 1, \"kind\": \"profile\", \"predicate\": \"employer\", \"qualifier\": null, \"value\": \"Lanternfish Labs\", \"text\": \"Works at Lanternfish Labs\", \"importance\": 7, \"valid_from\": null, \"quote\": \"launch week\"}]}" } },
+        { "match": "/Episodes:[\\s\\S]*Lanternfish/", "times": 1, "reply": { "delayMs": 4000, "text": "{\"updates\": [], \"insights\": [{\"text\": \"Works late in launch weeks\", \"importance\": 6, \"sources\": [1, 2]}], \"merges\": []}" } },
+        { "match": "/Episodes:[\\s\\S]*Lanternfish/", "reply": { "text": "{\"updates\": [], \"insights\": [{\"text\": \"Works late in launch weeks\", \"importance\": 6, \"sources\": [1, 2]}], \"merges\": []}" } },
         { "match": "said", "reply": { "text": "I said hi." } },
         { "match": "set for", "reply": { "text": "Reminder set." } },
         { "match": "remind me", "reply": { "toolCalls": [{ "name": "bash", "args": { "command": "buddy remind --in 2s stretch" } }] } },
@@ -809,4 +815,128 @@ fn several_memory_changes_between_turns_change_the_prompt_once() {
     assert!(!prompts[0].contains("Hanoi"));
     assert!(prompts[1].contains("Lives in Hanoi") && !prompts[1].contains("Saigon"), "{}", prompts[1]);
     assert_eq!(prompts[1], prompts[2]);
+}
+
+// ---- memory history (p2, I1/I2): recall rides a chat message; a reflection killed midway runs once ----
+
+fn now_on(day: jiff::civil::Date, at: &str) -> memory::Now {
+    memory::Now::new(day, at)
+}
+
+/// `learn` on another day: the turn ends at `at` and the extractor's reply is applied then.
+fn learn_on(fx: &Fx, store: &memory::Store, request_id: &str, when: &memory::Now) -> memory::Applied {
+    store.add_pending(request_id, &when.at).unwrap();
+    let args = store.extract_args(10, when.today).expect("a turn is pending");
+    assert_eq!(args["episodes"], true, "p2 asks the extractor for episodes");
+    let reply = fx.agent.memory_extract(args.clone()).expect("the extractor answers");
+    store.apply_extract(&args, &reply, when).unwrap()
+}
+
+/// The newest chat request's last user message (the extractor's and the reflection's are left out).
+fn last_chat_user(fx: &Fx) -> String {
+    let reqs = requests(fx);
+    let r = reqs
+        .iter()
+        .rev()
+        .find(|r| r["body"]["messages"].is_array() && !is_extract(r) && !is_reflect(r))
+        .expect("a chat request");
+    let msgs = r["body"]["messages"].as_array().unwrap();
+    msgs.iter().rev().find(|m| m["role"] == "user").map(|m| text_of(&m["content"])).unwrap_or_default()
+}
+
+fn is_reflect(req: &Value) -> bool {
+    req["body"]["messages"].as_array().and_then(|m| m.last()).is_some_and(|m| text_of(&m["content"]).contains("Episodes:"))
+}
+
+#[test]
+fn a11_yesterday_s_moments_ride_the_message_as_recall_and_the_entry_keeps_only_the_typed_words() {
+    let fx = fixture("mem-a11");
+    let store = memory::Store::open(&fx.root.join("memory")).unwrap();
+    let id = chat(&fx, "We tried the new ramen place with Lan");
+    let applied = learn_on(&fx, &store, &id, &now_on(jiff::civil::date(2026, 11, 26), "2026-11-26T19:40:00+07:00"));
+    assert_eq!(applied.created, 1, "{applied:?}");
+    // The day's moments are there for `buddy memory recall yesterday`.
+    let day = store.recall_span(&memory::dates::Span::Day(jiff::civil::date(2026, 11, 26))).unwrap();
+    assert_eq!(day.iter().map(|f| (f.text.as_str(), f.day.as_deref())).collect::<Vec<_>>(), vec![("Tried a new ramen place with Lan", Some("2026-11-26"))]);
+    // The episode never enters the core section.
+    assert!(!store.section().contains("ramen"), "{}", store.section());
+
+    // The next day: the date word wins, and the app hands the notes to the sidecar with the message.
+    let typed = "What did we talk about yesterday?";
+    let recall = store.recall(typed, &now()).unwrap();
+    assert_eq!(recall, vec!["2026-11-26: Tried a new ramen place with Lan".to_string()]);
+    let from = fx.len();
+    let rid = fx.agent.prompt_with(typed, &recall).unwrap();
+    assert_eq!(fx.run_end(from), MascotEvent::Idle);
+    let user = last_chat_user(&fx);
+    assert_eq!(
+        user,
+        format!("{typed}\n\n[Notes from earlier chats that may matter. Use them only if they help;\ndon't mention them otherwise.]\n- 2026-11-26: Tried a new ramen place with Lan")
+    );
+    let input = fx.snapshot().into_iter().find(|e| e["kind"] == "buddy.input" && e["data"]["requestId"] == rid.as_str()).expect("the turn's input entry");
+    assert_eq!(input["data"]["said"], typed, "the transcript keeps the person's words alone: {input}");
+
+    // A message that matches nothing gets no notes, and the model sees it as typed.
+    assert!(store.recall("Can you open the music widget", &now()).unwrap().is_empty());
+    chat(&fx, "hello there");
+    assert_eq!(last_chat_user(&fx), "hello there");
+
+    // Too many lines are refused by the sidecar (its bad_request is the bridge's usage), and nothing runs.
+    let lines: Vec<String> = (1..=4).map(|d| format!("2026-11-2{d}: a moment")).collect();
+    let before = requests(&fx).len();
+    let e = fx.agent.prompt_with("hi", &lines).unwrap_err();
+    assert_eq!(e.code, "usage", "{e:?}");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(requests(&fx).len(), before, "no model call for a refused prompt");
+}
+
+#[cfg(unix)]
+#[test]
+fn a13_a_reflection_killed_midway_is_rerun_as_the_same_batch_and_applied_once() {
+    let fx = fixture("mem-a13");
+    let store = memory::Store::open(&fx.root.join("memory")).unwrap();
+    let id = chat(&fx, "It was launch week again");
+    let applied = learn_on(&fx, &store, &id, &now_on(jiff::civil::date(2026, 11, 26), "2026-11-26T22:10:00+07:00"));
+    assert_eq!(applied.created, 4, "{applied:?}");
+    let ids: Vec<i64> = store.list(Some("episode")).unwrap().iter().map(|f| f.id).collect();
+    assert_eq!(ids, vec![1, 2, 3], "the script's insight cites episodes 1 and 2");
+
+    // The run starts; the sidecar is killed while the model is still answering.
+    let job = store.reflect_args(now().today, &now()).expect("new episodes make a batch");
+    let agent = fx.agent.clone();
+    let args = job.args.clone();
+    let call = std::thread::spawn(move || agent.memory_reflect(args));
+    let t = Instant::now();
+    while !requests(&fx).iter().any(is_reflect) {
+        assert!(t.elapsed() < Duration::from_secs(20), "the reflection never reached the model");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    let from = fx.len();
+    fx.agent.crash();
+    fx.wait(from, "the exit", |e| matches!(e, AgentEvent::Exited { by_app: false, .. }).then_some(()));
+    let err = call.join().unwrap().expect_err("a killed sidecar answers no reflection");
+    assert!(!err.code.is_empty());
+    store.reflect_failed(&job, &now()).unwrap();
+    let insights = |s: &memory::Store| s.list(Some("insight")).unwrap().len();
+    assert_eq!(insights(&store), 0, "nothing was applied");
+
+    // Restarted: the next run is the same batch, and it lands once.
+    fx.agent.start().unwrap();
+    let again = store.reflect_args(now().today, &now()).expect("the failed batch is picked again");
+    assert_eq!(again.batch_id, job.batch_id);
+    let reply = fx.agent.memory_reflect(again.args.clone()).expect("the retry answers");
+    let done = store.apply_reflect(&again, &reply, &now()).unwrap();
+    assert_eq!(done.insights, 1, "{done:?}");
+    // Applying the same reply again, or asking for a new run, changes nothing.
+    assert_eq!(store.apply_reflect(&again, &reply, &now()).unwrap(), memory::Reflected::default());
+    assert!(store.reflect_args(now().today, &now()).is_none(), "no new episodes: no batch");
+    assert_eq!(insights(&store), 1);
+    let c = rusqlite::Connection::open(store.dir().join("memory.sqlite")).unwrap();
+    let st: Vec<(String, String)> =
+        c.prepare("SELECT batch_id, status FROM reflections").unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().collect::<Result<_, _>>().unwrap();
+    assert_eq!(st, vec![(job.batch_id.clone(), "done".to_string())]);
+    // The day's notes file shows the pattern.
+    let notes = std::fs::read_to_string(store.dir().join("notes/2026-11-27.md")).unwrap_or_default();
+    assert!(notes.contains("Pattern: Works late in launch weeks (from 2 moments)"), "{notes}");
 }

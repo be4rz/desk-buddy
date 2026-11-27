@@ -131,6 +131,13 @@ pub async fn memory_state(w: tauri::WebviewWindow) -> Result<Value, String> {
     Ok(mem()?.state())
 }
 
+/// `memory_history {before}`: the 14 days with moments before `before` (`YYYY-MM-DD`), newest first.
+#[tauri::command]
+pub async fn memory_history(w: tauri::WebviewWindow, before: String) -> Result<Value, String> {
+    mine(w.label(), "memory_history")?;
+    mem()?.history(&before)
+}
+
 #[tauri::command]
 pub async fn memory_add(w: tauri::WebviewWindow, kind: String, text: String) -> Result<Value, String> {
     mine(w.label(), "memory_add")?;

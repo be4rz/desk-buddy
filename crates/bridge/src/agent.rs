@@ -34,6 +34,8 @@ pub const PERSONA_MAX_CHARS: usize = 20_000;
 pub const MEMORY_MAX_CHARS: usize = 4_000;
 /// `memory.extract` makes one model call of up to 60 s in the sidecar.
 const EXTRACT_WAIT: Duration = Duration::from_secs(65);
+/// `memory.reflect` times its model call out at 120 s.
+const REFLECT_WAIT: Duration = Duration::from_secs(125);
 /// A sign-in waits for the person (a browser, a pasted code).
 const LOGIN_WAIT: Duration = Duration::from_secs(600);
 
@@ -366,15 +368,32 @@ impl Agent {
         self.bridge()?.cmd("memory.extract", args, EXTRACT_WAIT)
     }
 
+    /// The reflection run's one model call (design I1 `memory.reflect`, p2): the episodes and the facts on record
+    /// in, `{updates, insights, merges}` out. Rust checks and applies the answer; the sidecar writes nothing.
+    pub fn memory_reflect(&self, args: Value) -> Res<Value> {
+        self.bridge()?.cmd("memory.reflect", args, REFLECT_WAIT)
+    }
+
     pub fn model(&self) -> Option<ModelRef> {
         lock(&self.model).clone()
     }
 
     /// Send the person's message; returns its request id.
     pub fn prompt(&self, text: &str) -> Res<String> {
+        self.prompt_with(text, &[])
+    }
+
+    /// The person's message with recall lines (design I1 `prompt.recall`, p2: each "YYYY-MM-DD: text", at most 3
+    /// and 600 chars, else the sidecar refuses it). The model gets them after the words; the transcript keeps the
+    /// words alone (`data.said`).
+    pub fn prompt_with(&self, text: &str, recall: &[String]) -> Res<String> {
         self.flush_memory()?;
         let id = new_request_id();
-        self.cmd("prompt", json!({ "requestId": id, "text": text, "source": "chat" }))?;
+        let mut cmd = json!({ "requestId": id, "text": text, "source": "chat" });
+        if !recall.is_empty() {
+            cmd["recall"] = json!(recall);
+        }
+        self.cmd("prompt", cmd)?;
         Ok(id)
     }
 

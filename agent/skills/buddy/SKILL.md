@@ -1,6 +1,6 @@
 ---
 name: buddy
-description: Drive desk-buddy's body, keep reminders and remember the person with the `buddy` command (say, mascot, remind, memory, status).
+description: Drive desk-buddy's body, keep reminders, remember the person and recall what happened on a day with the `buddy` command (say, mascot, remind, memory, memory recall, status).
 ---
 
 # buddy
@@ -37,7 +37,8 @@ Tell the person what you set and when it fires. If the agent isn't running, `bud
 ## Memory
 
 The app remembers the person across chats on its own: after a chat it notes what matters, and the "What I know
-about you" section of your prompt shows the core of it. You don't need to save every fact yourself.
+about you" section of your prompt shows the core of it; moments from past chats are kept by day. You don't need to
+save every fact yourself.
 
 - `buddy memory remember "<text>"` when the person asks you to remember something, or states a clear, lasting fact
   the notes may miss. Write one short third-person sentence ("Has a cat, Mochi"). For a known kind of fact add
@@ -49,8 +50,12 @@ about you" section of your prompt shows the core of it. You don't need to save e
 - "Not sure yet" lists a guess that differs from what the person told you. Ask once, when it fits. When they answer,
   `buddy memory remember` the right value with its `--key` (or `buddy memory forget <id>` the wrong one).
 - A promise with a time is a reminder: use `buddy remind`, not memory.
-- `buddy memory list` and `buddy memory search "<words>"` (`--json` for ids) before asking the person something
-  you may already know.
+- `buddy memory list` (the facts you know; `--kind episode|insight` for day moments) and
+  `buddy memory search "<words>"` (`--json` for ids) before asking the person something you may already know.
+- `buddy memory recall <YYYY-MM-DD|today|yesterday|last-week>` when the person asks what happened or what you talked
+  about on a day ("What did we talk about yesterday?"): that day's moments and patterns, in order. A chat message
+  may already carry a few notes from earlier chats after the person's words; use them only if they help, and never
+  mention the notes themselves.
 - `buddy memory forget <id>` (or `--key <predicate>[:<qualifier>]`) when the person says a fact is wrong or asks you
   to forget it. Only the person can erase completely, in the window.
 - `buddy memory open` opens the "What I remember" window when they want to see, fix or erase what you know.

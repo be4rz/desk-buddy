@@ -4,7 +4,8 @@
    `.skel`); `.btn.danger`, `.btn.quiet(.danger-text)`, `.pill` and the `.veil`/`.dlg` confirm are the
    studio's (`web/studio/studio.css`). New components (none of those fit; recorded in the memory design,
    § Window): `.switch` (a role=switch checkbox), `.rows`/`.mrow` (a fact row: text + meta, Edit · Forget ·
-   ⋯), `.menu` (a row's popover: Erase completely… with its inline confirm), `.ask` (a dispute card).
+   ⋯), `.menu` (a row's popover: Erase completely… with its inline confirm), `.ask` (a dispute card),
+   `details.day` (History: one day of moments and patterns, the prototype's) and `.more-days`.
    Bear-owned UI: the same in light and dark, like every other desk-buddy window; the title bar is the
    system's own. */
 :root {
@@ -130,6 +131,17 @@ h2.group .add { margin-left: auto; text-transform: none; letter-spacing: 0; colo
 .ask .row { margin-top: 6px; }
 .ask .btn { white-space: normal; text-align: left; max-width: 100%; }
 
+/* ---- History: one <details> per day, newest first; the same rows (Forget · ⋯, no Edit) ---- */
+details.day { margin: 0 0 6px; }
+details.day > summary { list-style: none; cursor: pointer; display: flex; align-items: baseline; gap: 6px; font-weight: 600; padding: 4px 2px; }
+details.day > summary::-webkit-details-marker { display: none; }
+details.day > summary::before { content: "▸"; font-size: 10px; color: var(--fur-5); transition: transform .12s; }
+details.day[open] > summary::before { transform: rotate(90deg); }
+details.day > summary small { font-weight: 400; color: var(--fur-5); font-size: 11.5px; }
+details.day > summary:focus-visible { outline: 2px solid var(--hat); outline-offset: 2px; border-radius: 4px; }
+details.day > .rows { margin-top: 2px; }
+.more-days { text-align: center; margin: 8px 0 0; }
+
 /* ---- off: the rows stay, quieter (a grey card, not opacity: the meta lines keep 4.5:1) ---- */
 .off .rows { background: var(--paper-2); }
 .off .mrow .txt { color: var(--ink-2); }
@@ -139,4 +151,4 @@ h2.group .add { margin-left: auto; text-transform: none; letter-spacing: 0; colo
   .mrow .acts .edit { display: none; }
   .menu .it.only-narrow, .menu .sep.only-narrow { display: block; }
 }
-@media (prefers-reduced-motion: reduce) { .skel .sk { animation: none; } .switch input::after { transition: none; } .btn:active:not([disabled]) { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .skel .sk { animation: none; } .switch input::after, details.day > summary::before { transition: none; } .btn:active:not([disabled]) { transform: none; } }

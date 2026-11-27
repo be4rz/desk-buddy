@@ -36,7 +36,7 @@ impl Refusal {
     }
 }
 
-/// What a memory command asks the app's store to do. `Recall` (p2) joins this enum.
+/// What a memory command asks the app's store to do.
 #[derive(Clone, Debug, PartialEq)]
 pub enum MemoryOp {
     /// Reply `{id, outcome: "created"|"extended"|"superseded"|"disputed"|"skipped"}`.
@@ -47,12 +47,15 @@ pub enum MemoryOp {
     List { kind: Option<String> },
     /// Reply `{facts: [Fact]}`, best first.
     Search { q: String, limit: u32 },
+    /// A day's (or the last week's) moments and patterns, oldest first: `date` is `YYYY-MM-DD`, `today`,
+    /// `yesterday` or `last-week` ([`recall_date`]). Reply `{day, facts}`, each fact with its `day`.
+    Recall { date: String },
     /// Reply `{}` (the app opens or focuses the window).
     Open,
 }
 
 /// The `/v1/memory/*` paths.
-const ROUTES: [&str; 5] = ["/v1/memory/remember", "/v1/memory/forget", "/v1/memory/list", "/v1/memory/search", "/v1/memory/open"];
+const ROUTES: [&str; 6] = ["/v1/memory/remember", "/v1/memory/forget", "/v1/memory/list", "/v1/memory/search", "/v1/memory/recall", "/v1/memory/open"];
 
 /// `pred[:qualifier]` as (predicate, qualifier).
 pub fn split_key(s: &str) -> Result<(String, Option<String>), String> {
@@ -192,6 +195,14 @@ fn search_op(query: &str) -> Result<MemoryOp, String> {
     Ok(MemoryOp::Search { q: q.to_string(), limit })
 }
 
+fn recall_op(query: &str) -> Result<MemoryOp, String> {
+    let date = query_pairs(query)?.into_iter().find(|(k, _)| k == "date").map(|(_, v)| v).unwrap_or_default();
+    if date.trim().is_empty() {
+        return Err("Which day? buddy memory recall <YYYY-MM-DD|today|yesterday|last-week>.".into());
+    }
+    Ok(MemoryOp::Recall { date: recall_date(&date)? })
+}
+
 /// Answer one `/v1/memory/*` request: check its shape, hand the `MemoryOp` to the sink, pass its reply on.
 pub(crate) fn serve(sh: &Shared, req: Request, caller: Caller, turn: Option<String>, after_turn: bool, method: &Method, path: &str, body: &Value) {
     let query = req.url().split_once('?').map(|(_, q)| q.to_string()).unwrap_or_default();
@@ -200,6 +211,7 @@ pub(crate) fn serve(sh: &Shared, req: Request, caller: Caller, turn: Option<Stri
         (Method::Post, "/v1/memory/forget") => forget_op(body),
         (Method::Get, "/v1/memory/list") => list_op(&query),
         (Method::Get, "/v1/memory/search") => search_op(&query),
+        (Method::Get, "/v1/memory/recall") => recall_op(&query),
         (Method::Post, "/v1/memory/open") => Ok(MemoryOp::Open),
         (_, p) if ROUTES.contains(&p) => return refuse(req, 405, "method", "Wrong method."),
         _ => return refuse(req, 404, "not_found", "No such endpoint."),
@@ -329,4 +341,44 @@ pub fn cli_search(args: &[&str]) -> Result<String, String> {
         Some(n) => format!("/v1/memory/search?q={}&limit={n}", query_encode(&q)),
         None => format!("/v1/memory/search?q={}", query_encode(&q)),
     })
+}
+
+/// The words `buddy memory recall` takes besides a `YYYY-MM-DD` day.
+pub const RECALL_WORDS: [&str; 3] = ["today", "yesterday", "last-week"];
+
+/// A recall date as sent: `YYYY-MM-DD` (a real calendar day), `today`, `yesterday` or `last-week`.
+pub fn recall_date(s: &str) -> Result<String, String> {
+    let bad = || format!("“{s}” isn’t a day: buddy memory recall <YYYY-MM-DD|today|yesterday|last-week>");
+    // "Yesterday" and "TODAY" are the same words; dates are digits.
+    let lower = s.trim().to_ascii_lowercase();
+    let s = lower.as_str();
+    if RECALL_WORDS.contains(&s) {
+        return Ok(s.to_string());
+    }
+    let b = s.as_bytes();
+    if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
+        return Err(bad());
+    }
+    let num = |r: std::ops::Range<usize>| s.get(r).filter(|p| p.bytes().all(|c| c.is_ascii_digit())).and_then(|p| p.parse::<u32>().ok());
+    let (Some(y), Some(m), Some(d)) = (num(0..4), num(5..7), num(8..10)) else { return Err(bad()) };
+    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    let days = match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return Err(bad()),
+    };
+    if y < 1970 || d == 0 || d > days {
+        return Err(bad());
+    }
+    Ok(s.to_string())
+}
+
+/// `buddy memory recall <date>`'s route path.
+pub fn cli_recall(args: &[&str]) -> Result<String, String> {
+    match args {
+        [d] if !d.starts_with("--") => Ok(format!("/v1/memory/recall?date={}", query_encode(&recall_date(d)?))),
+        _ => Err("buddy memory recall <YYYY-MM-DD|today|yesterday|last-week>".into()),
+    }
 }

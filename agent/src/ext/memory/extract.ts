@@ -24,13 +24,13 @@ const MAX_ITEMS = 20; // the store applies at most 20 per batch (apply_extract)
 const PAGE = 200;
 const MAX_PAGES = 100;
 const CHAT_ID = /^u:[0-9a-f-]{36}$/;
-const DAY = /^\d{4}-\d{2}-\d{2}$/;
+export const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 export type ExtractArgs = { turns: MemoryTurnIn[]; known: MemoryKnown[]; registry: MemoryRegistryEntry[]; today: string; episodes: boolean };
 
-const bad = (message: string) => new CmdError("bad_request", message);
-const clip = (s: string, max: number) => (s.length <= max ? s : [...s].slice(0, max).join(""));
-const str = (v: unknown): string | null => (typeof v === "string" ? v : typeof v === "number" && Number.isFinite(v) ? String(v) : null);
+export const bad = (message: string) => new CmdError("bad_request", message);
+export const clip = (s: string, max: number) => (s.length <= max ? s : [...s].slice(0, max).join(""));
+export const str = (v: unknown): string | null => (typeof v === "string" ? v : typeof v === "number" && Number.isFinite(v) ? String(v) : null);
 
 /** Check the command's arguments (1..10 turns, `u:` ids only). */
 export function parseArgs(args: Record<string, unknown>): ExtractArgs {
@@ -92,22 +92,25 @@ export async function readTurns(conv: Conversation, wanted: ReadonlySet<string>)
 
 /** The first JSON object in `text` that has an `items` array, or undefined. */
 export function parseItems(text: string): unknown[] | undefined {
-  for (const candidate of [text, repair(text)]) {
-    const items = firstItems(candidate);
-    if (items) return items;
-  }
-  return undefined;
+  const v = parseObject(text, "items", (o) => Array.isArray(o.items));
+  return v ? (v.items as unknown[]) : undefined;
 }
 
-function firstItems(text: string): unknown[] | undefined {
-  for (let at = text.indexOf("{"); at !== -1; at = text.indexOf("{", at + 1)) {
-    const end = balanced(text, at);
-    if (end === -1) continue;
-    try {
-      const v = JSON.parse(text.slice(at, end + 1));
-      if (v && typeof v === "object" && Array.isArray(v.items)) return v.items;
-    } catch {
-      // not JSON: try the next brace
+/**
+ * The first JSON object in `text` that `ok` accepts, trying the text as it is, then after the one repair pass
+ * (`lead` is the first key the model is asked to write, where a cut-off answer is resumed from). Undefined if none.
+ */
+export function parseObject(text: string, lead: string, ok: (o: Record<string, unknown>) => boolean): Record<string, unknown> | undefined {
+  for (const candidate of [text, repair(text, lead)]) {
+    for (let at = candidate.indexOf("{"); at !== -1; at = candidate.indexOf("{", at + 1)) {
+      const end = balanced(candidate, at);
+      if (end === -1) continue;
+      try {
+        const v = JSON.parse(candidate.slice(at, end + 1));
+        if (v && typeof v === "object" && !Array.isArray(v) && ok(v)) return v;
+      } catch {
+        // not JSON: try the next brace
+      }
     }
   }
   return undefined;
@@ -130,9 +133,10 @@ function balanced(text: string, from: number): number {
 }
 
 /** The one repair pass: smart quotes, trailing commas, and output cut off mid-list (kept up to its last whole item). */
-function repair(text: string): string {
+function repair(text: string, lead: string): string {
   let t = text.replace(/[“”]/g, '"').replace(/,\s*([}\]])/g, "$1");
-  const start = t.indexOf('{"items"') >= 0 ? t.indexOf('{"items"') : t.indexOf("{");
+  const head = `{"${lead}"`;
+  const start = t.indexOf(head) >= 0 ? t.indexOf(head) : t.indexOf("{");
   if (start === -1) return t;
   t = t.slice(start);
   if (balanced(t, 0) !== -1) return t;
@@ -171,7 +175,7 @@ export function toItems(raw: unknown[], turns: TurnRef[]): MemoryItem[] {
 export type TurnRef = { requestId: string };
 
 /** One model call on the current model; text out. Throws CmdError: no_provider, timeout, model_error. */
-async function callModel(system: string, user: string): Promise<string> {
+export async function callModel(system: string, user: string, timeoutMs = EXTRACT_TIMEOUT_MS, what = "Memory extraction"): Promise<string> {
   const current = currentModelCall();
   const model = current?.models.getModel(current.ref.provider, current.ref.model);
   if (!current || !model) throw new CmdError("no_provider", "Choose a model for desk-buddy first.");
@@ -180,8 +184,8 @@ async function callModel(system: string, user: string): Promise<string> {
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
       abort.abort();
-      reject(new CmdError("timeout", "Memory extraction took too long."));
-    }, EXTRACT_TIMEOUT_MS);
+      reject(new CmdError("timeout", `${what} took too long.`));
+    }, timeoutMs);
   });
   try {
     const call = current.models

@@ -647,7 +647,7 @@ fn the_memory_folder_is_private_to_every_tool_and_shell_word_even_in_skip_mode()
 fn buddy_memory_reads_run_and_writes_ask_only_while_marked_and_never_offer_always() {
     let (fx, _) = memory_fixture("memory-verbs");
     let p = policy();
-    let reads = ["buddy memory list", "buddy memory list --kind fact --json", "buddy memory search \"sister\" --limit 3", "buddy memory open --json", "buddy memory open"];
+    let reads = ["buddy memory list", "buddy memory list --kind fact --json", "buddy memory search \"sister\" --limit 3", "buddy memory open --json", "buddy memory open", "buddy memory recall yesterday", "buddy memory recall 2026-11-26 --json"];
     let writes = ["buddy memory remember \"I live in Hanoi\" --key home_city", "buddy memory forget 3", "buddy memory forget --key people:sister"];
     for (i, cmd) in reads.iter().chain(writes.iter()).enumerate() {
         assert_eq!(p.decide(&fx.at, &bash(&format!("u{i}"), cmd)), Decision::Allow, "untainted {cmd}");

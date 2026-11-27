@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-memory-history"
+description = "Enables the memory_history command without any pre-configured scope."
+commands.allow = ["memory_history"]
+
+[[permission]]
+identifier = "deny-memory-history"
+description = "Denies the memory_history command without any pre-configured scope."
+commands.deny = ["memory_history"]

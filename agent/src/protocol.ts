@@ -132,7 +132,7 @@ export type MemoryExtractCmd = {
   known: MemoryKnown[];
   registry: MemoryRegistryEntry[];
   today: string;
-  /** Phase 1 sends false: the prompt leaves out `episode`. */
+  /** Phase 1 sent false (the prompt leaves out `episode`); p2 sends true. */
   episodes: boolean;
 };
 export type MemoryItem = {
@@ -148,6 +148,14 @@ export type MemoryItem = {
   quote: string | null;
 };
 export type MemoryExtractAck = { items: MemoryItem[]; turns: { requestId: string; said: string }[]; missing: string[] };
+/** `memory.reflect` (agent/src/ext/memory/reflect.ts, p2): the ack. Updates are extractor items without turn/quote. */
+export type MemoryReflectUpdate = Omit<MemoryItem, "turn" | "quote">;
+export type MemoryReflectAck = {
+  updates: MemoryReflectUpdate[];
+  /** ≤ 3; `sources` are episode ids from the command. */
+  insights: { text: string; importance: number; sources: number[] }[];
+  merges: { keep: number; drop: number[] }[];
+};
 export type Res = { t: "res"; id: string; ok: true; result: unknown } | { t: "res"; id: string; ok: false; error: { code: string; message: string } };
 
 export type Out =

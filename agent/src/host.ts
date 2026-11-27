@@ -14,6 +14,7 @@ import { executionEnv } from "./env.ts";
 import { compactionSettings } from "./ext/context/index.ts";
 import { bindRoot, command, EVENT_KIND, INPUT_KIND, recordEvent } from "./ext/core/index.ts";
 import { MEMORY_MAX_CHARS, PERSONA_MAX_CHARS, setMemory, setPersona } from "./ext/core/prompt.ts";
+import { parseRecall, withRecall } from "./ext/memory/recall.ts";
 import { currentTrigger, gate, markAsked, setTrigger, type Trigger } from "./ext/gate/index.ts";
 import { addFakeOAuth, rustInteraction } from "./ext/auth/index.ts";
 import { bindJobs } from "./ext/jobs/index.ts";
@@ -233,7 +234,9 @@ export async function host(init: Init, input: AsyncIterator<Record<string, unkno
         const source = requestSource(requestId);
         if (!source) throw new CmdError("bad_request", `Not an accepted request id: ${requestId}`);
         if (typeof cmd.text !== "string" || !cmd.text.trim()) throw new CmdError("bad_request", "A prompt needs text.");
-        return submitInput(requestId, cmd.text, { source: (cmd.source as string) || source }, cmd.busy);
+        // Recall (p2): the notes ride after the person's words in the model's input; `said` keeps only their words.
+        const content = withRecall(cmd.text, parseRecall(cmd.recall));
+        return submitInput(requestId, content, { source: (cmd.source as string) || source, said: cmd.text }, cmd.busy);
       }
       case "abort":
         // Closing: try, but ack now so the ack beats the exit; the close ends the run anyway.

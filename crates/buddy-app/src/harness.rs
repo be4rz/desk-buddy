@@ -673,10 +673,15 @@ impl Harness {
             return Err(self.no_model());
         }
         // memory's extraction waits until the chat has been quiet a while
-        if let Some(m) = crate::memory::get() {
-            m.chat_sent();
-        }
-        self.agent.prompt(text)
+        // and a chat message (never a sense turn) carries the notes recall found for it
+        let recall = match crate::memory::get() {
+            Some(m) => {
+                m.chat_sent();
+                m.recall_for(text)
+            }
+            None => vec![],
+        };
+        self.agent.prompt_with(text, &recall)
     }
 
     /// A sense-triggered turn the attention budget allowed (`source: "sense"`, an `s:` id).

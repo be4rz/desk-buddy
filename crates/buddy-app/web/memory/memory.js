@@ -3,10 +3,13 @@
 // open: {code, message, file}, groups then empty), `phrase` (Forget everything's typed confirm), the
 // three groups of live rows (about = profile, help = preference, promises = promise; each row {id, kind,
 // text, key, label, value, since "YYYY-MM", source window|chat|bear|guess, disputed}), the open
-// `disputes` ({id, label, value, text, live {id, value, source}}) and `counts` {live, disputes, hidden}.
+// `disputes` ({id, label, value, text, live {id, value, source}}), `counts` {live, disputes, hidden, days},
+// and History (p2): `history` = up to 14 days newest first, each {day "YYYY-MM-DD", items: [row + kind
+// episode|insight, sources N]}, with `historyMore` when older days exist (memory_history {before} pages back
+// 14 at a time: {days, more}).
 // The page answers with memory_add {kind, text}, memory_edit {id, text, value?}, memory_forget {id, hard},
-// memory_resolve {id, keep: "new"|"old"}, memory_forget_all {confirm}, memory_set_enabled {on} and
-// memory_close. A refusal is one of `not allowed|secret|empty|too_long|not_found|bad_phrase|store`; a
+// memory_resolve {id, keep: "new"|"old"}, memory_forget_all {confirm}, memory_set_enabled {on},
+// memory_history {before} and memory_close. A refusal is one of `not allowed|secret|empty|too_long|not_found|bad_phrase|store`; a
 // refused change stays on screen (the row as it was, a form with its text) and the bar says why, with
 // Try again. All text goes in with textContent.
 "use strict";
@@ -19,6 +22,7 @@
   const SOURCE = { window: "you added this", chat: "you told me", bear: "I noted this", guess: "I picked this up" };
   const ASKED = { window: "You said", chat: "You said", bear: "I noted", guess: "I guessed" };
   const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const FORM_ERR = {
     secret: "That looks like a password or key, so I won't keep it. Keys belong in Accounts…, not in my memory.",
     empty: "Write something first.",
@@ -38,6 +42,10 @@
   let status = { kind: "idle" };
   let inflight = false;
   let restore = null; // data-k keys to focus after the next render, the first that can take it
+  /** History days loaded with Show older days (after the state's own 14): {days, more, busy} */
+  let older = { days: [], more: false, busy: false };
+  /** day → open, for the days the person opened or closed (the newest starts open) */
+  const dayOpen = {};
 
   const bar = root.querySelector(".bar");
   const stat = bar.querySelector(".status");
@@ -71,7 +79,17 @@
       const r = rows(name).find((x) => x.id === id);
       if (r) return r;
     }
+    for (const d of days()) {
+      const r = (d.items || []).find((x) => x.id === id);
+      if (r) return r;
+    }
     return null;
+  }
+  /** Every History day on screen, newest first: the state's, then the older ones loaded. */
+  function days() {
+    const own = (s && s.history) || [];
+    const last = own.length ? own[own.length - 1].day : null;
+    return own.concat(last ? older.days.filter((d) => d.day < last) : older.days);
   }
   function since(v) {
     const m = /^(\d{4})-(\d{2})/.exec(v || "");
@@ -92,7 +110,7 @@
     if (s.error) { form = null; menu = null; }
     render();
   }
-  const refresh = () => call("memory_state").then(apply).catch(() => {});
+  const refresh = () => call("memory_state").then((st) => reloadOlder(st).then(() => apply(st))).catch(() => {});
 
   // ---------- render (whole page; focus and the caret are put back) ----------
   function render() {
@@ -111,7 +129,7 @@
       if (!s.enabled) content.append(el("p", "note info", kept
         ? "Memory is off. I'm not learning anything new, and I don't use what's below in our chats. It stays here until you forget it."
         : "Memory is off. I'm not learning anything new."));
-      content.append(...asks(), ...groups());
+      content.append(...asks(), ...groups(), ...history());
     }
     const old = root.querySelector(".content");
     root.replaceChild(content, old);
@@ -217,7 +235,7 @@
       rs.forEach((r, i) => ul.append(form && form.id === r.id ? formRow() : row(r, name, rs[i + 1] || rs[i - 1])));
       out.push(h, ul);
     }
-    if (!any && !(s.disputes || []).length) {
+    if (!any && !(s.disputes || []).length && !days().length) {
       const c = el("div", "empty-card");
       c.append(el("b", null, s.enabled ? "Nothing yet" : "Nothing saved"));
       c.append(el("p", null, s.enabled
@@ -231,19 +249,25 @@
     return out;
   }
 
-  function row(r, group, near) {
+  function row(r, group, near, day) {
+    const hist = group === "history";
     const li = el("li", "mrow");
     const t = el("div", "t");
     t.append(el("span", "txt", r.text));
     const m = el("span", "meta");
     if (r.disputed) m.append(el("span", "pill rose", "asked above"));
-    m.append(txt(meta(r)));
+    if (hist && r.kind === "insight") {
+      m.append(el("span", "pill", "pattern"));
+      if (r.sources) m.append(txt("from " + plural(r.sources, "moment")));
+    } else m.append(txt(hist ? SOURCE[r.source] || "" : meta(r)));
     t.append(m);
     const acts = el("div", "acts");
-    const gone = near ? ["forget:" + near.id] : [];
+    // after a Forget: the next row, else the day (its summary), else the switch
+    const gone = (near ? ["forget:" + near.id] : []).concat(hist ? ["day:" + day] : []);
+    const back = gone.concat(hist ? ["hist-more", "switch"] : ["add:" + group, "add-first", "switch"]);
+    if (!hist) acts.append(btn("Edit", "small quiet edit", "edit:" + r.id, () => openEdit(r, group)));
     acts.append(
-      btn("Edit", "small quiet edit", "edit:" + r.id, () => openEdit(r, group)),
-      btn("Forget", "small quiet", "forget:" + r.id, () => act("memory_forget", { id: r.id, hard: false }, "Couldn't forget " + quoted(r.text) + ".", gone.concat("add:" + group, "add-first", "switch"))),
+      btn("Forget", "small quiet", "forget:" + r.id, () => act("memory_forget", { id: r.id, hard: false }, "Couldn't forget " + quoted(r.text) + ".", back)),
     );
     const more = btn("⋯", "small quiet more", "more:" + r.id, () => toggleMenu(r));
     more.setAttribute("aria-haspopup", "menu");
@@ -251,8 +275,89 @@
     more.setAttribute("aria-label", "More for " + r.text);
     acts.append(more);
     li.append(t, acts);
-    if (menu && menu.id === r.id) li.append(menuEl(r, group, gone));
+    if (menu && menu.id === r.id) li.append(menuEl(r, group, back));
     return li;
+  }
+
+  // ---------- History: days newest first, the newest open; then Show older days ----------
+  function dayLabel(day) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day || "");
+    if (!m) return { name: day || "", date: "" };
+    const at = Date.UTC(+m[1], +m[2] - 1, +m[3]);
+    const d = new Date(at);
+    const t = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s.today || "");
+    const today = t ? Date.UTC(+t[1], +t[2] - 1, +t[3]) : NaN;
+    const date = DAYS[d.getUTCDay()] + " " + d.getUTCDate() + " " + MONTHS[d.getUTCMonth()] + (t && t[1] !== m[1] ? " " + m[1] : "");
+    const ago = Math.round((today - at) / 86400000);
+    return ago === 0 ? { name: "Today", date } : ago === 1 ? { name: "Yesterday", date } : { name: date, date: "" };
+  }
+  function history() {
+    const ds = days();
+    if (!ds.length) return [];
+    const h = el("h2", "group", "History ");
+    const n = (s.counts && s.counts.days) || ds.length;
+    h.append(el("span", "n", plural(n, "day")));
+    const out = [h];
+    ds.forEach((d, i) => {
+      const items = d.items || [];
+      const det = el("details", "day");
+      det.open = d.day in dayOpen ? dayOpen[d.day] : i === 0;
+      const sum = el("summary");
+      sum.dataset.k = "day:" + d.day;
+      const lab = dayLabel(d.day);
+      sum.append(txt(lab.name + " "), el("small", null, lab.date ? lab.date + " · " + items.length : String(items.length)));
+      det.append(sum);
+      det.addEventListener("toggle", () => { dayOpen[d.day] = det.open; });
+      const ul = el("ul", "rows");
+      items.forEach((r, j) => ul.append(row(r, "history", items[j + 1] || items[j - 1], d.day)));
+      det.append(ul);
+      out.push(det);
+    });
+    const more = older.days.length ? older.more : !!s.historyMore;
+    if (more) {
+      const p = el("p", "more-days");
+      const b = btn(older.busy ? "Loading…" : "Show older days", "small quiet", "hist-more", showOlder);
+      b.disabled = older.busy;
+      p.append(b);
+      out.push(p);
+    }
+    return out;
+  }
+  function showOlder() {
+    const ds = days();
+    if (!ds.length || older.busy) return;
+    older.busy = true;
+    status = { kind: "idle" };
+    restore = ["hist-more"];
+    render();
+    call("memory_history", { before: ds[ds.length - 1].day }).then((r) => {
+      older = { days: older.days.concat((r && r.days) || []), more: !!(r && r.more), busy: false };
+      // the first newly shown day takes focus, so the list reads on from where it was
+      const first = r && r.days && r.days[0];
+      restore = first ? ["day:" + first.day, "hist-more"] : ["hist-more"];
+      render();
+    }).catch(() => {
+      older.busy = false;
+      status = { kind: "err", text: "Couldn't show older days.", retry: showOlder };
+      restore = ["hist-more"];
+      render();
+    });
+  }
+  /** After a change: reload the older days already shown (a Forget there must leave the page too). */
+  function reloadOlder(st) {
+    if (!older.days.length) return Promise.resolve();
+    const want = older.days.length;
+    const own = (st && st.history) || [];
+    if (!own.length) { older = { days: [], more: false, busy: false }; return Promise.resolve(); }
+    const got = [];
+    let more = false;
+    const page = (before) => call("memory_history", { before }).then((r) => {
+      const ds = (r && r.days) || [];
+      got.push(...ds);
+      more = !!(r && r.more);
+      if (more && ds.length && got.length < want) return page(ds[ds.length - 1].day);
+    });
+    return page(own[own.length - 1].day).then(() => { older = { days: got, more, busy: false }; }).catch(() => {});
   }
 
   // ---------- the row menu ----------
@@ -272,18 +377,21 @@
     if (menu.step === "menu") {
       m.setAttribute("role", "menu");
       m.setAttribute("aria-label", "More for " + r.text);
-      const edit = el("button", "it only-narrow", "Edit…");
-      edit.type = "button";
-      edit.dataset.k = "menu-edit";
-      edit.setAttribute("role", "menuitem");
-      edit.addEventListener("click", () => { menu = null; openEdit(r, group); });
       const erase = el("button", "it danger", "Erase completely…");
       erase.type = "button";
       erase.dataset.k = "menu-erase";
       erase.setAttribute("role", "menuitem");
-      erase.append(el("small", null, "Erases this and its history. Can't be undone."));
+      erase.append(el("small", null, group === "history" ? "Erases this moment for good. Can't be undone." : "Erases this and its history. Can't be undone."));
       erase.addEventListener("click", () => { menu.step = "confirm"; restore = ["er-cancel"]; render(); });
-      m.append(edit, el("div", "sep only-narrow"), erase);
+      if (group === "history") m.append(erase);
+      else {
+        const edit = el("button", "it only-narrow", "Edit…");
+        edit.type = "button";
+        edit.dataset.k = "menu-edit";
+        edit.setAttribute("role", "menuitem");
+        edit.addEventListener("click", () => { menu = null; openEdit(r, group); });
+        m.append(edit, el("div", "sep only-narrow"), erase);
+      }
       m.addEventListener("keydown", (e) => {
         const items = [...m.querySelectorAll("button.it")].filter((b) => b.offsetParent !== null);
         const i = items.indexOf(document.activeElement);
@@ -303,14 +411,14 @@
       const c = el("div", "confirm");
       const b = el("b", null, "Erase " + quoted(r.text) + "?");
       b.id = "er-h";
-      const p = el("p", null, "This and anything it replaced are deleted for good. Can't be undone.");
+      const p = el("p", null, group === "history" ? "This moment is deleted for good, here and in my notes. Can't be undone." : "This and anything it replaced are deleted for good. Can't be undone.");
       p.id = "er-p";
       c.append(b, p);
       const rr = el("div", "row");
       rr.append(
         btn("Cancel", "small quiet", "er-cancel", closeMenu),
         btn("Erase", "small danger", "er-go", () => {
-          act("memory_forget", { id: r.id, hard: true }, "Couldn't erase " + quoted(r.text) + ".", gone.concat("add:" + group, "add-first", "switch"), () => { menu = null; });
+          act("memory_forget", { id: r.id, hard: true }, "Couldn't erase " + quoted(r.text) + ".", gone, () => { menu = null; });
         }),
       );
       m.append(c, rr);
@@ -563,7 +671,7 @@
     else if (!s.enabled) { ok = true; text = "Memory is off."; }
     else {
       const c = s.counts || { live: 0, disputes: 0 };
-      text = c.live || c.disputes ? plural(c.live, "thing") + (c.disputes ? " · " + c.disputes + " to answer" : "") : "";
+      text = c.live || c.disputes ? plural(c.live, "thing") + (c.days ? " · " + plural(c.days, "day") : "") + (c.disputes ? " · " + c.disputes + " to answer" : "") : "";
     }
     bar.className = "bar" + cls;
     stat.className = "status" + (ok ? " ok" : "");
@@ -591,6 +699,6 @@
   });
   NARROW.addEventListener("change", () => { if (s) render(); });
 
-  T.event.listen("memory://state", (e) => apply(e.payload));
+  T.event.listen("memory://state", (e) => { const st = e.payload; reloadOlder(st).then(() => apply(st)); });
   call("memory_state").then((st) => { if (st && !s) apply(st); }).catch(() => {});
 })();

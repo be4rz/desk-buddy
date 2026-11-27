@@ -4,6 +4,7 @@
 use crate::schema::{self, Row, BEST_FIRST};
 use crate::Result;
 use rusqlite::Connection;
+use std::collections::HashSet;
 
 const CAP: usize = 2000;
 const MAX_PROMISES: usize = 5;
@@ -12,7 +13,8 @@ const MAX_DISPUTES: usize = 2;
 const HEAD: &str = "## What I know about you
 These are notes from earlier chats. They can be out of date: if the person
 says otherwise, believe them. Never recite this list unprompted.";
-const TAIL: &str = "For anything not listed here, run `buddy memory search \"<words>\"`.";
+const TAIL: &str = "You remember past chats. If the person asks about the past and it isn't here,
+run `buddy memory recall <date>` or `buddy memory search \"<words>\"`.";
 const TITLES: [&str; 4] =
     ["About them", "How they like help", "Things you said you'd do", "Not sure yet (ask when it fits, once)"];
 const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -61,9 +63,20 @@ fn lower_first(s: &str) -> String {
 
 /// The section text, or "" when nothing live is stored.
 pub(crate) fn section(conn: &Connection) -> Result<String> {
+    let entries = selected(conn)?;
+    Ok(if entries.is_empty() { String::new() } else { compose(&entries) })
+}
+
+/// The ids of the rows the section lists (recall never repeats these).
+pub(crate) fn core_ids(conn: &Connection) -> Result<HashSet<i64>> {
+    Ok(selected(conn)?.iter().map(|e| e.id).collect())
+}
+
+/// The entries that make the section, after the cap.
+fn selected(conn: &Connection) -> Result<Vec<Entry>> {
     let core = live_core(conn)?;
     if core.is_empty() {
-        return Ok(String::new());
+        return Ok(Vec::new());
     }
     let mut entries = Vec::new();
     let mut promises = 0;
@@ -92,12 +105,12 @@ pub(crate) fn section(conn: &Connection) -> Result<String> {
         (b.importance, &b.observed_at, b.id).cmp(&(a.importance, &a.observed_at, a.id))
     });
     for n in (1..=entries.len()).rev() {
-        let text = compose(&entries[..n]);
-        if text.chars().count() <= CAP {
-            return Ok(text);
+        if compose(&entries[..n]).chars().count() <= CAP {
+            entries.truncate(n);
+            return Ok(entries);
         }
     }
-    Ok(String::new())
+    Ok(Vec::new())
 }
 
 fn entry(group: usize, line: String, r: &Row) -> Entry {

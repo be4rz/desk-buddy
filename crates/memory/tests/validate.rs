@@ -76,12 +76,12 @@ fn valid_from_accepts_a_day_or_a_month_and_at_most_a_year_ahead() {
 }
 
 #[test]
-fn episodes_are_skipped_in_phase_1() {
+fn the_extractor_may_send_episodes_but_the_bear_may_not() {
     let (_t, s) = store();
     let r = extract(&s, "x", vec![item("episode", None, None, "Was stressed about Friday")], &now());
-    assert_eq!(r.items[0].outcome, Outcome::Skipped("episode"));
-    assert_eq!((r.skipped, r.created), (1, 0));
-    assert!(s.list(None).unwrap().is_empty());
+    assert!(matches!(r.items[0].outcome, Outcome::Created(_)));
+    assert_eq!((r.skipped, r.created), (0, 1));
+    assert_eq!(s.list(Some("episode")).unwrap().len(), 1);
     let op = RememberIn { text: "Was stressed".into(), kind: Some("episode".into()), ..Default::default() };
     assert_eq!(s.remember(op, &now()).unwrap(), Outcome::Skipped("episode"));
 }
@@ -283,7 +283,7 @@ fn extract_args_has_the_i1_shape() {
     assert_eq!(turns[0], json!({"requestId": "u:00", "endedAt": "2026-11-27T09:00:00+07:00"}));
     assert_eq!(s.extract_args(3, now().today).unwrap()["turns"].as_array().unwrap().len(), 3);
     assert_eq!(a["today"], "2026-11-27");
-    assert_eq!(a["episodes"], false);
+    assert_eq!(a["episodes"], true);
     let known = a["known"].as_array().unwrap();
     assert_eq!((known.len(), &known[0]["predicate"], &known[0]["value"], &known[0]["subject"]), (1, &json!("home_city"), &json!("Hanoi"), &json!("user")));
     assert!(known[0]["id"].is_i64() && known[0].get("qualifier").is_some());
@@ -318,4 +318,39 @@ fn an_item_naming_no_known_turn_is_a_guess_with_no_source() {
     let r = extract(&s, "I like tea", vec![v], &now());
     assert_eq!(r.items[0].turn, None);
     assert_eq!(source_of(&s, r.items[0].outcome.id().unwrap()), "guess");
+}
+
+#[test]
+fn an_episode_must_be_keyless_and_at_least_importance_3() {
+    let (t, s) = store();
+    let r = extract(
+        &s,
+        "x",
+        vec![
+            item("episode", Some("home_city"), Some("Hanoi"), "Was in Hanoi"),
+            with(item("episode", None, None, "Minor thing"), "importance", json!(2)),
+            with(item("episode", None, None, "Borderline thing"), "importance", json!(3)),
+            item("insight", None, None, "A pattern the extractor made up"),
+        ],
+        &now(),
+    );
+    let o: Vec<&Outcome> = r.items.iter().map(|i| &i.outcome).collect();
+    assert_eq!(o[0], &Outcome::Skipped("predicate"));
+    assert_eq!(o[1], &Outcome::Skipped("low"));
+    assert!(matches!(o[2], Outcome::Created(_)));
+    assert_eq!(o[3], &Outcome::Skipped("kind"));
+    assert_eq!(count(&t.mem(), "SELECT count(*) FROM facts"), 1);
+    // the bear's command and the window can't make an insight either
+    let op = RememberIn { text: "A pattern".into(), kind: Some("insight".into()), ..Default::default() };
+    assert!(matches!(s.remember(op, &now()), Ok(Outcome::Skipped(_)) | Err(_)));
+    assert!(s.add("insight", "A pattern", &now()).is_err());
+}
+
+#[test]
+fn an_episode_with_a_secret_is_refused_and_not_counted() {
+    let (t, s) = store();
+    let secret = format!("Pasted {}{}", "sk", "-live-abc123def456ghi");
+    let r = extract(&s, "x", vec![with(item("episode", None, None, &secret), "importance", json!(9))], &now());
+    assert_eq!(r.created, 0);
+    assert_eq!(meta(&t.mem(), "importance_since_reflection"), None);
 }

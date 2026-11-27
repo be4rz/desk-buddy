@@ -3,7 +3,9 @@
 //   `loading` (memory_state never answers: the skeleton), `empty` (on, nothing kept), `few` (three groups,
 //   seven rows), `many` (40 rows, long texts: the list scrolls, the bar stays), `disputed` (two questions
 //   first, their rows marked), `off` (the switch off: rows stay, quieter), `error` (the store didn't open),
-//   `partial` (the list loaded; forgetting "Sister: Lan" fails and the bar offers Try again).
+//   `partial` (the list loaded; forgetting "Sister: Lan" fails and the bar offers Try again),
+//   `history` (phase 2: one promise, then History over 31 days, newest first, the newest open; moments and
+//   "pattern" insights; 14 days, then Show older days pages back through memory_history {before}).
 // The overlays are reached through the page's own handlers: ⋯ (row menu, Erase completely… and its
 // confirm), Edit / + Add (in-place forms; an add that looks like a password or key is refused with
 // `secret`), Forget everything… (the typed-phrase dialog). Every person and place is invented.
@@ -100,6 +102,55 @@
     return { g, disputes };
   }
 
+  // History (phase 2): 31 days with moments, newest first; [day, [text, source] | [text, "insight", [episode idx…]]]
+  const MOMENTS = [
+    "Stressed about Friday's talk at the meetup; practised the intro twice with the bear",
+    "Fixed the flaky upload test after two days of trying",
+    "Worked until 23:00 on the upload service",
+    "Skipped lunch to finish the release notes",
+    "Went for a long run along the river and felt great after",
+    "Mochi knocked the water glass off the desk during the morning call",
+    "Had a tense planning meeting about the spring release",
+    "Finished the đàn bầu lesson piece without a mistake for the first time",
+    "Cooked phở for Lan and Minh on Sunday",
+    "Spent the evening reading on the balcony after a hard week",
+    "Felt proud after the demo for Lanternfish Labs went smoothly",
+    "Was tired after a night of bad sleep and kept the day light",
+  ];
+  function historyDays() {
+    const out = [];
+    const day = (y, m, d) => y + "-" + String(m).padStart(2, "0") + "-" + String(d).padStart(2, "0");
+    const ep = (text, source) => ({ id: next++, kind: "episode", text, key: null, label: null, value: null, since: null, source, disputed: false });
+    // the prototype's four newest days first
+    const y1 = [ep(MOMENTS[0], "chat"), ep(MOMENTS[1], "guess")];
+    y1.push({ id: next++, kind: "insight", text: "Crunch week: worked late three nights and skipped lunch twice", key: null, label: null, value: null, since: null, source: "guess", disputed: false, sources: 3, src: [] });
+    out.push({ day: "2026-11-26", items: y1 });
+    out.push({ day: "2026-11-23", items: [ep(MOMENTS[2], "guess"), ep(MOMENTS[3], "chat")] });
+    out.push({ day: "2026-11-20", items: [ep(MOMENTS[4], "chat")] });
+    out.push({ day: "2026-11-17", items: [ep(MOMENTS[5], "guess"), ep(MOMENTS[6], "chat"), ep(MOMENTS[7], "chat"), ep(MOMENTS[8], "guess")] });
+    // 27 more, two or three days apart, back into September
+    let t = Date.UTC(2026, 10, 15);
+    for (let i = 0; i < 27; i++) {
+      const d = new Date(t);
+      const n = 1 + (i % 3);
+      const items = [];
+      for (let j = 0; j < n; j++) items.push(ep(MOMENTS[(i * 3 + j) % MOMENTS.length], j % 2 ? "guess" : "chat"));
+      out.push({ day: day(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate()), items });
+      t -= (2 + (i % 2)) * 86400000;
+    }
+    // the insight rests on the three newest moments of the crunch (yesterday's two and one from the 23rd)
+    y1[2].src = [y1[0].id, y1[1].id, out[1].items[0].id];
+    return out;
+  }
+  let days = [];
+  const PAGE = 14;
+  const dayCopy = (d) => ({ day: d.day, items: d.items.map((r) => {
+    const c = { ...r };
+    delete c.src;
+    if (r.kind === "insight") c.sources = r.src.filter((id) => days.some((x) => x.items.some((e) => e.id === id))).length;
+    return c;
+  }) });
+
   const clone = (g) => ({ about: g.about.map((r) => ({ ...r })), help: g.help.map((r) => ({ ...r })), promises: g.promises.map((r) => ({ ...r })) });
   let groups = { about: [], help: [], promises: [] };
   let disputes = [];
@@ -115,21 +166,24 @@
     case "error": error = { code: "store", message: "unable to open database file", file: "~/.desk-buddy/memory/memory.sqlite" }; break;
     case "partial": groups = { about: [{ ...FEW.about[0] }, { ...FEW.about[3] }], help: [], promises: [] }; failForget = true; break;
     case "loading": silent = true; break;
+    case "history": groups = { about: [], help: [], promises: [{ ...FEW.promises[0] }] }; days = historyDays(); break;
     default: break; // empty
   }
 
   const GROUP_OF = { profile: "about", preference: "help", promise: "promises" };
   const all = () => [...groups.about, ...groups.help, ...groups.promises];
-  const find = (id) => all().find((r) => r.id === id);
+  const hist = () => days.flatMap((d) => d.items);
+  const find = (id) => all().find((r) => r.id === id) || hist().find((r) => r.id === id);
   function view() {
-    const live = error ? 0 : all().length;
+    const live = error ? 0 : all().length + hist().length;
     const ds = error ? [] : disputes;
     const disputedIds = new Set(ds.map((d) => d.live.id));
     const g = error ? { about: [], help: [], promises: [] } : clone(groups);
     for (const k of Object.keys(g)) g[k].forEach((r) => { r.disputed = disputedIds.has(r.id); });
     return {
       v: 1, enabled, error, today: "2026-11-27", phrase: PHRASE, groups: g, disputes: ds.map((d) => ({ ...d, live: { ...d.live } })),
-      history: null, historyMore: false, counts: { live, disputes: ds.length },
+      history: error || !days.length ? null : days.slice(0, PAGE).map(dayCopy), historyMore: !error && days.length > PAGE,
+      counts: { live, disputes: ds.length, days: error ? 0 : days.length },
     };
   }
   const looksSecret = (t) => /\b(password|passcode|api[ _-]?key|token)\b/i.test(t) || /\b(sk|ghp|xox[bp])[-_][A-Za-z0-9]/.test(t);
@@ -143,6 +197,8 @@
   function remove(id) {
     for (const k of Object.keys(groups)) groups[k] = groups[k].filter((r) => r.id !== id);
     disputes = disputes.filter((d) => d.live.id !== id && d.id !== id);
+    // a moment leaves its day (an empty day leaves History); an insight resting on it stays
+    days = days.map((d) => ({ day: d.day, items: d.items.filter((r) => r.id !== id) })).filter((d) => d.items.length);
   }
 
   const listeners = {};
@@ -193,12 +249,19 @@
         if ((a.confirm || "").trim() !== PHRASE) throw "bad_phrase";
         groups = { about: [], help: [], promises: [] };
         disputes = [];
+        days = [];
         error = null;
         failForget = false;
         push();
         return {};
       }
       case "memory_set_enabled": enabled = !!a.on; push(); return {};
+      case "memory_history": {
+        if (error) throw "store";
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(a.before || "")) throw "store";
+        const older = days.filter((d) => d.day < a.before);
+        return { days: older.slice(0, PAGE).map(dayCopy), more: older.length > PAGE };
+      }
       case "memory_close": return {};
     }
     throw "not allowed";

@@ -1,0 +1,12 @@
+// Memory history (design memory-history): "What did we talk about yesterday?" The message already carries
+// yesterday's moments as recall (the bubble shows only the person's words); the agent may also run
+// `buddy memory recall yesterday` (MemoryOp::Recall, a read) before it answers from them. Replay with
+// BUDDY_EVENTS: the bear thinks, works the read, speaks and settles as in any turn.
+{"at_ms": 0, "poke": "click"}
+{"at_ms": 200, "poke": "prompt_open"}
+{"at_ms": 2500, "poke": "prompt_sent"}
+{"at_ms": 2500, "event": {"type": "thinking"}}
+{"at_ms": 4000, "event": {"type": "working", "kind": "buddy", "tool": "buddy memory recall yesterday"}}
+{"at_ms": 4600, "event": {"type": "speaking", "text": "Yesterday you practised your talk intro twice and finally fixed that flaky upload test."}}
+{"at_ms": 7000, "event": {"type": "idle"}}
+{"at_ms": 9500, "event": {"type": "settled"}}

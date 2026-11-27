@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::time::{Duration, Instant};
 
-use super::jobs::{run_once, Ran};
+use super::jobs::{reflect_once, run_once, Ran, REFLECT_IDLE};
 use super::*;
 
 fn tmp(name: &str) -> PathBuf {
@@ -28,6 +28,8 @@ struct Fake {
     sections: Mutex<Vec<Option<String>>>,
     asked: Mutex<Vec<Value>>,
     reply: Mutex<Option<Result<Value, String>>>,
+    reflected: Mutex<Vec<Value>>,
+    reflect_reply: Mutex<Option<Result<Value, String>>>,
     down: AtomicBool,
 }
 
@@ -38,6 +40,10 @@ impl Sidecar for Fake {
     fn extract(&self, args: Value) -> Result<Value, String> {
         self.asked.lock().unwrap().push(args);
         self.reply.lock().unwrap().clone().unwrap_or_else(|| Err("timeout".into()))
+    }
+    fn reflect(&self, args: Value) -> Result<Value, String> {
+        self.reflected.lock().unwrap().push(args);
+        self.reflect_reply.lock().unwrap().clone().unwrap_or_else(|| Err("timeout".into()))
     }
     fn running(&self) -> bool {
         !self.down.load(Ordering::SeqCst)
@@ -85,7 +91,7 @@ fn only_the_memory_window_may_call_its_commands() {
 fn the_page_calls_its_commands_words_their_refusals_and_keeps_to_the_csp() {
     let js = include_str!("../../web/memory/memory.js");
     let html = include_str!("../../web/memory/index.html");
-    for cmd in ["memory_state", "memory_add", "memory_edit", "memory_forget", "memory_resolve", "memory_forget_all", "memory_set_enabled", "memory_close"] {
+    for cmd in ["memory_state", "memory_history", "memory_add", "memory_edit", "memory_forget", "memory_resolve", "memory_forget_all", "memory_set_enabled", "memory_close"] {
         assert!(js.contains(&format!("\"{cmd}\"")), "the page never calls {cmd}");
     }
     assert!(js.contains(&format!("\"{}\"", window::EVENT)), "the page doesn't listen for {}", window::EVENT);
@@ -435,4 +441,166 @@ fn the_memory_fixture_opens_the_window_with_buddy_memory_open() {
     let open = items.iter().position(|i| matches!(&i.event, Some(MascotEvent::Working { tool, .. }) if tool == "buddy memory open"));
     let idle = items.iter().position(|i| i.event == Some(MascotEvent::Idle));
     assert!(open.is_some() && open < idle, "the tool runs during the turn");
+}
+
+// ---- history (p2): episodes, recall, reflection, the window's older days ----
+
+/// `n` moments from one chat turn, through the jobs' extraction as in the app.
+fn moments(m: &Mem, fake: &Fake, id: &str, texts: &[&str]) {
+    turn(m, 1, id);
+    let items: Vec<Value> = texts
+        .iter()
+        .map(|t| json!({"turn": id, "kind": "episode", "predicate": null, "qualifier": null, "value": null, "text": t, "importance": 5, "validFrom": null, "quote": "launch week"}))
+        .collect();
+    *fake.reply.lock().unwrap() = Some(Ok(json!({"items": items, "turns": [{"requestId": id, "said": "launch week"}], "missing": []})));
+    assert_eq!(run_once(m, Duration::ZERO), Ran::Extracted { turns: 1, items: texts.len() });
+}
+
+const LAUNCH: [&str; 4] = ["Stayed late for the launch", "Skipped lunch to fix the build", "Walked Mochi after the late shift", "Had ramen with Lan"];
+
+fn insight(text: &str, sources: &[i64]) -> Value {
+    json!({"text": text, "importance": 6, "sources": sources})
+}
+
+fn episode_ids(fake: &Fake) -> Vec<i64> {
+    fake.reflected.lock().unwrap().last().unwrap()["episodes"].as_array().unwrap().iter().map(|e| e["id"].as_i64().unwrap()).collect()
+}
+
+#[test]
+fn reflection_waits_for_the_gate_then_a_failed_run_is_retried_as_the_same_batch() {
+    let (m, notices) = mem("reflect", true);
+    let fake = Arc::new(Fake::default());
+    m.attach(fake.clone());
+    assert_eq!(reflect_once(&m, REFLECT_IDLE), Ran::Waiting("not due"), "no episode yet");
+    moments(&m, &fake, "u:launch", &LAUNCH);
+    // the person is at the keyboard, a turn runs, the agent is down, memory is off: wait
+    assert_eq!(reflect_once(&m, REFLECT_IDLE - Duration::from_secs(1)), Ran::Waiting("person here"));
+    m.on_status(1, &status(true, Some("u:b"), false));
+    assert_eq!(reflect_once(&m, REFLECT_IDLE), Ran::Waiting("busy"));
+    m.on_status(1, &status(false, None, false));
+    fake.down.store(true, Ordering::SeqCst);
+    assert_eq!(reflect_once(&m, REFLECT_IDLE), Ran::Waiting("no agent"));
+    fake.down.store(false, Ordering::SeqCst);
+    // a chat turn still waiting for the extractor holds it too
+    turn(&m, 1, "u:waiting");
+    assert_eq!(reflect_once(&m, REFLECT_IDLE), Ran::Waiting("not due"));
+    m.store().unwrap().clear_pending().unwrap();
+    assert!(fake.reflected.lock().unwrap().is_empty());
+
+    // the model call fails: nothing applied, the run is failed
+    let Ran::Reflected { batch8, outcome, .. } = reflect_once(&m, REFLECT_IDLE) else { panic!("a run") };
+    assert_eq!((batch8.len(), outcome), (8, "failed"));
+    let ids = episode_ids(&fake);
+    assert_eq!(ids.len(), 4);
+    assert!(m.store().unwrap().list(Some("insight")).unwrap().is_empty());
+    // the next look sends the same batch, and this time it lands
+    *fake.reflect_reply.lock().unwrap() = Some(Ok(json!({"updates": [], "insights": [insight("Works late in launch weeks", &ids[..2])], "merges": []})));
+    let before = notices.load(Ordering::SeqCst);
+    assert_eq!(reflect_once(&m, REFLECT_IDLE), Ran::Reflected { batch8: batch8.clone(), outcome: "done", pct: 25 });
+    assert_eq!(episode_ids(&fake), ids);
+    assert!(notices.load(Ordering::SeqCst) > before, "memory://state");
+    let st = m.state();
+    let day = &st["history"][0];
+    assert!(day["items"].as_array().unwrap().iter().any(|r| r["kind"] == "insight" && r["sources"] == json!(2)), "{day}");
+    // nothing new: no run, and no duplicate insight
+    assert_eq!(reflect_once(&m, REFLECT_IDLE), Ran::Waiting("not due"));
+    assert_eq!(m.store().unwrap().list(Some("insight")).unwrap().len(), 1);
+    // off: nothing runs
+    m.set_enabled(false);
+    assert_eq!(reflect_once(&m, REFLECT_IDLE), Ran::Waiting("off"));
+}
+
+/// A14 in the app: a reply that changes more than 30% of the live rows is rejected and nothing lands.
+#[test]
+fn a_reflection_over_the_30_percent_guard_is_rejected() {
+    let (m, _) = mem("guard", true);
+    let fake = Arc::new(Fake::default());
+    m.attach(fake.clone());
+    moments(&m, &fake, "u:launch", &LAUNCH);
+    moments(&m, &fake, "u:more", &["Fixed the build at midnight", "Slept in on Saturday"]);
+    let reply = |ids: &[i64]| json!({"updates": [], "insights": [insight("Works late in launch weeks", ids), insight("Sleeps in after a hard week", ids), insight("Eats out when busy", ids)], "merges": []});
+    *fake.reflect_reply.lock().unwrap() = Some(Err("timeout".into()));
+    assert!(matches!(reflect_once(&m, REFLECT_IDLE), Ran::Reflected { outcome: "failed", .. }));
+    let ids = episode_ids(&fake);
+    *fake.reflect_reply.lock().unwrap() = Some(Ok(reply(&ids)));
+    // 3 insights over 6 live rows: 50%
+    let Ran::Reflected { outcome, pct, .. } = reflect_once(&m, REFLECT_IDLE) else { panic!("a run") };
+    assert_eq!((outcome, pct), ("rejected", 50));
+    assert!(m.store().unwrap().list(Some("insight")).unwrap().is_empty(), "nothing applied");
+}
+
+/// A model that was never asked (signed out, the sidecar down) gives the try back: the batch outlives
+/// MAX_TRIES of those, while unusable replies use it up.
+#[test]
+fn a_reflection_the_model_never_saw_does_not_use_up_its_batch() {
+    let (m, _) = mem("unspent", true);
+    let fake = Arc::new(Fake::default());
+    m.attach(fake.clone());
+    moments(&m, &fake, "u:launch", &LAUNCH);
+    for _ in 0..memory::MAX_TRIES + 2 {
+        *fake.reflect_reply.lock().unwrap() = Some(Err("no_provider".into()));
+        assert!(matches!(reflect_once(&m, REFLECT_IDLE), Ran::Reflected { outcome: "failed", .. }));
+    }
+    let ids = episode_ids(&fake);
+    *fake.reflect_reply.lock().unwrap() = Some(Ok(json!({"updates": [], "insights": [insight("Works late in launch weeks", &ids[..2])], "merges": []})));
+    assert!(matches!(reflect_once(&m, REFLECT_IDLE), Ran::Reflected { outcome: "done", .. }));
+    assert_eq!(episode_ids(&fake), ids, "the same batch");
+    assert_eq!(m.store().unwrap().list(Some("insight")).unwrap().len(), 1);
+}
+
+#[test]
+fn buddy_memory_recall_answers_a_day_and_409_while_off() {
+    let (m, _) = mem("recall-route", true);
+    let fake = Arc::new(Fake::default());
+    m.attach(fake.clone());
+    moments(&m, &fake, "u:launch", &LAUNCH[..2]);
+    let today = now().today.to_string();
+    let r = m.on_op(MemoryOp::Recall { date: "today".into() }).unwrap();
+    assert_eq!(r["day"], json!(today));
+    let facts = r["facts"].as_array().unwrap();
+    assert_eq!(facts.iter().map(|f| (f["text"].as_str().unwrap(), f["day"].as_str().unwrap())).collect::<Vec<_>>(), vec![(LAUNCH[0], today.as_str()), (LAUNCH[1], today.as_str())]);
+    assert_eq!(m.on_op(MemoryOp::Recall { date: "yesterday".into() }).unwrap()["facts"], json!([]));
+    let week = m.on_op(MemoryOp::Recall { date: "last-week".into() }).unwrap();
+    assert!(week["day"].as_str().unwrap() < today.as_str() && week["facts"] == json!([]), "{week}");
+    assert!(week["to"].as_str().unwrap() < today.as_str() && week["to"].as_str() > week["day"].as_str(), "{week}");
+    assert!(r.get("to").is_none(), "one day has no `to`");
+    assert_eq!(m.on_op(MemoryOp::Recall { date: "someday".into() }).unwrap_err().code, "usage");
+    // chat recall: a message about the day gets its lines, an unrelated one none
+    let lines = m.recall_for("What did we talk about today?");
+    assert!(lines.iter().any(|l| l == &format!("{today}: {}", LAUNCH[0])), "{lines:?}");
+    assert!(m.recall_for("Can you open the music widget").is_empty());
+    m.set_enabled(false);
+    let r = m.on_op(MemoryOp::Recall { date: "today".into() }).unwrap_err();
+    assert_eq!((r.status, r.code), (409, "memory_off"));
+    assert!(m.recall_for("What did we talk about today?").is_empty(), "off: no recall");
+}
+
+#[test]
+fn the_window_pages_older_days_and_words_a_bad_day_as_store() {
+    let (m, _) = mem("history", true);
+    let fake = Arc::new(Fake::default());
+    m.attach(fake.clone());
+    moments(&m, &fake, "u:launch", &LAUNCH[..1]);
+    let st = m.state();
+    assert_eq!((st["history"].as_array().unwrap().len(), st["historyMore"].as_bool(), st["counts"]["days"].as_i64()), (1, Some(false), Some(1)));
+    let tomorrow = now().today.tomorrow().unwrap().to_string();
+    let page = m.history(&tomorrow).unwrap();
+    assert_eq!((page["days"].as_array().unwrap().len(), page["more"].as_bool()), (1, Some(false)));
+    assert_eq!(m.history(&now().today.to_string()).unwrap()["days"], json!([]), "strictly before");
+    assert_eq!(m.history("someday"), Err("store".to_string()));
+    // the fallback state (no store) has the same keys
+    let (closed, _) = mem("history-off", false);
+    let fb = closed.state();
+    assert!(fb.get("history").is_some() && fb.get("historyMore").is_some() && fb["counts"].get("days").is_some(), "{fb}");
+}
+
+/// The replay of a turn that runs `buddy memory recall yesterday` parses, in time order.
+#[test]
+fn the_memory_history_fixture_recalls_yesterday_during_the_turn() {
+    use mascot_protocol::MascotEvent;
+    let items = crate::events::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/memory_history.jsonl")).unwrap();
+    assert!(items.windows(2).all(|w| w[0].at_ms <= w[1].at_ms));
+    let recall = items.iter().position(|i| matches!(&i.event, Some(MascotEvent::Working { tool, .. }) if tool == "buddy memory recall yesterday"));
+    let idle = items.iter().position(|i| i.event == Some(MascotEvent::Idle));
+    assert!(recall.is_some() && recall < idle, "the tool runs during the turn");
 }

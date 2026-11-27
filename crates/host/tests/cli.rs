@@ -363,6 +363,11 @@ fn memory_host(name: &str, store: bool) -> (Host, PathBuf, Arc<Mutex<Vec<host::M
             host::MemoryOp::List { .. } => Ok(json!({ "facts": [fact(12, "Lives in Hanoi", json!("2026-10")), fact(13, "Likes tea", Value::Null)] })),
             host::MemoryOp::Search { q, .. } if q == "nothing" => Ok(json!({ "facts": [] })),
             host::MemoryOp::Search { .. } => Ok(json!({ "facts": [fact(12, "Lives in Hanoi", json!("2026-10"))] })),
+            host::MemoryOp::Recall { date } if date == "today" => Ok(json!({ "day": "2026-11-27", "facts": [] })),
+            host::MemoryOp::Recall { .. } => {
+                let ep = |id: i64, kind: &str, text: &str, day: &str| json!({ "id": id, "kind": kind, "text": text, "key": null, "value": null, "since": null, "source": "chat", "day": day });
+                Ok(json!({ "day": "2026-11-20", "facts": [ep(31, "episode", "Tried a new ramen place with Lan", "2026-11-20"), ep(32, "episode", "Stayed late for the launch", "2026-11-26"), ep(33, "insight", "Works late in launch weeks", "2026-11-26")] }))
+            }
             _ => Ok(json!({})),
         }
     })
@@ -403,6 +408,15 @@ fn memory_commands_print_one_line_per_fact_and_send_their_ops() {
     assert_eq!((code(&o), out(&o).as_str()), (0, "#12 Lives in Hanoi (since Oct 2026)\n"));
     assert_eq!(seen.lock().unwrap().last(), Some(&MemoryOp::Search { q: "where do I live".into(), limit: 3 }));
     assert_eq!(out(&buddy(&file, &["memory", "search", "nothing"])), "no matches\n");
+    let o = buddy(&file, &["memory", "recall", "last-week"]);
+    assert_eq!(
+        (code(&o), out(&o).as_str()),
+        (0, "2026-11-20:\n  #31 Tried a new ramen place with Lan\n2026-11-26:\n  #32 Stayed late for the launch\n  #33 Works late in launch weeks\n"),
+        "{}",
+        err(&o)
+    );
+    assert_eq!(seen.lock().unwrap().last(), Some(&MemoryOp::Recall { date: "last-week".into() }));
+    assert_eq!(out(&buddy(&file, &["memory", "recall", "today"])), "nothing from 2026-11-27\n");
     let o = buddy(&file, &["memory", "open"]);
     assert_eq!((code(&o), out(&o).as_str()), (0, "opened\n"));
     assert_eq!(seen.lock().unwrap().last(), Some(&MemoryOp::Open));
@@ -424,6 +438,7 @@ fn memory_json_prints_the_reply_for_every_subcommand() {
     let v = json_of(&["memory", "list", "--json"]);
     assert_eq!((v["facts"][0]["id"].as_i64(), v["facts"][0]["since"].as_str(), v["facts"][1]["since"].is_null()), (Some(12), Some("2026-10"), true));
     assert_eq!(json_of(&["memory", "search", "hanoi", "--json"])["facts"][0]["text"], "Lives in Hanoi");
+    assert_eq!(json_of(&["memory", "recall", "2026-11-26", "--json"])["facts"][0]["day"], "2026-11-20");
     assert_eq!(json_of(&["memory", "open", "--json"]), json!({ "ok": true }));
     drop(host);
     let _ = std::fs::remove_dir_all(dir);
@@ -459,6 +474,10 @@ fn memory_refusals_exit_1_usage_exits_2_and_no_store_is_503() {
         &["memory", "search", "x", "--limit", "0"],
         &["memory", "search", "x", "--limit", "21"],
         &["memory", "open", "now"],
+        &["memory", "recall"],
+        &["memory", "recall", "tomorrow"],
+        &["memory", "recall", "2026-02-30"],
+        &["memory", "recall", "today", "yesterday"],
     ] {
         let o = buddy(&file, args);
         assert_eq!(code(&o), 2, "{args:?}: {}", err(&o));
@@ -469,7 +488,7 @@ fn memory_refusals_exit_1_usage_exits_2_and_no_store_is_503() {
 
     // a sink with no store
     let (host, dir, _) = memory_host("memory-none", false);
-    for args in [&["memory", "list"][..], &["memory", "search", "x"], &["memory", "remember", "x"], &["memory", "forget", "1"], &["memory", "open"]] {
+    for args in [&["memory", "list"][..], &["memory", "search", "x"], &["memory", "remember", "x"], &["memory", "forget", "1"], &["memory", "recall", "yesterday"], &["memory", "open"]] {
         let o = buddy(host.file(), args);
         assert_eq!(code(&o), 1, "{args:?}");
         assert!(err(&o).contains("desk-buddy's memory isn't available.") && err(&o).contains("503"), "{}", err(&o));
@@ -487,7 +506,7 @@ fn help_lists_the_memory_commands_and_marks_the_reads() {
     assert_eq!(code(&o), 0);
     let v: Value = serde_json::from_slice(&o.stdout).unwrap();
     let cmds = v["commands"].as_array().unwrap();
-    for (prefix, read_only) in [("buddy memory remember", false), ("buddy memory forget", false), ("buddy memory list", true), ("buddy memory search", true), ("buddy memory open", true)] {
+    for (prefix, read_only) in [("buddy memory remember", false), ("buddy memory forget", false), ("buddy memory list", true), ("buddy memory search", true), ("buddy memory recall", true), ("buddy memory open", true)] {
         let c = cmds.iter().find(|c| c["usage"].as_str().unwrap_or("").starts_with(prefix)).unwrap_or_else(|| panic!("{prefix} is missing from help"));
         assert_eq!(c["readOnly"], read_only, "{prefix}");
     }

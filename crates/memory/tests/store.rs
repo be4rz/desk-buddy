@@ -15,16 +15,16 @@ fn guess_city(s: &Store, v: &str) -> Outcome {
 // ---- open, files, versions ----
 
 #[test]
-fn open_creates_a_wal_store_at_user_version_1() {
+fn open_creates_a_wal_store_at_user_version_2() {
     let tmp = Tmp::new();
     let dir = tmp.0.join("a").join("memory");
     let s = Store::open(&dir).unwrap();
     assert!(!s.is_newer());
     assert_eq!(s.dir(), dir);
     let c = db(&dir);
-    assert_eq!(c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+    assert_eq!(c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
     assert_eq!(c.query_row("PRAGMA journal_mode", [], |r| r.get::<_, String>(0)).unwrap(), "wal");
-    for t in ["facts", "pending_turns", "reflections", "insight_sources", "meta"] {
+    for t in ["facts", "pending_turns", "reflections", "insight_sources", "meta", "facts_fts"] {
         assert_eq!(count(&dir, &format!("SELECT count(*) FROM sqlite_master WHERE name = '{t}'")), 1, "{t}");
     }
     assert_eq!(count(&dir, "SELECT count(*) FROM pragma_table_info('pending_turns') WHERE name = 'tries'"), 1);
@@ -102,7 +102,7 @@ fn a_newer_file_opens_read_only() {
     let fresh = Store::forget_all(&tmp.mem()).unwrap();
     assert!(!fresh.is_newer());
     assert_eq!(fresh.list(None).unwrap().len(), 0);
-    assert_eq!(count(&tmp.mem(), "PRAGMA user_version"), 1);
+    assert_eq!(count(&tmp.mem(), "PRAGMA user_version"), 2);
     fresh.add("profile", "Likes tea", &now()).unwrap();
 }
 
@@ -387,7 +387,7 @@ fn core_rev_moves_when_the_section_changes() {
     assert!(r1 > 0);
     s.add("preference", "Likes tea", &now()).unwrap(); // extends: same section
     assert_eq!(s.core_rev(), r1);
-    extract(&s, "x", vec![item("episode", None, None, "Was tired")], &now()); // skipped
+    extract(&s, "x", vec![item("episode", None, None, "Was tired")], &now()); // an episode is not in the section
     assert_eq!(s.core_rev(), r1);
     let Outcome::Created(_) = guess_city(&s, "Hanoi") else { panic!() };
     let r2 = s.core_rev();
@@ -426,10 +426,10 @@ fn list_and_search() {
     assert_eq!(s.list(Some("preference")).unwrap().len(), 2);
     assert_eq!(s.list(None).unwrap()[0].text, "Lives in Hà Nội", "importance first");
     assert!(matches!(s.list(Some("mood")), Err(Error::Usage(_))));
-    // case-insensitive, accents kept
+    // case-insensitive; FTS5 folds accents, so the no-accent spelling finds them too
     assert_eq!(s.search("GREEN", 5).unwrap().len(), 1);
     assert_eq!(s.search("hà nội", 5).unwrap().len(), 2);
-    assert_eq!(s.search("ha noi", 5).unwrap().len(), 0);
+    assert_eq!(s.search("ha noi", 5).unwrap().len(), 2);
     // more matched words first, and the key and value are searched too
     let hits = s.search("tea shop", 5).unwrap();
     assert_eq!(hits[0].text, "Ask about the tea shop in Hà Nội");
@@ -485,4 +485,13 @@ fn a_new_value_with_the_old_sentence_puts_the_value_in_the_sentence_or_asks() {
     let n2 = s.edit(n, "Lives near the sea", None, &now()).unwrap();
     assert!(matches!(s.edit(n2, "Lives near the sea", Some("Hue"), &now()), Err(Error::Usage(_))));
     assert_eq!(s.view(date(2026, 11, 27))["groups"]["about"][0]["id"], json!(n2));
+}
+
+#[test]
+fn a_day_moment_cannot_be_edited_only_forgotten() {
+    let (_t, s) = store();
+    let ep = episode(&s, date(2026, 11, 26), "Walked to the lake with Lan", 5);
+    assert!(matches!(s.edit(ep, "Walked to the lake with Minh", None, &now()), Err(memory::Error::NotFound)));
+    assert_eq!(s.list(Some("episode")).unwrap()[0].text, "Walked to the lake with Lan");
+    s.soft_forget(ep).unwrap();
 }

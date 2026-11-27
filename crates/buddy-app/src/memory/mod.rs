@@ -45,6 +45,8 @@ pub trait Sidecar: Send + Sync {
     fn set_memory(&self, section: Option<String>);
     /// One memory.extract batch; `Err` is the error code only.
     fn extract(&self, args: Value) -> Result<Value, String>;
+    /// One memory.reflect run; `Err` is the error code only.
+    fn reflect(&self, args: Value) -> Result<Value, String>;
     /// The sidecar is up (an extraction could run).
     fn running(&self) -> bool;
 }
@@ -57,6 +59,9 @@ impl Sidecar for bridge::Agent {
     }
     fn extract(&self, args: Value) -> Result<Value, String> {
         self.memory_extract(args).map_err(|e| e.code.to_string())
+    }
+    fn reflect(&self, args: Value) -> Result<Value, String> {
+        self.memory_reflect(args).map_err(|e| e.code.to_string())
     }
     fn running(&self) -> bool {
         self.is_running()
@@ -137,6 +142,7 @@ pub fn werr(e: &Error) -> &'static str {
         Error::Empty => "empty",
         Error::TooLong => "too_long",
         Error::NotFound => "not_found",
+        Error::Rejected { .. } => "rejected",
         Error::Usage(_) | Error::Newer | Error::Store(_) => "store",
     }
 }
@@ -148,7 +154,7 @@ fn refuse(e: Error) -> Refusal {
         Error::NotFound => Refusal::new(404, "not_found", "Nothing like that to forget."),
         Error::Usage(m) => Refusal::new(400, "usage", m),
         Error::Empty | Error::TooLong => Refusal::new(400, "usage", "Keep it between 1 and 200 characters."),
-        Error::Newer | Error::Store(_) => Refusal::no_memory(),
+        Error::Rejected { .. } | Error::Newer | Error::Store(_) => Refusal::no_memory(),
     }
 }
 
@@ -309,7 +315,7 @@ impl Mem {
             None => json!({
                 "v": 1, "today": today.to_string(), "phrase": PHRASE,
                 "groups": {"about": [], "help": [], "promises": []}, "disputes": [],
-                "history": null, "historyMore": false, "counts": {"live": 0, "disputes": 0, "hidden": 0},
+                "history": null, "historyMore": false, "counts": {"live": 0, "disputes": 0, "hidden": 0, "days": 0},
             }),
         };
         v["enabled"] = json!(self.enabled());
@@ -391,11 +397,47 @@ impl Mem {
             }
             MemoryOp::List { kind } => Ok(json!({"facts": s.list(kind.as_deref()).map_err(refuse)?})),
             MemoryOp::Search { q, limit } => Ok(json!({"facts": s.search(&q, limit).map_err(refuse)?})),
+            MemoryOp::Recall { date } => {
+                let span = memory::dates::parse_arg(&date, now().today)
+                    .ok_or_else(|| Refusal::new(400, "usage", "Which day? buddy memory recall <YYYY-MM-DD|today|yesterday|last-week>."))?;
+                let facts = s.recall_span(&span).map_err(refuse)?;
+                // `day` is the first day; a range (last-week) also carries its last one as `to`
+                let (from, to) = span.bounds();
+                let mut out = json!({"day": from.to_string(), "facts": facts});
+                if to != from {
+                    out["to"] = json!(to.to_string());
+                }
+                Ok(out)
+            }
             MemoryOp::Open => unreachable!(),
         }
     }
 
+    /// The notes for one chat message (I1 `prompt.recall`): none while memory is off, the store is
+    /// closed, or the store fails (a failed recall never stops the message).
+    pub fn recall_for(&self, text: &str) -> Vec<String> {
+        if !self.enabled() {
+            return vec![];
+        }
+        let Some(s) = self.store() else { return vec![] };
+        match s.recall(text, &now()) {
+            Ok(lines) => lines,
+            Err(e) => {
+                eprintln!("[buddy] memory recall skipped: {}", werr(&e));
+                vec![]
+            }
+        }
+    }
+
     // ---- the window ----
+
+    /// The window's `memory_history {before}` (I6): the 14 days before `before`, and whether more remain.
+    pub fn history(&self, before: &str) -> Result<Value, String> {
+        let before: jiff::civil::Date = before.trim().parse().map_err(|_| "store".to_string())?;
+        let s = self.store().ok_or("store")?;
+        let (days, more) = s.history(before).map_err(|e| werr(&e).to_string())?;
+        Ok(json!({"days": days, "more": more}))
+    }
 
     fn with_store<T>(&self, f: impl FnOnce(&Store, &Now) -> memory::Result<T>) -> Result<T, String> {
         let s = self.store().ok_or("store")?;

@@ -68,16 +68,24 @@ pub(crate) fn parse_valid_from(s: &str, today: Date) -> Option<String> {
     (date <= limit).then(|| date.to_string())
 }
 
+/// Episodes below this importance are not worth keeping.
+const EPISODE_MIN: i64 = 3;
+
 /// Checks one memory. `Err` carries the reason, a short static word (never the text).
-pub(crate) fn check(raw: &Raw, today: Date) -> Result<Item, &'static str> {
+/// `extracted` is true for the extractor's items, the only source of episodes: the bear's own
+/// `remember` never writes one, and an insight comes only from a reflection run.
+pub(crate) fn check(raw: &Raw, today: Date, extracted: bool) -> Result<Item, &'static str> {
     if !KINDS.contains(&raw.kind) {
         return Err("kind");
     }
-    // C6: phase 1 has no History, so a stored episode could not be seen or erased.
     match raw.kind {
-        "episode" => return Err("episode"),
+        "episode" if !extracted => return Err("episode"),
         "insight" => return Err("kind"),
         _ => {}
+    }
+    let episode = raw.kind == "episode";
+    if episode && raw.predicate.is_some_and(|p| !p.trim().is_empty()) {
+        return Err("predicate");
     }
     let text = clean(raw.text);
     if text.is_empty() || text.chars().count() > TEXT_MAX {
@@ -89,6 +97,9 @@ pub(crate) fn check(raw: &Raw, today: Date) -> Result<Item, &'static str> {
     }
     if !(1..=10).contains(&raw.importance) {
         return Err("importance");
+    }
+    if episode && raw.importance < EPISODE_MIN {
+        return Err("low");
     }
     let valid_from = match raw.valid_from.map(str::trim).filter(|s| !s.is_empty()) {
         Some(s) => Some(parse_valid_from(s, today).ok_or("valid_from")?),
@@ -129,12 +140,14 @@ fn str_of<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
     v.get(key).and_then(Value::as_str)
 }
 
+/// A whole number from a model reply (`7` or `7.0`).
+pub(crate) fn int(v: &Value) -> Option<i64> {
+    v.as_i64().or_else(|| v.as_f64().filter(|f| f.fract() == 0.0).map(|f| f as i64))
+}
+
 /// One `items[]` entry of a memory.extract reply.
 pub(crate) fn from_extract(v: &Value, today: Date) -> Result<Item, &'static str> {
-    let importance = v
-        .get("importance")
-        .and_then(|n| n.as_i64().or_else(|| n.as_f64().filter(|f| f.fract() == 0.0).map(|f| f as i64)))
-        .ok_or("importance")?;
+    let importance = v.get("importance").and_then(int).ok_or("importance")?;
     let raw = Raw {
         kind: str_of(v, "kind").ok_or("kind")?,
         predicate: str_of(v, "predicate"),
@@ -144,5 +157,5 @@ pub(crate) fn from_extract(v: &Value, today: Date) -> Result<Item, &'static str>
         importance,
         valid_from: str_of(v, "validFrom").or_else(|| str_of(v, "valid_from")),
     };
-    check(&raw, today)
+    check(&raw, today, true)
 }

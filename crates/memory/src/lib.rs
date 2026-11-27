@@ -5,16 +5,24 @@
 //! (time comes in as [`Now`] or a `Date`) and never logs: callers log `[buddy] memory <outcome> <id>`,
 //! ids and counts only, never text, quotes or what the person said.
 
+pub mod dates;
 mod files;
+mod notes;
 pub mod predicates;
+pub mod recall;
 mod reconcile;
+pub mod reflect;
 mod render;
+mod retention;
 mod schema;
 mod secret;
 mod store;
 mod validate;
 mod view;
 
+pub use dates::Span;
+pub use recall::{MAX_CHARS, MIN_SCORE, TOP};
+pub use reflect::{ReflectJob, Reflected, GUARD, MAX_EPISODES, MAX_TRIES, TRIGGER};
 pub use secret::looks_secret;
 pub use store::Store;
 
@@ -38,6 +46,8 @@ pub enum Error {
     Newer,
     /// SQLite or the disk failed (503).
     Store(String),
+    /// A reflection reply would have changed more than [`GUARD`] of the live rows: nothing was applied.
+    Rejected { pct: u32 },
 }
 
 impl std::fmt::Display for Error {
@@ -50,6 +60,7 @@ impl std::fmt::Display for Error {
             Error::TooLong => f.write_str("too long"),
             Error::Newer => f.write_str("memory was written by a newer version"),
             Error::Store(m) => write!(f, "store: {m}"),
+            Error::Rejected { pct } => write!(f, "rejected ({pct}% changed)"),
         }
     }
 }
@@ -94,6 +105,9 @@ pub struct Fact {
     pub since: Option<String>,
     /// `window | chat | bear | guess`.
     pub source: &'static str,
+    /// `YYYY-MM-DD` the bear noted it: set by `recall_span` only, absent elsewhere.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub day: Option<String>,
 }
 
 /// What reconcile did with one memory.

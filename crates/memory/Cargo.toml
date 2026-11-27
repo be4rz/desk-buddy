@@ -14,3 +14,4 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 jiff = "0.2"
 unicode-normalization = "0.1"
 regex = "1"
+sha2 = "0.10"

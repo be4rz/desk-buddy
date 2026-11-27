@@ -519,6 +519,10 @@ fn memory_routes_map_to_their_ops_and_a_sink_with_no_store_answers_503() {
         ("GET", "/v1/memory/search?q=sister", None, MemoryOp::Search { q: "sister".into(), limit: 5 }),
         ("GET", "/v1/memory/search?q=hanoi%20city+food&limit=20", None, MemoryOp::Search { q: "hanoi city food".into(), limit: 20 }),
         ("GET", "/v1/memory/search?q=x&limit=1", None, MemoryOp::Search { q: "x".into(), limit: 1 }),
+        ("GET", "/v1/memory/recall?date=yesterday", None, MemoryOp::Recall { date: "yesterday".into() }),
+        ("GET", "/v1/memory/recall?date=last-week", None, MemoryOp::Recall { date: "last-week".into() }),
+        ("GET", "/v1/memory/recall?date=2026-11-26", None, MemoryOp::Recall { date: "2026-11-26".into() }),
+        ("GET", "/v1/memory/recall?date=%20today%20", None, MemoryOp::Recall { date: "today".into() }),
         ("POST", "/v1/memory/open", Some(json!({})), MemoryOp::Open),
         ("POST", "/v1/memory/open", None, MemoryOp::Open),
     ];
@@ -568,6 +572,14 @@ fn memory_usage_errors_never_reach_the_sink_and_wrong_methods_are_405() {
         ("GET", "/v1/memory/search?q=x&limit=-1", None),
         ("GET", "/v1/memory/search?q=x&limit=many", None),
         ("GET", "/v1/memory/search?q=%ZZ", None),
+        ("GET", "/v1/memory/recall", None),
+        ("GET", "/v1/memory/recall?date=", None),
+        ("GET", "/v1/memory/recall?date=tomorrow", None),
+        ("GET", "/v1/memory/recall?date=2026-02-30", None),
+        ("GET", "/v1/memory/recall?date=2026-13-01", None),
+        ("GET", "/v1/memory/recall?date=26-11-2026", None),
+        ("GET", "/v1/memory/recall?date=2026-1-05", None),
+        ("GET", "/v1/memory/recall?date=%2B026-11-26", None),
     ];
     for (method, path, body) in bad {
         let r = request(p, method, path, &h, body.as_ref()).unwrap();
@@ -579,11 +591,11 @@ fn memory_usage_errors_never_reach_the_sink_and_wrong_methods_are_405() {
     assert!(matches!(fx.events.recv_timeout(Duration::from_secs(2)).unwrap().action, Action::Memory(MemoryOp::Remember { .. })));
     assert!(fx.events.try_recv().is_err(), "only the valid request reached the sink");
     // a wrong method is 405, an unknown route 404
-    for (method, path) in [("GET", "/v1/memory/remember"), ("GET", "/v1/memory/forget"), ("POST", "/v1/memory/list"), ("POST", "/v1/memory/search"), ("GET", "/v1/memory/open"), ("PUT", "/v1/memory/open")] {
+    for (method, path) in [("GET", "/v1/memory/remember"), ("GET", "/v1/memory/forget"), ("POST", "/v1/memory/list"), ("POST", "/v1/memory/search"), ("POST", "/v1/memory/recall"), ("GET", "/v1/memory/open"), ("PUT", "/v1/memory/open")] {
         let r = request(p, method, path, &h, None).unwrap();
         assert_eq!((r.status, r.body["error"]["code"].as_str()), (405, Some("method")), "{method} {path}");
     }
-    for path in ["/v1/memory/recall", "/v1/memory/", "/v1/memory/erase"] {
+    for path in ["/v1/memory/", "/v1/memory/erase", "/v1/memory/history"] {
         assert_eq!(request(p, "GET", path, &h, None).unwrap().status, 404, "{path}");
     }
     // no token, no memory
@@ -602,6 +614,8 @@ fn memory_replies_pass_through_and_refusals_keep_their_codes() {
         Action::Memory(MemoryOp::Forget { .. }) => Err(Refusal::new(404, "not_found", "Nothing like that to forget.")),
         Action::Memory(MemoryOp::List { .. }) => Ok(json!({ "facts": [{ "id": 12, "kind": "profile", "text": "Lives in Hanoi", "key": "home_city", "value": "Hanoi", "since": "2026-10", "source": "chat" }] })),
         Action::Memory(MemoryOp::Search { .. }) => Err(Refusal::memory_off()),
+        Action::Memory(MemoryOp::Recall { date }) if date == "today" => Err(Refusal::memory_off()),
+        Action::Memory(MemoryOp::Recall { .. }) => Ok(json!({ "day": "2026-11-26", "facts": [{ "id": 31, "kind": "episode", "text": "Tried a new ramen place with Lan", "day": "2026-11-26" }] })),
         Action::Memory(MemoryOp::Open) => Ok(json!({})),
         _ => Ok(json!({})),
     })
@@ -621,6 +635,10 @@ fn memory_replies_pass_through_and_refusals_keep_their_codes() {
     let r = request(p, "GET", "/v1/memory/list", &h, None).unwrap();
     assert_eq!((r.status, r.body["facts"][0]["since"].as_str()), (200, Some("2026-10")));
     assert_eq!(request(p, "GET", "/v1/memory/search?q=x", &h, None).unwrap().status, 409);
+    let r = request(p, "GET", "/v1/memory/recall?date=yesterday", &h, None).unwrap();
+    assert_eq!((r.status, r.body["day"].as_str(), r.body["facts"][0]["day"].as_str()), (200, Some("2026-11-26"), Some("2026-11-26")));
+    let r = request(p, "GET", "/v1/memory/recall?date=today", &h, None).unwrap();
+    assert_eq!((r.status, r.body["error"]["code"].as_str()), (409, Some("memory_off")));
     assert_eq!(request(p, "POST", "/v1/memory/open", &h, Some(&json!({}))).unwrap().body, json!({ "ok": true }));
     drop(host);
     let _ = fs::remove_dir_all(&dir);
@@ -628,7 +646,17 @@ fn memory_replies_pass_through_and_refusals_keep_their_codes() {
 
 #[test]
 fn memory_cli_helpers_build_requests_and_one_line_facts() {
-    use super::memory::{cli_forget, cli_list, cli_remember, cli_search, fact_line, since_label, split_key};
+    use super::memory::{cli_forget, cli_list, cli_recall, cli_remember, cli_search, fact_line, recall_date, since_label, split_key};
+    assert_eq!(cli_recall(&["yesterday"]), Ok("/v1/memory/recall?date=yesterday".into()));
+    assert_eq!(cli_recall(&["2026-11-26"]), Ok("/v1/memory/recall?date=2026-11-26".into()));
+    assert_eq!(cli_recall(&["last-week"]), Ok("/v1/memory/recall?date=last-week".into()));
+    for bad in [&[][..], &["tomorrow"], &["2026-02-29"], &["2026-11-26", "today"], &["--json"]] {
+        assert!(cli_recall(bad).is_err(), "{bad:?}");
+    }
+    assert_eq!(recall_date("2028-02-29"), Ok("2028-02-29".into()), "a leap day");
+    assert_eq!(recall_date(" Yesterday "), Ok("yesterday".into()), "the words in any case");
+    assert_eq!(recall_date("LAST-WEEK"), Ok("last-week".into()));
+    assert!(recall_date("2100-02-29").is_err() && recall_date("1969-12-31").is_err() && recall_date("2026-11-00").is_err());
     assert_eq!(split_key("people:sister"), Ok(("people".into(), Some("sister".into()))));
     assert_eq!(split_key("home_city"), Ok(("home_city".into(), None)));
     assert!(split_key("").is_err() && split_key("a:").is_err() && split_key(":b").is_err());

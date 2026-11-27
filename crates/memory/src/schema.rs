@@ -4,7 +4,7 @@ use crate::Result;
 use rusqlite::{Connection, Params, TransactionBehavior};
 
 /// The `user_version` this crate writes. A file with a higher one opens read-only.
-pub const VERSION: i64 = 1;
+pub const VERSION: i64 = 2;
 
 const V1: &str = "
 CREATE TABLE facts (
@@ -61,8 +61,27 @@ CREATE TABLE insight_sources (
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 ";
 
+// Keyword search over `facts.text` (an external-content index: the rows stay in `facts`).
+// `remove_diacritics 2` makes "hom qua" match "hôm qua".
+const V2: &str = "
+CREATE VIRTUAL TABLE facts_fts USING fts5(
+  text, content='facts', content_rowid='id', tokenize='unicode61 remove_diacritics 2'
+);
+CREATE TRIGGER facts_ai AFTER INSERT ON facts BEGIN
+  INSERT INTO facts_fts(rowid, text) VALUES (new.id, new.text);
+END;
+CREATE TRIGGER facts_ad AFTER DELETE ON facts BEGIN
+  INSERT INTO facts_fts(facts_fts, rowid, text) VALUES ('delete', old.id, old.text);
+END;
+CREATE TRIGGER facts_au AFTER UPDATE OF text ON facts BEGIN
+  INSERT INTO facts_fts(facts_fts, rowid, text) VALUES ('delete', old.id, old.text);
+  INSERT INTO facts_fts(rowid, text) VALUES (new.id, new.text);
+END;
+INSERT INTO facts_fts(facts_fts) VALUES ('rebuild');
+";
+
 /// `MIGRATIONS[n]` takes a file from user_version `n` to `n + 1`.
-const MIGRATIONS: [&str; 1] = [V1];
+const MIGRATIONS: [&str; 2] = [V1, V2];
 
 pub fn user_version(conn: &Connection) -> Result<i64> {
     Ok(conn.pragma_query_value(None, "user_version", |r| r.get(0))?)
@@ -79,6 +98,30 @@ pub fn migrate(conn: &mut Connection) -> Result<()> {
     }
     Ok(())
 }
+
+/// One `meta` value.
+pub(crate) fn meta_get(conn: &Connection, key: &str) -> Option<String> {
+    conn.query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get(0)).ok()
+}
+
+pub(crate) fn meta_i64(conn: &Connection, key: &str) -> i64 {
+    meta_get(conn, key).and_then(|v| v.parse().ok()).unwrap_or(0)
+}
+
+pub(crate) fn meta_set(conn: &Connection, key: &str, value: &str) -> Result<()> {
+    conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)", [key, value])?;
+    Ok(())
+}
+
+pub(crate) fn meta_del(conn: &Connection, key: &str) -> Result<()> {
+    conn.execute("DELETE FROM meta WHERE key = ?1", [key])?;
+    Ok(())
+}
+
+/// The live day moments (episodes and insights): the History, recall by day and the notes files.
+pub(crate) const LIVE_HISTORY: &str = "status = 'live' AND kind IN ('episode', 'insight')";
+/// The kinds a day moment can be.
+pub(crate) const HISTORY_KINDS: [&str; 2] = ["episode", "insight"];
 
 pub(crate) const COLS: &str = "id, kind, subject, predicate, qualifier, value, text, importance, \
      authority, status, valid_from, observed_at, superseded_by";
@@ -102,7 +145,7 @@ pub(crate) struct Row {
 }
 
 impl Row {
-    fn read(r: &rusqlite::Row) -> rusqlite::Result<Row> {
+    pub(crate) fn read(r: &rusqlite::Row) -> rusqlite::Result<Row> {
         Ok(Row {
             id: r.get(0)?,
             kind: r.get(1)?,

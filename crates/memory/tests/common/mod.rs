@@ -115,3 +115,19 @@ pub fn city(s: &Store, value: &str, authority: u8, now: &Now) -> i64 {
         id
     }
 }
+
+/// A live episode observed on `day`, stored through the extractor as in real use.
+pub fn episode(s: &Store, day: Date, text: &str, importance: i64) -> i64 {
+    let it = with(item("episode", None, None, text), "importance", json!(importance));
+    extract(s, "x", vec![it], &now_on(day)).items[0].outcome.id().unwrap()
+}
+
+/// `meta.<key>` read straight from the file.
+pub fn meta(dir: &Path, key: &str) -> Option<String> {
+    db(dir).query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get(0)).ok()
+}
+
+/// A `Now` on `day` at `hh:mm:ss` local (+07:00).
+pub fn now_at(day: Date, hms: &str) -> Now {
+    Now::new(day, format!("{day}T{hms}+07:00"))
+}

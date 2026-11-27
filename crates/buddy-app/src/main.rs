@@ -300,6 +300,7 @@ fn main() {
             persona::persona_open_studio,
             persona::persona_close,
             memory::window::memory_state,
+            memory::window::memory_history,
             memory::window::memory_add,
             memory::window::memory_edit,
             memory::window::memory_forget,

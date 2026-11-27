@@ -152,7 +152,7 @@ fn a_guess_disputes_a_stated_fact_and_the_person_resolves_it() {
     let Outcome::Disputed(d) = out else { panic!("{out:?}") };
 
     let v = s.view(date(2026, 11, 27));
-    assert_eq!(v["counts"], json!({"live": 1, "disputes": 1, "hidden": 0}));
+    assert_eq!(v["counts"], json!({"live": 1, "disputes": 1, "hidden": 0, "days": 0}));
     assert_eq!(v["disputes"][0]["id"], d);
     assert_eq!(v["disputes"][0]["live"], json!({"id": hanoi, "value": "Hanoi", "source": "chat"}));
     assert_eq!(v["groups"]["about"][0]["disputed"], true);
@@ -231,4 +231,16 @@ fn the_bear_remember_is_authority_2() {
     assert_eq!(row(&tmp.mem(), id).3, 2);
     // A known key sets the kind from the registry.
     assert_eq!(s.list(Some("preference")).unwrap()[0].id, id);
+}
+
+#[test]
+fn an_episode_dedupes_within_its_day_only() {
+    let (tmp, s) = store();
+    let mon = now_on(date(2026, 11, 23));
+    let Outcome::Created(a) = note(&s, "episode", "Went to the gym", &mon) else { panic!() };
+    assert_eq!(note(&s, "episode", "went to the GYM", &mon), Outcome::Extended(a), "same day: one moment");
+    // the same words on Wednesday are Wednesday's moment; Monday's stays on Monday
+    let wed = now_on(date(2026, 11, 25));
+    assert!(matches!(note(&s, "episode", "Went to the gym", &wed), Outcome::Created(b) if b != a));
+    assert_eq!(count(&tmp.mem(), &format!("SELECT count(*) FROM facts WHERE id = {a} AND observed_at LIKE '2026-11-23%'")), 1);
 }

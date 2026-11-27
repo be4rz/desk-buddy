@@ -9,6 +9,7 @@
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "allow-memory-state",
+    "allow-memory-history",
     "allow-memory-add",
     "allow-memory-edit",
     "allow-memory-forget",

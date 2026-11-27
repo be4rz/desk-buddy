@@ -2,7 +2,8 @@
 
 use crate::files::DB;
 use crate::reconcile::{delete_disputes, insert, reconcile};
-use crate::schema::{self, Row, BEST_FIRST, VERSION};
+use crate::render::CORE_KINDS;
+use crate::schema::{self, BEST_FIRST, VERSION};
 use crate::secret::looks_secret;
 use crate::validate::{self, clean, fold, quote_ok, Item, Raw, TEXT_MAX, VALUE_MAX};
 use crate::{predicates, render, view, Applied, Error, Fact, Now, Outcome, RememberIn, Result};
@@ -19,7 +20,8 @@ const MAX_ITEMS: usize = 20;
 /// A pending turn the extractor keeps failing on is dropped after this many tries or days (C5).
 const MAX_TRIES: i64 = 3;
 const MAX_PENDING_DAYS: i32 = 7;
-const SEARCH_MAX: u32 = 20;
+/// `meta` key: the importance of everything stored since the last reflection run.
+pub(crate) const REFLECT_IMPORTANCE: &str = "importance_since_reflection";
 
 /// The memory store. `Send + Sync`: share it as `Arc<Store>`.
 pub struct Store {
@@ -62,13 +64,13 @@ impl Store {
         self.newer
     }
 
-    fn lock(&self) -> MutexGuard<'_, Connection> {
+    pub(crate) fn lock(&self) -> MutexGuard<'_, Connection> {
         self.conn.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Runs a write. Afterwards the core section is compared with the last one, so `core_rev` moves
     /// exactly when what the prompt carries changed (a profile, preference or promise row, or a dispute).
-    fn write<T>(&self, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
+    pub(crate) fn write<T>(&self, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
         let out = self.write_quiet(f);
         if let Ok(now) = render::section(&self.lock()) {
             let mut rev = self.rev.lock().unwrap_or_else(|e| e.into_inner());
@@ -80,7 +82,7 @@ impl Store {
     }
 
     /// A write that can't change the section (the pending queue, meta).
-    fn write_quiet<T>(&self, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
+    pub(crate) fn write_quiet<T>(&self, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
         if self.newer {
             return Err(Error::Newer);
         }
@@ -138,13 +140,14 @@ impl Store {
             .collect();
         Some(json!({
             "turns": turns, "known": known, "registry": predicates::registry_json(),
-            "today": today.to_string(), "episodes": false,
+            "today": today.to_string(), "episodes": true,
         }))
     }
 
     /// Validates and reconciles a memory.extract reply, one transaction per item, then clears the
     /// pending turns of `args` and the reply's `missing` ones. Quotes are checked against
-    /// `reply.turns[].said` (authority 3 if the person really said it, else 1). Episodes are skipped (C6).
+    /// `reply.turns[].said` (authority 3 if the person really said it, else 1). Each created or extended
+    /// item adds its importance to `meta.importance_since_reflection`, in the item's transaction.
     pub fn apply_extract(&self, args: &Value, reply: &Value, now: &Now) -> Result<Applied> {
         let items = reply.get("items").and_then(Value::as_array).ok_or_else(|| Error::Usage("reply has no items".into()))?;
         let asked: Vec<&str> = strings(args.get("turns"), "requestId");
@@ -166,7 +169,15 @@ impl Store {
                     Outcome::Skipped("limit")
                 } else {
                     match item(v, turn, turn.and_then(|t| said.get(t).copied()), now.today) {
-                        Ok(it) => in_tx(c, |tx| reconcile(tx, &it, now))?,
+                        Ok(it) => in_tx(c, |tx| {
+                            let outcome = reconcile(tx, &it, now)?;
+                            if matches!(outcome, Outcome::Created(_) | Outcome::Extended(_)) {
+                                // what happened since the last reflection run (its trigger)
+                                let sum = schema::meta_i64(tx, REFLECT_IMPORTANCE) + it.importance;
+                                schema::meta_set(tx, REFLECT_IMPORTANCE, &sum.to_string())?;
+                            }
+                            Ok(outcome)
+                        })?,
                         Err(why) => Outcome::Skipped(why),
                     }
                 };
@@ -175,7 +186,7 @@ impl Store {
             for id in clear {
                 out.cleared += c.execute("DELETE FROM pending_turns WHERE request_id = ?1", [id])?;
             }
-            c.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('last_extract_at', ?1)", [&now.at])?;
+            schema::meta_set(c, "last_extract_at", &now.at)?;
             Ok(out)
         })
     }
@@ -233,7 +244,7 @@ impl Store {
             importance: op.importance.map_or(5, i64::from),
             valid_from: op.from.as_deref(),
         };
-        let mut it = match validate::check(&raw, now.today) {
+        let mut it = match validate::check(&raw, now.today, false) {
             Ok(it) => it,
             Err("episode") => return Ok(Outcome::Skipped("episode")),
             Err("secret") => return Err(Error::Secret),
@@ -246,7 +257,7 @@ impl Store {
     /// Soft forget (status `forgotten`) by id, or every live row of a key (`pred` or `pred:qual`,
     /// or `key` with `qualifier`). Returns the ids; none found is `Error::NotFound`.
     pub fn forget(&self, id: Option<i64>, key: Option<&str>, qualifier: Option<&str>) -> Result<Vec<i64>> {
-        self.write(|c| {
+        let ids = self.write(|c| {
             in_tx(c, |tx| {
                 let ids: Vec<i64> = match (id, key) {
                     (Some(id), _) => schema::get(tx, id)?.filter(|r| r.status == "live" || r.status == "disputed").map(|r| vec![r.id]).unwrap_or_default(),
@@ -272,38 +283,26 @@ impl Store {
                 }
                 Ok(ids)
             })
-        })
+        })?;
+        self.refresh_notes();
+        Ok(ids)
     }
 
-    /// Live rows, best first (importance, then newest), optionally of one kind.
+    /// Live rows, best first (importance, then newest), of one kind, or with none the core facts only
+    /// (profile, preference, promise): day moments grow by the week and are read by day (`recall_span`)
+    /// or by word (`search`), so `--kind episode|insight` asks for them by name.
     pub fn list(&self, kind: Option<&str>) -> Result<Vec<Fact>> {
         if let Some(k) = kind {
             if !validate::KINDS.contains(&k) {
                 return Err(Error::Usage("unknown kind".into()));
             }
         }
-        let rows = schema::query(&self.lock(), &format!("WHERE status = 'live' AND (?1 IS NULL OR kind = ?1) {BEST_FIRST}"), [kind])?;
+        let rows = schema::query(
+            &self.lock(),
+            &format!("WHERE status = 'live' AND (kind = ?1 OR (?1 IS NULL AND {CORE_KINDS})) {BEST_FIRST}"),
+            [kind],
+        )?;
         Ok(rows.iter().map(Fact::from).collect())
-    }
-
-    /// Live rows whose text, value or key contain the words (case-insensitive, accents kept).
-    /// Best first: most words matched, then importance, then newest. `limit` is 1..=20.
-    pub fn search(&self, q: &str, limit: u32) -> Result<Vec<Fact>> {
-        let words: Vec<String> = fold(q).split(' ').filter(|w| !w.is_empty()).map(str::to_string).collect();
-        if words.is_empty() {
-            return Err(Error::Usage("an empty query".into()));
-        }
-        let rows = schema::query(&self.lock(), &format!("WHERE status = 'live' {BEST_FIRST}"), [])?;
-        let mut hits: Vec<(usize, &Row)> = rows
-            .iter()
-            .map(|r| {
-                let hay = fold(&format!("{} {} {}", r.text, r.value.as_deref().unwrap_or(""), r.key().unwrap_or_default()));
-                (words.iter().filter(|w| hay.contains(w.as_str())).count(), r)
-            })
-            .filter(|(n, _)| *n > 0)
-            .collect();
-        hits.sort_by_key(|(n, _)| std::cmp::Reverse(*n)); // stable: keeps best-first inside a tie
-        Ok(hits.into_iter().take(limit.clamp(1, SEARCH_MAX) as usize).map(|(_, r)| Fact::from(r)).collect())
     }
 
     // ---- reading for the prompt, the file and the window ----
@@ -326,6 +325,12 @@ impl Store {
     /// The window's `memory_state` (I6) without `enabled` and `error`.
     pub fn view(&self, today: Date) -> Value {
         view::view(&self.lock(), today).unwrap_or_else(|_| view::empty(today))
+    }
+
+    /// The 14 newest days with live episodes or insights strictly before `before` (the window's
+    /// `memory_history`), newest first as in `view`'s `history`, and whether older days remain.
+    pub fn history(&self, before: Date) -> Result<(Vec<Value>, bool)> {
+        view::history(&self.lock(), Some(before))
     }
 
     // ---- the window (authority 4) ----
@@ -365,7 +370,10 @@ impl Store {
         }
         self.write(|c| {
             in_tx(c, |tx| {
-                let old = schema::get(tx, id)?.filter(|r| r.status == "live").ok_or(Error::NotFound)?;
+                // Day moments are the bear's own notes of a day: forget one, never rewrite it.
+                let old = schema::get(tx, id)?
+                    .filter(|r| r.status == "live" && !schema::HISTORY_KINDS.contains(&r.kind.as_str()))
+                    .ok_or(Error::NotFound)?;
                 let pred = old.predicate.as_deref().and_then(predicates::get);
                 let new_value = if pred.is_some() { value.or_else(|| old.value.clone()) } else { None };
                 let same = new_value.as_deref().map(fold) == old.value.as_deref().map(fold);
@@ -408,7 +416,9 @@ impl Store {
                 schema::get(tx, id)?.filter(|r| r.status == "live" || r.status == "disputed").ok_or(Error::NotFound)?;
                 soft_forget_row(tx, id)
             })
-        })
+        })?;
+        self.refresh_notes();
+        Ok(())
     }
 
     /// Hard erase: the row and its whole `superseded_by` chain, both directions (every earlier value
@@ -442,12 +452,16 @@ impl Store {
                 for (p, q) in slots {
                     drop_orphan_disputes(tx, &p, q.as_deref(), true)?;
                 }
+                // The index keeps a deletion marker made of the erased words until its segments merge:
+                // rebuilding it from the surviving rows leaves none, and secure_delete zeroes the old pages.
+                tx.execute("INSERT INTO facts_fts(facts_fts) VALUES ('rebuild')", [])?;
                 Ok(())
             })
         })?;
         // the erased rows' pages are zeroed in the WAL; move them into the main file and empty the WAL,
         // so no copy of the text stays on disk after the window says it's gone
         self.lock().query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        self.refresh_notes();
         Ok(())
     }
 
@@ -490,7 +504,7 @@ fn check_len(s: &str, max: usize) -> Result<()> {
     }
 }
 
-fn in_tx<T>(c: &mut Connection, f: impl FnOnce(&Transaction) -> Result<T>) -> Result<T> {
+pub(crate) fn in_tx<T>(c: &mut Connection, f: impl FnOnce(&Transaction) -> Result<T>) -> Result<T> {
     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let out = f(&tx)?;
     tx.commit()?;
@@ -516,9 +530,11 @@ fn item(v: &Value, turn: Option<&str>, said: Option<&str>, today: Date) -> std::
     Ok(it)
 }
 
-fn soft_forget_row(tx: &Transaction, id: i64) -> Result<()> {
+pub(crate) fn soft_forget_row(tx: &Transaction, id: i64) -> Result<()> {
     let r = schema::get(tx, id)?.ok_or(Error::NotFound)?;
     tx.execute("UPDATE facts SET status = 'forgotten' WHERE id = ?1", [id])?;
+    // a forgotten episode no longer backs an insight (the insight itself stays)
+    tx.execute("DELETE FROM insight_sources WHERE episode_id = ?1", [id])?;
     if let Some(p) = r.predicate {
         drop_orphan_disputes(tx, &p, r.qualifier.as_deref(), false)?;
     }

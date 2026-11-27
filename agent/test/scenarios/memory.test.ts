@@ -188,3 +188,127 @@ test("set_memory: Init.memory is in the first request; the next one carries the 
   expect(last).not.toContain("Hanoi");
   await d.shutdown();
 }, 60000);
+
+// ---- p2: recall on the message, and memory.reflect ----
+
+const RECALL = ["2026-11-26: Stressed about Friday's talk at the meetup; practised the intro twice with the bear"];
+const SAID = "I'm nervous about speaking tomorrow, any tips?";
+const userTexts = (b: { messages: Msg[] }) => b.messages.filter((m) => m.role === "user").map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)));
+
+test("prompt.recall: the content carries the block after the person's words; the entry's said is their words alone", async () => {
+  fake.setScript([{ match: /./, reply: { text: "Breathe, and practise the intro once more." } }]);
+  const d = new Driver({ fakeUrl: fake.url });
+  expect((await d.start()).t).toBe("ready");
+  const since = fake.requests().length;
+  const id = `u:${crypto.randomUUID()}`;
+  expect((await d.send("prompt", { requestId: id, text: SAID, source: "chat", recall: RECALL })).ok).toBe(true);
+  await d.waitRunEnd(0, 20000);
+  const block = `${SAID}\n\n[Notes from earlier chats that may matter. Use them only if they help;\ndon't mention them otherwise.]\n- ${RECALL[0]}`;
+  expect(userTexts(bodies(since).at(-1)!).at(-1)).toBe(block);
+  const input = d.entries().find((e) => e.kind === "buddy.input" && e.data?.requestId === id)!;
+  expect(input.data).toEqual({ requestId: id, source: "chat", said: SAID });
+  // The extractor reads `said`, never the block.
+  fake.setScript([{ match: "Known facts:", reply: items() }, { match: /./, reply: { text: "ok" } }]);
+  const s2 = fake.requests().length;
+  expect((await d.send("memory.extract", args([id], { episodes: true }))).result.turns).toEqual([{ requestId: id, said: SAID }]);
+  const sent = flat(extractRequests(s2)[0]);
+  expect(sent).toContain("nervous about speaking tomorrow");
+  expect(sent).not.toContain("Notes from earlier chats");
+  expect(sent).not.toContain("practised the intro");
+
+  // No recall: the content is the text, and said is still set.
+  const s3 = fake.requests().length;
+  const n = d.records.length;
+  const id2 = `u:${crypto.randomUUID()}`;
+  await d.prompt("hello again", id2);
+  await d.waitRunEnd(n, 20000);
+  expect(userTexts(bodies(s3).at(-1)!).at(-1)).toBe("hello again");
+  expect(d.entries().find((e) => e.kind === "buddy.input" && e.data?.requestId === id2)!.data.said).toBe("hello again");
+  await d.shutdown();
+}, 60000);
+
+test("prompt.recall: over 3 lines, over 600 chars, a malformed line or a non-list is bad_request, and nothing is submitted", async () => {
+  fake.setScript([{ match: /./, reply: { text: "ok" } }]);
+  const d = new Driver({ fakeUrl: fake.url });
+  expect((await d.start()).t).toBe("ready");
+  const since = fake.requests().length;
+  const bad = async (recall: unknown) => {
+    const id = `u:${crypto.randomUUID()}`;
+    expect(await d.send("prompt", { requestId: id, text: "hi", source: "chat", recall })).toMatchObject({ ok: false, error: { code: "bad_request" } });
+    expect(d.entries().some((e) => e.data?.requestId === id)).toBe(false);
+  };
+  await bad(["2026-11-26: a", "2026-11-25: b", "2026-11-24: c", "2026-11-23: d"]);
+  await bad([`2026-11-26: ${"x".repeat(600)}`]);
+  await bad(["yesterday: we talked"]);
+  await bad(["2026-11-26: two\nlines"]);
+  await bad("2026-11-26: not a list");
+  await bad([7]);
+  expect(bodies(since)).toHaveLength(0);
+  // Exactly 600 chars over three lines is fine.
+  const ok = ["2026-11-26: " + "a".repeat(188), "2026-11-25: " + "b".repeat(188), "2026-11-24: " + "c".repeat(188)];
+  expect(ok.join("").length).toBe(600);
+  expect((await d.send("prompt", { requestId: `u:${crypto.randomUUID()}`, text: "hi", source: "chat", recall: ok })).ok).toBe(true);
+  await d.waitRunEnd(0, 20000);
+  await d.shutdown();
+}, 40000);
+
+const EPISODES = [
+  { id: 101, day: "2026-11-24", text: "Worked until 23:00 on the upload service", importance: 5 },
+  { id: 102, day: "2026-11-25", text: "Skipped lunch to finish the release notes", importance: 4 },
+  { id: 104, day: "2026-11-26", text: "Worked late again and skipped lunch", importance: 5 },
+];
+const reflectArgs = (extra: Record<string, unknown> = {}) => ({
+  episodes: EPISODES,
+  known: [{ id: 12, kind: "profile", predicate: "home_city", qualifier: null, value: "Hanoi", text: "Lives in Hanoi" }],
+  registry: REGISTRY,
+  today: "2026-11-27",
+  ...extra,
+});
+const reflectRequests = (since: number) => bodies(since).filter((b) => system(b).includes("You tidy the long-term memory"));
+
+test("memory.reflect: one direct call sees the episodes with ids and the facts on record; the ack is shaped; the chat is untouched", async () => {
+  const answer = {
+    updates: [{ kind: "profile", predicate: "job", qualifier: null, value: "engineer", text: "Works as an engineer", importance: 6, valid_from: null }],
+    insights: [{ text: "Crunch week: worked late three nights and skipped lunch twice", importance: 6, sources: [101, 102, "104"] }, { text: "" }],
+    merges: [{ keep: 101, drop: [104] }, { keep: 3, drop: [] }],
+  };
+  fake.setScript([{ match: "Facts on record:", reply: { text: `Sure:\n\`\`\`json\n${JSON.stringify(answer)}\n\`\`\`` } }, { match: /./, reply: { text: "ok" } }]);
+  const { d } = await chatted("hello");
+  const before = JSON.stringify(await d.snapshot());
+  const since = fake.requests().length;
+  const ack = await d.send("memory.reflect", reflectArgs());
+  expect(ack.ok).toBe(true);
+  expect(ack.result).toEqual({
+    updates: [{ kind: "profile", predicate: "job", qualifier: null, value: "engineer", text: "Works as an engineer", importance: 6, validFrom: null }],
+    insights: [{ text: "Crunch week: worked late three nights and skipped lunch twice", importance: 6, sources: [101, 102, 104] }],
+    merges: [{ keep: 101, drop: [104] }],
+  });
+  const reqs = reflectRequests(since);
+  expect(reqs).toHaveLength(1);
+  const sent = flat(reqs[0]);
+  expect(sent).toContain("#101 2026-11-24");
+  expect(sent).toContain("Skipped lunch to finish the release notes");
+  expect(sent).toContain("#12 profile home_city: Hanoi");
+  expect(system(reqs[0])).not.toContain("desk-buddy");
+  expect(reqs[0].messages.filter((m) => m.role === "user")).toHaveLength(1);
+  expect(JSON.stringify(await d.snapshot())).toBe(before);
+  await d.shutdown();
+}, 40000);
+
+test("memory.reflect: an empty answer is empty lists; no JSON is bad_output; arguments are checked; no model is no_provider", async () => {
+  fake.setScript([{ match: "Facts on record:", reply: { text: '{"updates": [], "insights": [], "merges": []}' } }, { match: /./, reply: { text: "ok" } }]);
+  const { d } = await chatted("hello");
+  expect((await d.send("memory.reflect", reflectArgs())).result).toEqual({ updates: [], insights: [], merges: [] });
+  fake.setScript([{ match: "Facts on record:", reply: { text: "Nothing to tidy today." } }, { match: /./, reply: { text: "ok" } }]);
+  expect(await d.send("memory.reflect", reflectArgs())).toMatchObject({ ok: false, error: { code: "bad_output" } });
+  fake.setScript([{ match: "Facts on record:", reply: { text: '{"items": []}' } }, { match: /./, reply: { text: "ok" } }]);
+  expect(await d.send("memory.reflect", reflectArgs())).toMatchObject({ ok: false, error: { code: "bad_output" } });
+  const refused = async (a: Record<string, unknown>) => expect(await d.send("memory.reflect", a)).toMatchObject({ ok: false, error: { code: "bad_request" } });
+  await refused(reflectArgs({ episodes: [] }));
+  await refused(reflectArgs({ episodes: Array.from({ length: 51 }, (_, i) => ({ id: i + 1, day: "2026-11-26", text: "x", importance: 3 })) }));
+  await refused(reflectArgs({ episodes: [{ id: "x", text: "y" }] }));
+  await refused(reflectArgs({ today: "yesterday" }));
+  expect((await d.send("set_model", { model: null })).ok).toBe(true);
+  expect(await d.send("memory.reflect", reflectArgs())).toMatchObject({ ok: false, error: { code: "no_provider" } });
+  await d.shutdown();
+}, 40000);

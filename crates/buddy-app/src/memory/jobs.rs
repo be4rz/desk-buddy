@@ -5,8 +5,16 @@
 //! failure (`extract_failed`, which drops a turn after 3 tries or 7 days). Then the usual change:
 //! MEMORY.md, the agent's section, the window's state.
 //!
+//! Reflection (p2, supplied § Reflection job): every [`REFLECT_EVERY`] the same thread looks again; a
+//! run starts when memory is on, the person has been away from the keyboard for [`REFLECT_IDLE`] or
+//! more, no turn is busy, the agent runs, and the store says one is due (`reflect_due`: nothing pending,
+//! and enough importance since the last run, or a day and a new episode). It takes the batch
+//! (`reflect_args`), asks the sidecar's `memory.reflect` (one model call, ≤ 125 s) and applies the reply
+//! in one transaction (`apply_reflect`, the 30% guard and retention inside), or marks the run failed.
+//!
 //! Logs: `[buddy] memory extract <n> turns → <m> items`, `[buddy] memory <outcome> <id>`,
-//! `[buddy] memory extract failed (<code>)`, `[buddy] memory drop <request_id>`. Never text.
+//! `[buddy] memory extract failed (<code>)`, `[buddy] memory drop <request_id>`,
+//! `[buddy] memory reflect <batch8> done|failed|rejected (<pct>% changed)`. Never text.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,6 +27,10 @@ pub const TICK: Duration = Duration::from_secs(30);
 pub const BATCH: usize = 10;
 /// The default quiet time after the last chat message.
 pub const IDLE: Duration = Duration::from_secs(300);
+/// How often reflection looks.
+pub const REFLECT_EVERY: Duration = Duration::from_secs(600);
+/// How long the person must have been away from keyboard and mouse before a reflection runs.
+pub const REFLECT_IDLE: Duration = Duration::from_secs(30 * 60);
 
 /// `BUDDY_MEMORY_IDLE_S`, else 300 s.
 pub fn idle() -> Duration {
@@ -38,6 +50,8 @@ pub enum Ran {
     Extracted { turns: usize, items: usize },
     /// The extractor (or applying its reply) failed; these turns were dropped.
     Failed { turns: usize, dropped: Vec<String> },
+    /// A reflection ran: `done`, `failed` or `rejected`, with the share of live rows it changed.
+    Reflected { batch8: String, outcome: &'static str, pct: u32 },
 }
 
 /// One look (the tick's body; tests call it directly with a fake sidecar).
@@ -95,15 +109,95 @@ pub fn run_once(m: &Mem, idle: Duration) -> Ran {
     ran
 }
 
+/// Sidecar error codes that mean the model was never asked, so the batch's try is given back.
+const UNSPENT: [&str; 3] = ["no_provider", "not_running", "exited"];
+
+/// One reflection look (every [`REFLECT_EVERY`]; tests call it directly with a fake sidecar).
+/// `user_idle` is the time since the person's last input.
+pub fn reflect_once(m: &Mem, user_idle: Duration) -> Ran {
+    if !m.enabled() {
+        return Ran::Waiting("off");
+    }
+    if user_idle < REFLECT_IDLE {
+        return Ran::Waiting("person here");
+    }
+    let Some(side) = m.sidecar() else { return Ran::Waiting("no agent") };
+    if !side.running() {
+        return Ran::Waiting("no agent");
+    }
+    if m.busy() {
+        return Ran::Waiting("busy");
+    }
+    let Some((store, gen)) = m.store_gen() else { return Ran::Waiting("no store") };
+    let now = now();
+    if !store.reflect_due(&now) {
+        return Ran::Waiting("not due");
+    }
+    let Some(job) = store.reflect_args(now.today, &now) else { return Ran::Waiting("nothing new") };
+    let batch8: String = job.batch_id.chars().take(8).collect();
+    // one model call of up to two minutes: hold no store meanwhile (Forget everything may replace it)
+    drop(store);
+    let reply = side.reflect(job.args.clone());
+    let Some((store, now_gen)) = m.store_gen() else { return Ran::Waiting("no store") };
+    let now = super::now();
+    if now_gen != gen {
+        // erased meanwhile: the batch is gone with the store
+        return Ran::Waiting("changed");
+    }
+    if !m.enabled() {
+        // switched off while the model ran: drop the reply, and the try with it
+        let _ = store.reflect_unspent(&job, &now);
+        return Ran::Waiting("changed");
+    }
+    let (outcome, pct) = match reply {
+        Err(code) => {
+            eprintln!("[buddy] memory reflect {batch8} failed ({code})");
+            // A reply that never came (signed out, the sidecar stopped or was killed) gives the try back;
+            // one that came and was unusable (bad_output, timeout, model_error) uses it up.
+            if UNSPENT.contains(&code.as_str()) {
+                let _ = store.reflect_unspent(&job, &now);
+            } else {
+                let _ = store.reflect_failed(&job, &now);
+            }
+            ("failed", 0)
+        }
+        Ok(r) => match store.apply_reflect(&job, &r, &now) {
+            Ok(done) => {
+                eprintln!("[buddy] memory reflect {batch8} done ({}% changed)", done.pct);
+                ("done", done.pct)
+            }
+            Err(memory::Error::Rejected { pct }) => {
+                eprintln!("[buddy] memory reflect {batch8} rejected ({pct}% changed)");
+                ("rejected", pct)
+            }
+            Err(e) => {
+                eprintln!("[buddy] memory reflect {batch8} failed ({})", werr(&e));
+                let _ = store.reflect_failed(&job, &now);
+                ("failed", 0)
+            }
+        },
+    };
+    drop(store);
+    m.changed();
+    Ran::Reflected { batch8, outcome, pct }
+}
+
 /// Start the worker (with the harness). It lives as long as the app.
 pub fn start(m: Arc<Mem>) {
     let idle = idle();
     if idle != IDLE {
         eprintln!("[buddy] memory idle {} s", idle.as_secs());
     }
-    let spawned = std::thread::Builder::new().name("buddy-memory".into()).spawn(move || loop {
-        std::thread::sleep(TICK);
-        run_once(&m, idle);
+    let spawned = std::thread::Builder::new().name("buddy-memory".into()).spawn(move || {
+        let mut last_reflect = std::time::Instant::now();
+        loop {
+            std::thread::sleep(TICK);
+            run_once(&m, idle);
+            if last_reflect.elapsed() >= REFLECT_EVERY {
+                last_reflect = std::time::Instant::now();
+                reflect_once(&m, Duration::from_millis(crate::senses::idle::idle_ms()));
+            }
+        }
     });
     if let Err(e) = spawned {
         eprintln!("[buddy] memory worker didn't start: {e}");
