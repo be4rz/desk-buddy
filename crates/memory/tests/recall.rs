@@ -36,6 +36,17 @@ fn an_unrelated_message_recalls_nothing() {
 }
 
 #[test]
+fn a_common_word_alone_does_not_bring_a_note() {
+    let (_t, s) = store();
+    episode(&s, date(2026, 11, 26), "Fixed the flaky upload test at Lanternfish Labs after two days", 6);
+    episode(&s, date(2026, 11, 26), "Tried the new ramen place with Lan", 5);
+    for msg in ["I've been feeling tired for two days", "What's a good name for a new project?", "Can I take a break after this?"] {
+        assert!(s.recall(msg, &now()).unwrap().is_empty(), "{msg}");
+    }
+    assert_eq!(s.recall("any ramen spots near the office?", &now()).unwrap().len(), 1, "a topic word still works");
+}
+
+#[test]
 fn a_date_word_returns_that_days_episodes_without_any_keyword() {
     let (_t, s) = fixture();
     let want = ["2026-11-26: Fixed the login bug at Lanternfish Labs", "2026-11-26: Walked to the lake with Lan"];
@@ -297,6 +308,16 @@ fn search_matches_the_start_of_a_word_recall_does_not() {
     assert_eq!(s.search("biscuit", 5).unwrap().len(), 1);
     assert!(s.search("is", 5).unwrap().is_empty(), "two letters stay whole words");
     assert!(s.recall("bisc", &now()).unwrap().is_empty(), "recall stays on whole words");
+}
+
+#[test]
+fn search_finds_a_keyed_value_without_its_accents() {
+    let (t, s) = store();
+    let id = city(&s, "Hà Nội", 3, &now());
+    db(&t.mem()).execute("UPDATE facts SET text = 'Home town noted' WHERE id = ?1", [id]).unwrap(); // only the value says it
+    assert_eq!(s.search("ha noi", 5).unwrap().len(), 1);
+    assert_eq!(s.search("HÀ NỘI", 5).unwrap().len(), 1);
+    assert!(s.search("da nang", 5).unwrap().is_empty());
 }
 
 #[test]

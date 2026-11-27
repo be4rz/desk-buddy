@@ -145,6 +145,29 @@ fn the_quote_is_checked_against_its_own_turn() {
 }
 
 #[test]
+fn a_moment_keeps_the_day_it_was_said_not_the_day_it_was_extracted() {
+    let (_t, s) = store();
+    // Said just before midnight; the extractor runs the next morning (idle wait, sleep, signed out).
+    s.add_pending("u:late", "2026-11-26T23:58:00+07:00").unwrap();
+    let args = s.extract_args(10, now().today).unwrap();
+    let ep = |text: &str| with(item("episode", None, None, text), "turn", json!("u:late"));
+    let reply = json!({
+        "items": [ep("Mochi knocked a cup off the desk"), with(item("preference", None, None, "Likes oat milk"), "turn", json!("u:late"))],
+        "turns": [{"requestId": "u:late", "said": "Mochi knocked a cup off the desk"}],
+        "missing": [],
+    });
+    let r = s.apply_extract(&args, &reply, &now()).unwrap();
+    let at = |id: i64| -> String {
+        db(&_t.mem()).query_row("SELECT observed_at FROM facts WHERE id = ?1", [id], |r| r.get(0)).unwrap()
+    };
+    assert_eq!(at(r.items[0].outcome.id().unwrap()), "2026-11-26T23:58:00+07:00", "the moment is the 26th's");
+    assert_eq!(at(r.items[1].outcome.id().unwrap()), now().at, "a core fact is learned when extracted");
+    let v = s.view(now().today);
+    assert_eq!(v["history"][0]["day"], "2026-11-26");
+    assert_eq!(v["history"].as_array().unwrap().len(), 1);
+}
+
+#[test]
 fn the_quote_check_ignores_unicode_normal_form_and_case() {
     let (_t, s) = store();
     // NFC "Mình ở Hà Nội" vs the same words decomposed (NFD).
@@ -321,13 +344,13 @@ fn an_item_naming_no_known_turn_is_a_guess_with_no_source() {
 }
 
 #[test]
-fn an_episode_must_be_keyless_and_at_least_importance_3() {
+fn an_episode_is_keyless_and_at_least_importance_3() {
     let (t, s) = store();
     let r = extract(
         &s,
         "x",
         vec![
-            item("episode", Some("home_city"), Some("Hanoi"), "Was in Hanoi"),
+            item("episode", Some("home_city"), Some("Hanoi"), "Was in Hanoi"), // kept, keyless
             with(item("episode", None, None, "Minor thing"), "importance", json!(2)),
             with(item("episode", None, None, "Borderline thing"), "importance", json!(3)),
             item("insight", None, None, "A pattern the extractor made up"),
@@ -335,11 +358,12 @@ fn an_episode_must_be_keyless_and_at_least_importance_3() {
         &now(),
     );
     let o: Vec<&Outcome> = r.items.iter().map(|i| &i.outcome).collect();
-    assert_eq!(o[0], &Outcome::Skipped("predicate"));
+    assert!(matches!(o[0], Outcome::Created(_)));
     assert_eq!(o[1], &Outcome::Skipped("low"));
     assert!(matches!(o[2], Outcome::Created(_)));
     assert_eq!(o[3], &Outcome::Skipped("kind"));
-    assert_eq!(count(&t.mem(), "SELECT count(*) FROM facts"), 1);
+    assert_eq!(count(&t.mem(), "SELECT count(*) FROM facts"), 2);
+    assert_eq!(count(&t.mem(), "SELECT count(*) FROM facts WHERE kind = 'episode' AND predicate IS NULL AND value IS NULL"), 2);
     // the bear's command and the window can't make an insight either
     let op = RememberIn { text: "A pattern".into(), kind: Some("insight".into()), ..Default::default() };
     assert!(matches!(s.remember(op, &now()), Ok(Outcome::Skipped(_)) | Err(_)));

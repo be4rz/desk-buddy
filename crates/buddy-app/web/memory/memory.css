@@ -94,7 +94,7 @@ main.body > .bar { margin-top: 0; }
 .switch input:disabled { opacity: .55; cursor: default; }
 
 /* ---- a group's rows: one fact each; text left, actions right ---- */
-h2.group .n { font: 600 10px var(--mono); color: var(--fur-4); letter-spacing: 0; }
+h2.group .n { font: 600 10px var(--mono); color: var(--fur-5); letter-spacing: 0; } /* 4.5:1 on paper */
 h2.group .add { margin-left: auto; text-transform: none; letter-spacing: 0; color: var(--hat-d); }
 .rows { list-style: none; margin: 0; padding: 0; border: 1px solid var(--fur); border-radius: 9px; background: #fff; }
 .mrow { position: relative; display: flex; gap: 8px; align-items: flex-start; padding: 7px 6px 7px 10px; border-top: 1px solid var(--fur); }

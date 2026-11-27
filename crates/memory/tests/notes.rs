@@ -89,6 +89,15 @@ fn a_file_is_written_only_when_it_changed() {
 }
 
 #[test]
+fn a_temp_note_left_by_a_crash_is_swept() {
+    let (t, s, e, _i) = fixture();
+    let stray = t.mem().join("notes").join("2026-11-25.md.tmp");
+    fs::write(&stray, "a moment the person later forgot").unwrap();
+    s.soft_forget(e[0]).unwrap();
+    assert!(!stray.exists(), "the half-written copy goes too");
+}
+
+#[test]
 fn a_day_with_nothing_live_loses_its_note_and_strangers_are_left_alone() {
     let (t, s, e, _i) = fixture();
     fs::write(t.mem().join("notes").join("README.txt"), "mine").unwrap();

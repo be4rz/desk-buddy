@@ -84,9 +84,6 @@ pub(crate) fn check(raw: &Raw, today: Date, extracted: bool) -> Result<Item, &'s
         _ => {}
     }
     let episode = raw.kind == "episode";
-    if episode && raw.predicate.is_some_and(|p| !p.trim().is_empty()) {
-        return Err("predicate");
-    }
     let text = clean(raw.text);
     if text.is_empty() || text.chars().count() > TEXT_MAX {
         return Err("text");
@@ -109,11 +106,12 @@ pub(crate) fn check(raw: &Raw, today: Date, extracted: bool) -> Result<Item, &'s
         return Err("secret");
     }
 
-    // Unknown predicate → a keyless note. A promise is never keyed. A keyed row needs its value.
+    // Unknown predicate → a keyless note. A promise or a day's moment is never keyed (an episode's
+    // predicate is dropped, not refused: the moment is still worth keeping). A keyed row needs its value.
     let predicate = raw
         .predicate
         .and_then(predicates::get)
-        .filter(|_| raw.kind != "promise" && value.is_some());
+        .filter(|_| raw.kind != "promise" && !episode && value.is_some());
     let qualifier = match predicate.and_then(|p| p.qualifier) {
         Some(_) => raw.qualifier.map(fold).filter(|q| !q.is_empty()),
         None => None,

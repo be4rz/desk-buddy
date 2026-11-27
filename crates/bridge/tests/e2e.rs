@@ -936,7 +936,8 @@ fn a13_a_reflection_killed_midway_is_rerun_as_the_same_batch_and_applied_once() 
     let st: Vec<(String, String)> =
         c.prepare("SELECT batch_id, status FROM reflections").unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().collect::<Result<_, _>>().unwrap();
     assert_eq!(st, vec![(job.batch_id.clone(), "done".to_string())]);
-    // The day's notes file shows the pattern.
+    // The day's notes file shows the pattern, once the caller re-renders (the app's `changed()`).
+    store.write_files().unwrap();
     let notes = std::fs::read_to_string(store.dir().join("notes/2026-11-27.md")).unwrap_or_default();
     assert!(notes.contains("Pattern: Works late in launch weeks (from 2 moments)"), "{notes}");
 }

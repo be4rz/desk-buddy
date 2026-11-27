@@ -30,6 +30,9 @@ pub struct Store {
     newer: bool,
     /// The core-section revision and the text it was last seen as.
     rev: Mutex<(u64, String)>,
+    /// Held while the generated files are read from the store and written, so two threads never share a
+    /// temp file and a render read before a forget never lands after the forget's own render.
+    pub(crate) files: Mutex<()>,
 }
 
 impl Store {
@@ -51,7 +54,7 @@ impl Store {
             schema::migrate(&mut conn)?;
         }
         let first = if newer { String::new() } else { render::section(&conn)? };
-        Ok(Store { conn: Mutex::new(conn), dir: dir.to_path_buf(), newer, rev: Mutex::new((0, first)) })
+        Ok(Store { conn: Mutex::new(conn), dir: dir.to_path_buf(), newer, rev: Mutex::new((0, first)), files: Mutex::new(()) })
     }
 
     pub fn dir(&self) -> &Path {
@@ -162,6 +165,16 @@ impl Store {
         clear.extend(reply.get("missing").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str));
 
         self.write(|c| {
+            // A moment belongs to the day it was said, not the day the extractor ran (a chat at 23:58
+            // extracted after midnight, or turns that waited while signed out, are still that day's).
+            let mut ended: HashMap<String, Now> = HashMap::new();
+            for id in &asked {
+                let at: Option<String> =
+                    c.query_row("SELECT ended_at FROM pending_turns WHERE request_id = ?1", [id], |r| r.get(0)).ok();
+                if let Some(day) = at.as_deref().and_then(|a| a.get(..10)?.parse::<Date>().ok()) {
+                    ended.insert(id.to_string(), Now::new(day, at.unwrap_or_default()));
+                }
+            }
             let mut out = Applied::default();
             for (n, v) in items.iter().enumerate() {
                 let turn = v.get("turn").and_then(Value::as_str).filter(|t| asked.contains(t));
@@ -170,7 +183,11 @@ impl Store {
                 } else {
                     match item(v, turn, turn.and_then(|t| said.get(t).copied()), now.today) {
                         Ok(it) => in_tx(c, |tx| {
-                            let outcome = reconcile(tx, &it, now)?;
+                            let when = match turn.and_then(|t| ended.get(t)) {
+                                Some(t) if it.kind == "episode" && t.today <= now.today => t,
+                                _ => now,
+                            };
+                            let outcome = reconcile(tx, &it, when)?;
                             if matches!(outcome, Outcome::Created(_) | Outcome::Extended(_)) {
                                 // what happened since the last reflection run (its trigger)
                                 let sum = schema::meta_i64(tx, REFLECT_IMPORTANCE) + it.importance;
@@ -458,10 +475,11 @@ impl Store {
                 Ok(())
             })
         })?;
+        // the rows are gone: take the text out of notes/ first, whatever the checkpoint does
+        self.refresh_notes();
         // the erased rows' pages are zeroed in the WAL; move them into the main file and empty the WAL,
         // so no copy of the text stays on disk after the window says it's gone
         self.lock().query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
-        self.refresh_notes();
         Ok(())
     }
 

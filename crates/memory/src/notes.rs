@@ -14,7 +14,8 @@ use std::path::Path;
 fn days(conn: &Connection) -> Result<BTreeMap<String, String>> {
     let mut st = conn.prepare(&format!(
         "SELECT substr(f.observed_at, 1, 10), f.kind, f.text,
-                (SELECT count(*) FROM insight_sources s WHERE s.insight_id = f.id)
+                (SELECT count(*) FROM insight_sources s JOIN facts e ON e.id = s.episode_id AND e.status = 'live'
+                 WHERE s.insight_id = f.id)
          FROM facts f WHERE {LIVE_HISTORY} ORDER BY f.observed_at, f.id"
     ))?;
     let rows = st
@@ -37,14 +38,15 @@ fn days(conn: &Connection) -> Result<BTreeMap<String, String>> {
     Ok(out)
 }
 
-/// `YYYY-MM-DD.md`, the files this module owns.
+/// `YYYY-MM-DD.md`, the files this module owns, and the `YYYY-MM-DD.md.tmp` a crash can leave behind.
 fn is_note(name: &str) -> bool {
-    name.len() == 13 && name.ends_with(".md") && name[..10].parse::<Date>().is_ok()
+    matches!(name.get(10..), Some(".md" | ".md.tmp")) && name[..10].parse::<Date>().is_ok()
 }
 
 impl Store {
     /// Writes the notes whose content changed and deletes those of days with no live episode or insight.
     pub(crate) fn write_notes(&self) -> Result<()> {
+        let _files = self.files.lock().unwrap_or_else(|e| e.into_inner());
         let days = days(&self.lock())?;
         let dir = self.dir().join("notes");
         if days.is_empty() && !dir.is_dir() {
@@ -60,7 +62,8 @@ impl Store {
         for entry in fs::read_dir(&dir)? {
             let entry = entry?;
             let name = entry.file_name().to_string_lossy().into_owned();
-            if is_note(&name) && !days.contains_key(&name[..10]) {
+            // a stray temp file (a crash mid-write) goes whatever its day; no write is in flight here
+            if is_note(&name) && (name.ends_with(".tmp") || !days.contains_key(&name[..10])) {
                 fs::remove_file(entry.path())?;
             }
         }
@@ -78,7 +81,7 @@ impl Store {
     }
 }
 
-fn write_atomic(path: &Path, text: &str) -> Result<()> {
+pub(crate) fn write_atomic(path: &Path, text: &str) -> Result<()> {
     let tmp = path.with_extension("md.tmp");
     fs::write(&tmp, text)?;
     fs::rename(&tmp, path)?;

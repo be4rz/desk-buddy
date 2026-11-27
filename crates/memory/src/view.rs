@@ -95,7 +95,7 @@ fn item(conn: &Connection, r: &Row) -> Result<Value> {
     v["label"] = Value::Null;
     v["disputed"] = json!(false);
     if r.kind == "insight" {
-        let n: i64 = conn.query_row("SELECT count(*) FROM insight_sources WHERE insight_id = ?1", [r.id], |r| r.get(0))?;
+        let n: i64 = conn.query_row("SELECT count(*) FROM insight_sources s JOIN facts e ON e.id = s.episode_id AND e.status = 'live' WHERE s.insight_id = ?1", [r.id], |r| r.get(0))?;
         v["sources"] = json!(n);
     }
     Ok(v)

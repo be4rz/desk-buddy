@@ -110,7 +110,13 @@
     if (s.error) { form = null; menu = null; }
     render();
   }
-  const refresh = () => call("memory_state").then((st) => reloadOlder(st).then(() => apply(st))).catch(() => {});
+  /** A new state, after the older days shown are reloaded for it; a newer state wins over a slower one. */
+  let stateGen = 0;
+  function take(st) {
+    const g = ++stateGen;
+    return reloadOlder(st, g).then(() => { if (g === stateGen) apply(st); });
+  }
+  const refresh = () => call("memory_state").then(take).catch(() => {});
 
   // ---------- render (whole page; focus and the caret are put back) ----------
   function render() {
@@ -301,13 +307,16 @@
     ds.forEach((d, i) => {
       const items = d.items || [];
       const det = el("details", "day");
-      det.open = d.day in dayOpen ? dayOpen[d.day] : i === 0;
+      const want = d.day in dayOpen ? dayOpen[d.day] : i === 0;
+      det.open = want;
       const sum = el("summary");
       sum.dataset.k = "day:" + d.day;
       const lab = dayLabel(d.day);
       sum.append(txt(lab.name + " "), el("small", null, lab.date ? lab.date + " · " + items.length : String(items.length)));
       det.append(sum);
-      det.addEventListener("toggle", () => { dayOpen[d.day] = det.open; });
+      // only the person's own toggles are kept (setting `open` above fires one too), so the newest day
+      // starts open and yesterday's closes again when a newer day arrives
+      det.addEventListener("toggle", () => { if (det.open !== want || d.day in dayOpen) dayOpen[d.day] = det.open; });
       const ul = el("ul", "rows");
       items.forEach((r, j) => ul.append(row(r, "history", items[j + 1] || items[j - 1], d.day)));
       det.append(ul);
@@ -330,7 +339,9 @@
     status = { kind: "idle" };
     restore = ["hist-more"];
     render();
+    const g = stateGen;
     call("memory_history", { before: ds[ds.length - 1].day }).then((r) => {
+      if (g !== stateGen) { older.busy = false; render(); return; } // the list changed meanwhile: ask again
       older = { days: older.days.concat((r && r.days) || []), more: !!(r && r.more), busy: false };
       // the first newly shown day takes focus, so the list reads on from where it was
       const first = r && r.days && r.days[0];
@@ -344,7 +355,7 @@
     });
   }
   /** After a change: reload the older days already shown (a Forget there must leave the page too). */
-  function reloadOlder(st) {
+  function reloadOlder(st, g) {
     if (!older.days.length) return Promise.resolve();
     const want = older.days.length;
     const own = (st && st.history) || [];
@@ -357,7 +368,11 @@
       more = !!(r && r.more);
       if (more && ds.length && got.length < want) return page(ds[ds.length - 1].day);
     });
-    return page(own[own.length - 1].day).then(() => { older = { days: got, more, busy: false }; }).catch(() => {});
+    // on failure the older days go (a forgotten moment must not stay on screen); Show older days brings them back
+    const set = (v) => { if (g === stateGen) older = v; };
+    return page(own[own.length - 1].day)
+      .then(() => set({ days: got, more, busy: false }))
+      .catch(() => set({ days: [], more: false, busy: false }));
   }
 
   // ---------- the row menu ----------
@@ -671,7 +686,11 @@
     else if (!s.enabled) { ok = true; text = "Memory is off."; }
     else {
       const c = s.counts || { live: 0, disputes: 0 };
-      text = c.live || c.disputes ? plural(c.live, "thing") + (c.days ? " · " + plural(c.days, "day") : "") + (c.disputes ? " · " + c.disputes + " to answer" : "") : "";
+      const parts = [];
+      if (c.live) parts.push(plural(c.live, "thing"));
+      if (c.days) parts.push(plural(c.days, "day"));
+      if (c.disputes) parts.push(c.disputes + " to answer");
+      text = parts.join(" · ");
     }
     bar.className = "bar" + cls;
     stat.className = "status" + (ok ? " ok" : "");
@@ -699,6 +718,6 @@
   });
   NARROW.addEventListener("change", () => { if (s) render(); });
 
-  T.event.listen("memory://state", (e) => { const st = e.payload; reloadOlder(st).then(() => apply(st)); });
+  T.event.listen("memory://state", (e) => { take(e.payload); });
   call("memory_state").then((st) => { if (st && !s) apply(st); }).catch(() => {});
 })();

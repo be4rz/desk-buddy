@@ -109,8 +109,9 @@ pub fn run_once(m: &Mem, idle: Duration) -> Ran {
     ran
 }
 
-/// Sidecar error codes that mean the model was never asked, so the batch's try is given back.
-const UNSPENT: [&str; 3] = ["no_provider", "not_running", "exited"];
+/// Sidecar error codes that mean the model was never asked, so the batch's try is given back (a sidecar
+/// killed mid-call reaches the job as `not_running`).
+const UNSPENT: [&str; 2] = ["no_provider", "not_running"];
 
 /// One reflection look (every [`REFLECT_EVERY`]; tests call it directly with a fake sidecar).
 /// `user_idle` is the time since the person's last input.
@@ -152,8 +153,9 @@ pub fn reflect_once(m: &Mem, user_idle: Duration) -> Ran {
     let (outcome, pct) = match reply {
         Err(code) => {
             eprintln!("[buddy] memory reflect {batch8} failed ({code})");
-            // A reply that never came (signed out, the sidecar stopped or was killed) gives the try back;
-            // one that came and was unusable (bad_output, timeout, model_error) uses it up.
+            // A call the model never saw (signed out, the sidecar stopped or was killed) gives the try back;
+            // one that reached it and failed (`agent_error`: bad output, a model timeout or error; or the
+            // bridge's own `timeout`) uses it up.
             if UNSPENT.contains(&code.as_str()) {
                 let _ = store.reflect_unspent(&job, &now);
             } else {

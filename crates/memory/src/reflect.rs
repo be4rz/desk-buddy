@@ -147,7 +147,7 @@ impl Store {
     /// `reconcile` at authority 1 (episodes and insights refused); `insights` (at most 3) cite episodes of
     /// this batch; `merges` fold keyless rows of one kind into one. A reply that changes more than [`GUARD`]
     /// of the live rows is `Err(Error::Rejected)`: nothing is applied and the run is `failed`. Otherwise
-    /// retention runs, the counters reset and the run is `done`; the generated files are then re-rendered.
+    /// retention runs, the counters reset and the run is `done`; the caller then re-renders the generated files.
     /// Applying a batch that is already `done` does nothing. A reply that is not an object marks the run
     /// `failed` and is `Err(Error::Usage)`.
     pub fn apply_reflect(&self, job: &ReflectJob, reply: &Value, now: &Now) -> Result<Reflected> {
@@ -190,14 +190,9 @@ impl Store {
             tx.commit()?;
             Ok(Ok(done.out))
         })?;
-        match out {
-            Ok(done) => {
-                // The data is committed; the files are derived and the app re-renders them on its next change.
-                let _ = self.write_files();
-                Ok(done)
-            }
-            Err(pct) => Err(Error::Rejected { pct }),
-        }
+        // The data is committed; MEMORY.md and notes/ are derived: the caller re-renders them (the app's
+        // `changed()` after every run), so they are not written twice.
+        out.map_err(|pct| Error::Rejected { pct })
     }
 
     /// The model's reply was unusable (bad JSON, an apply error): the run is `failed`, nothing is applied.
@@ -206,9 +201,10 @@ impl Store {
         self.write_quiet(|c| mark(c, &job.batch_id, "failed", now))
     }
 
-    /// The run never got a reply to judge (no account, a timeout, the sidecar died or restarted, memory
-    /// switched off meanwhile): `failed` like [`Store::reflect_failed`], but the try is given back, so a
-    /// flaky network or a quit never uses up a batch.
+    /// The model was never asked (no account, the sidecar not running or killed mid-call, memory switched
+    /// off meanwhile): `failed` like [`Store::reflect_failed`], but the try is given back, so a signed-out
+    /// week or a quit never uses up a batch. A call that reached the model and timed out or errored
+    /// (`agent_error`, `timeout`) still uses one.
     pub fn reflect_unspent(&self, job: &ReflectJob, now: &Now) -> Result<()> {
         self.write_quiet(|c| {
             in_tx(c, |tx| {
@@ -264,7 +260,7 @@ fn array<'a>(reply: &'a Value, key: &str) -> &'a [Value] {
 fn apply(tx: &Transaction, batch: &[i64], reply: &Value, now: &Now) -> Result<Done> {
     let mut out = Reflected::default();
     let mut changed = 0;
-    let today = now.at.get(..10).unwrap_or_default().to_string();
+    let today = now.today.to_string();
 
     for v in array(reply, "updates").iter().take(MAX_UPDATES) {
         let kind = v.get("kind").and_then(Value::as_str);
@@ -337,7 +333,9 @@ fn apply(tx: &Transaction, batch: &[i64], reply: &Value, now: &Now) -> Result<Do
         let ok = |r: &schema::Row| r.status == "live" && r.predicate.is_none() && r.kind == kept.kind;
         // Reflection never overrides what the person said: only the bear's and the extractor's rows
         // (authority 1-2) can be dropped into another.
-        let droppable = |r: &schema::Row| ok(r) && r.authority <= 2;
+        // and a day's moment stays on its day: episodes merge only with the same day's.
+        let day = |r: &schema::Row| r.observed_at.get(..10).map(str::to_string);
+        let droppable = |r: &schema::Row| ok(r) && r.authority <= 2 && (r.kind != "episode" || day(r) == day(&kept));
         if !ok(&kept) || !rows.iter().all(|r| r.as_ref().is_some_and(droppable)) {
             continue;
         }

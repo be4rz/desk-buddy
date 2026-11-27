@@ -50,8 +50,9 @@ save every fact yourself.
 - "Not sure yet" lists a guess that differs from what the person told you. Ask once, when it fits. When they answer,
   `buddy memory remember` the right value with its `--key` (or `buddy memory forget <id>` the wrong one).
 - A promise with a time is a reminder: use `buddy remind`, not memory.
-- `buddy memory list` (the facts you know; `--kind episode|insight` for day moments) and
-  `buddy memory search "<words>"` (`--json` for ids) before asking the person something you may already know.
+- `buddy memory list` (the facts you know) and `buddy memory search "<words>"` (`--json` for ids) before asking the
+  person something you may already know. For day moments use `search` or `recall` below, not
+  `list --kind episode|insight` (that lists every one).
 - `buddy memory recall <YYYY-MM-DD|today|yesterday|last-week>` when the person asks what happened or what you talked
   about on a day ("What did we talk about yesterday?"): that day's moments and patterns, in order. A chat message
   may already carry a few notes from earlier chats after the person's words; use them only if they help, and never

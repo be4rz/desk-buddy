@@ -1,5 +1,6 @@
 //! The generated `MEMORY.md`, and erasing everything.
 
+use crate::notes::write_atomic;
 use crate::{Error, Result, Store};
 use std::fs;
 use std::io::ErrorKind;
@@ -16,12 +17,12 @@ impl Store {
         if self.is_newer() {
             return Err(Error::Newer);
         }
-        let section = self.section();
-        let body = if section.is_empty() { EMPTY } else { section.as_str() };
-        let path = self.dir().join("MEMORY.md");
-        let tmp = self.dir().join("MEMORY.md.tmp");
-        fs::write(&tmp, format!("{HEADER}\n\n{body}\n"))?;
-        fs::rename(&tmp, path)?;
+        {
+            let _files = self.files.lock().unwrap_or_else(|e| e.into_inner());
+            let section = self.section();
+            let body = if section.is_empty() { EMPTY } else { section.as_str() };
+            write_atomic(&self.dir().join("MEMORY.md"), &format!("{HEADER}\n\n{body}\n"))?;
+        }
         self.write_notes()
     }
 

@@ -292,12 +292,16 @@ fn merges_follow_the_rules() {
     for id in [core[0], core[2], core[3], core[4], core[5], core[6], core[7], core[9], city] {
         assert_eq!(row(&t.mem(), id).0, "live", "{id}");
     }
-    // two episodes may merge into one: they leave History
-    let (_t, s, _core, eps) = fixture();
+    // two moments of one day may merge into one; another day's moment stays on its day
+    let (t, s, _core, eps) = fixture();
+    let twin = episode(&s, date(2026, 11, 24), "Stayed late again to ship the release", 5);
     let j = job(&s);
-    let r = s.apply_reflect(&j, &json!({"merges": [{"keep": eps[1], "drop": [eps[0]]}]}), &now()).unwrap();
+    let reply = json!({"merges": [{"keep": eps[1], "drop": [eps[0]]}, {"keep": eps[0], "drop": [twin]}]});
+    let r = s.apply_reflect(&j, &reply, &now()).unwrap();
     assert_eq!(r.merges, 1);
     assert_eq!(r.days, ["2026-11-24"]);
+    assert_eq!(row(&t.mem(), twin).0, "superseded");
+    assert_eq!(row(&t.mem(), eps[1]).0, "live");
 }
 
 #[test]

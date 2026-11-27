@@ -32,7 +32,13 @@ const STOPWORDS: &[&str] = &[
     "what", "did", "we", "talk", "about", "the", "a", "an", "and", "or", "to", "of", "in", "on", "for", "is", "are",
     "was", "were", "i", "you", "me", "my", "it", "that", "this", "with", "do", "how", "any", "can", "có", "không",
     "là", "và", "của", "tôi", "bạn", "em", "anh", "chị", "gì", "nào", "nhé", "ạ", "thì", "mà", "đã", "được", "một",
-    "những", "các",
+    "những", "các", "này", "rồi", "cũng", "nữa", "nhỉ", "để", "nhưng", "rất", "lắm",
+    // words too common to name a topic ("after two days", "a new project" must not pull in a note)
+    "after", "before", "again", "also", "all", "am", "as", "at", "be", "been", "but", "by", "could", "does", "from",
+    "get", "got", "had", "has", "have", "he", "she", "her", "him", "his", "if", "into", "just", "let", "more", "much",
+    "new", "no", "not", "now", "only", "our", "out", "so", "some", "still", "than", "then", "there", "they", "them",
+    "too", "up", "us", "very", "want", "when", "where", "which", "who", "why", "will", "would", "your", "good",
+    "ve", "ll", "re", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
     // date words (dates.rs resolves them; they are not topics)
     "today", "yesterday", "last", "week", "ago", "day", "days", "monday", "tuesday", "wednesday", "thursday",
     "friday", "saturday", "sunday", "hôm", "nay", "qua", "kia", "tuần", "trước", "ngày", "thứ", "chủ", "nhật",
@@ -241,7 +247,8 @@ impl Store {
     /// chars also matches as a prefix) or whose value or key contains one. Best BM25 first, then importance, then newest. `limit` is 1..=20.
     pub fn search(&self, q: &str, limit: u32) -> Result<Vec<Fact>> {
         let terms = words(q, 1, false, usize::MAX);
-        let folded = fold(q);
+        // the keyed path ignores accents and đ/d like FTS does ("ha noi" finds "Hà Nội")
+        let folded = plain(&fold(q));
         let needles: Vec<&str> = folded.split(' ').filter(|w| !w.is_empty()).collect();
         if needles.is_empty() {
             return Err(Error::Usage("an empty query".into()));
@@ -260,7 +267,7 @@ impl Store {
         // Keyed rows also match on their value and key ("home_city"), which the text may not carry.
         let seen: HashSet<i64> = hits.iter().map(|(_, r)| r.id).collect();
         for r in schema::query(&c, "WHERE status = 'live' AND predicate IS NOT NULL", [])? {
-            let hay = fold(&format!("{} {}", r.value.as_deref().unwrap_or(""), r.key().unwrap_or_default()));
+            let hay = plain(&fold(&format!("{} {}", r.value.as_deref().unwrap_or(""), r.key().unwrap_or_default())));
             if !seen.contains(&r.id) && needles.iter().any(|w| hay.contains(w)) {
                 hits.push((0.0, r));
             }
