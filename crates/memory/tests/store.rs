@@ -216,6 +216,8 @@ fn soft_forget_hides_a_row_everywhere_but_keeps_it_on_disk() {
     assert!(s.search("hanoi", 5).unwrap().is_empty());
     assert_eq!(s.section(), "");
     assert_eq!(s.view(date(2026, 11, 27))["counts"]["live"], 0);
+    // still in the file, so the window keeps Forget everything on for it
+    assert_eq!(s.view(date(2026, 11, 27))["counts"]["hidden"], 1);
     assert_eq!(s.forget(Some(id), None, None), Err(Error::NotFound));
     assert_eq!(s.soft_forget(id), Err(Error::NotFound));
     assert_eq!(s.forget(Some(999), None, None), Err(Error::NotFound));
@@ -243,7 +245,8 @@ fn forgetting_the_live_value_forgets_the_question_about_it() {
     let Outcome::Disputed(d) = guess_city(&s, "Da Nang") else { panic!() };
     s.soft_forget(hanoi).unwrap();
     assert_eq!(row(&tmp.mem(), d).0, "forgotten");
-    assert_eq!(s.view(date(2026, 11, 27))["counts"], json!({"live": 0, "disputes": 0}));
+    let c = &s.view(date(2026, 11, 27))["counts"];
+    assert_eq!((&c["live"], &c["disputes"]), (&json!(0), &json!(0)));
 }
 
 #[test]
@@ -278,11 +281,14 @@ fn erasing_the_live_value_takes_the_question_with_it_and_zeroes_the_bytes() {
     guess_city(&s, "Da Nang");
     s.erase(hanoi).unwrap();
     assert_eq!(count(&tmp.mem(), "SELECT count(*) FROM facts"), 0);
-    // checkpoint from another connection, then look for the text in the main file
-    db(&tmp.mem()).query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(())).unwrap();
-    let bytes = std::fs::read(tmp.mem().join("memory.sqlite")).unwrap();
+    // erase checkpoints itself: neither the main file nor the WAL holds the text
     // (the schema's own comments quote 'Hanoi', so this test uses another city)
-    assert!(!String::from_utf8_lossy(&bytes).contains("Lives in Hue"));
+    for f in ["memory.sqlite", "memory.sqlite-wal"] {
+        let bytes = std::fs::read(tmp.mem().join(f)).unwrap_or_default();
+        assert!(!String::from_utf8_lossy(&bytes).contains("Lives in Hue"), "{f}");
+    }
+    let wal = std::fs::metadata(tmp.mem().join("memory.sqlite-wal")).map(|m| m.len()).unwrap_or(0);
+    assert_eq!(wal, 0, "the WAL is truncated");
 }
 
 #[test]
@@ -464,4 +470,19 @@ fn the_crate_never_reads_the_clock() {
             assert!(!code.contains(bad), "{bad}");
         }
     }
+}
+
+#[test]
+fn a_new_value_with_the_old_sentence_puts_the_value_in_the_sentence_or_asks() {
+    let (_t, s) = store();
+    let old = said_city(&s, "Hanoi", &now());
+    // the person changed only the value: the sentence follows it, whatever the case
+    let n = s.edit(old, "Lives in hanoi", Some("Da Nang"), &now()).unwrap();
+    let f = &s.view(date(2026, 11, 27))["groups"]["about"][0];
+    assert_eq!((&f["id"], &f["value"], &f["text"]), (&json!(n), &json!("Da Nang"), &json!("Lives in Da Nang")));
+    assert!(s.section().contains("Lives in Da Nang") && !s.section().contains("Hanoi"));
+    // a sentence that doesn't name the old value can't be fixed for them: nothing changes
+    let n2 = s.edit(n, "Lives near the sea", None, &now()).unwrap();
+    assert!(matches!(s.edit(n2, "Lives near the sea", Some("Hue"), &now()), Err(Error::Usage(_))));
+    assert_eq!(s.view(date(2026, 11, 27))["groups"]["about"][0]["id"], json!(n2));
 }

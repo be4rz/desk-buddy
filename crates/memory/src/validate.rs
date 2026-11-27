@@ -94,7 +94,7 @@ pub(crate) fn check(raw: &Raw, today: Date) -> Result<Item, &'static str> {
         Some(s) => Some(parse_valid_from(s, today).ok_or("valid_from")?),
         None => None,
     };
-    if looks_secret(&text) || value.as_deref().is_some_and(looks_secret) {
+    if looks_secret(&text) || value.as_deref().is_some_and(looks_secret) || raw.qualifier.as_deref().is_some_and(looks_secret) {
         return Err("secret");
     }
 

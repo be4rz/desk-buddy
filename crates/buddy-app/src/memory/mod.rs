@@ -251,21 +251,22 @@ impl Mem {
 
     /// The section for the agent's spec at launch (None when off, in error or empty), remembered as sent.
     pub fn initial_section(&self) -> Option<String> {
-        let (text, key) = self.wanted();
-        self.lock().sent = Some(key);
+        let mut i = self.lock();
+        let (text, key) = self.wanted(&i);
+        i.sent = Some(key);
         text
     }
 
-    /// What the agent should carry now, and its key.
-    fn wanted(&self) -> (Option<String>, Option<(u64, u64)>) {
+    /// What the agent should carry now, and its key, read under the caller's lock so the key always
+    /// names the text it goes with (the rev is read first: a write in between only re-sends later).
+    fn wanted(&self, i: &Inner) -> (Option<String>, Option<(u64, u64)>) {
         if !self.enabled() {
             return (None, None);
         }
-        let i = self.lock();
         match &i.store {
             Some(s) => {
-                let text = s.section();
                 let key = Some((i.gen, s.core_rev()));
+                let text = s.section();
                 (Some(text).filter(|t| !t.is_empty()), key)
             }
             None => (None, None),
@@ -273,17 +274,16 @@ impl Mem {
     }
 
     /// Hand the agent the section when it moved since the last one it got (core_rev, a new store,
-    /// the switch). The bridge sends it before the next turn.
+    /// the switch). The bridge sends it before the next turn. Compare, mark and hand over under one
+    /// lock, so a slower caller can never overwrite a newer section with its older one.
     pub fn sync_agent(&self) {
         let Some(side) = self.sidecar() else { return };
-        let (text, key) = self.wanted();
-        {
-            let mut i = self.lock();
-            if i.sent == Some(key) {
-                return;
-            }
-            i.sent = Some(key);
+        let mut i = self.lock();
+        let (text, key) = self.wanted(&i);
+        if i.sent == Some(key) {
+            return;
         }
+        i.sent = Some(key);
         side.set_memory(text);
     }
 
@@ -302,16 +302,18 @@ impl Mem {
     pub fn state(&self) -> Value {
         let today = now().today;
         let store = self.store();
-        let mut v = match &store {
+        let open = store.is_some();
+        // the Arc goes with the match, before `error()` locks: Forget everything waits for every holder
+        let mut v = match store {
             Some(s) => s.view(today),
             None => json!({
                 "v": 1, "today": today.to_string(), "phrase": PHRASE,
                 "groups": {"about": [], "help": [], "promises": []}, "disputes": [],
-                "history": null, "historyMore": false, "counts": {"live": 0, "disputes": 0},
+                "history": null, "historyMore": false, "counts": {"live": 0, "disputes": 0, "hidden": 0},
             }),
         };
         v["enabled"] = json!(self.enabled());
-        v["error"] = match (store.is_some(), self.error()) {
+        v["error"] = match (open, self.error()) {
             (false, Some((code, message))) => json!({"code": code, "message": message, "file": tilde(&self.dir.join("memory.sqlite"))}),
             _ => Value::Null,
         };
@@ -367,15 +369,20 @@ impl Mem {
                     (k, _) => k,
                 };
                 let out = s.remember(RememberIn { text, key, value, kind, importance, from }, &now()).map_err(refuse)?;
+                drop(s);
                 match out.id() {
                     Some(id) => eprintln!("[buddy] memory {} {id}", out.name()),
                     None => eprintln!("[buddy] memory skipped"),
                 }
                 self.changed();
-                Ok(json!({"id": out.id(), "outcome": out.name()}))
+                Ok(match out.reason() {
+                    Some(why) => json!({"id": null, "outcome": out.name(), "reason": why}),
+                    None => json!({"id": out.id(), "outcome": out.name()}),
+                })
             }
             MemoryOp::Forget { id, key, qualifier } => {
                 let ids = s.forget(id, key.as_deref(), qualifier.as_deref()).map_err(refuse)?;
+                drop(s);
                 for id in &ids {
                     eprintln!("[buddy] memory forgotten {id}");
                 }
@@ -433,15 +440,24 @@ impl Mem {
         if confirm.trim() != PHRASE {
             return Err("bad_phrase".into());
         }
+        // Take the store, then wait outside the lock for a host call or the jobs thread that still holds
+        // it (they need the lock to finish). `tried` is set so nothing reopens the old file meanwhile.
+        let old = {
+            let mut i = self.lock();
+            i.tried = Some(Instant::now());
+            i.store.take()
+        };
+        if let Some(old) = old {
+            let t = Instant::now();
+            while Arc::strong_count(&old) > 1 && t.elapsed() < Duration::from_secs(2) {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            drop(old);
+        }
         let out = {
             let mut i = self.lock();
-            if let Some(old) = i.store.take() {
-                // a host call or the jobs thread may hold it for a moment: let it finish first
-                let t = Instant::now();
-                while Arc::strong_count(&old) > 1 && t.elapsed() < Duration::from_secs(2) {
-                    std::thread::sleep(Duration::from_millis(20));
-                }
-                drop(old);
+            if let Some(again) = i.store.take() {
+                drop(again); // opened by someone in between: it goes with the files too
             }
             i.tried = Some(Instant::now());
             match Store::forget_all(&self.dir) {

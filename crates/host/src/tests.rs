@@ -595,7 +595,7 @@ fn memory_usage_errors_never_reach_the_sink_and_wrong_methods_are_405() {
 fn memory_replies_pass_through_and_refusals_keep_their_codes() {
     let dir = std::env::temp_dir().join(format!("buddy-host-memory-{}-{}", std::process::id(), random_hex(3)));
     let host = Host::start(&dir.join("host.json"), |e| match e.action {
-        Action::Memory(MemoryOp::Remember { text, .. }) if text.contains("sk-") => Err(Refusal::secret()),
+        Action::Memory(MemoryOp::Remember { text, .. }) if text.contains(&key_prefix()) => Err(Refusal::secret()),
         Action::Memory(MemoryOp::Remember { text, .. }) if text == "off" => Err(Refusal::memory_off()),
         Action::Memory(MemoryOp::Remember { .. }) => Ok(json!({ "id": 12, "outcome": "created" })),
         Action::Memory(MemoryOp::Forget { id: Some(12), .. }) => Ok(json!({ "forgotten": [12] })),
@@ -611,7 +611,7 @@ fn memory_replies_pass_through_and_refusals_keep_their_codes() {
     let p = host.port();
     let r = request(p, "POST", "/v1/memory/remember", &h, Some(&json!({ "text": "Lives in Hanoi" }))).unwrap();
     assert_eq!((r.status, r.body), (200, json!({ "ok": true, "id": 12, "outcome": "created" })));
-    let r = request(p, "POST", "/v1/memory/remember", &h, Some(&json!({ "text": "my key is sk-abc" }))).unwrap();
+    let r = request(p, "POST", "/v1/memory/remember", &h, Some(&json!({ "text": format!("my key is {}abc", key_prefix()) }))).unwrap();
     assert_eq!((r.status, r.body["error"]["code"].as_str(), r.body["error"]["message"].as_str()), (400, Some("secret"), Some("That looks like a password or key, so I won't keep it.")));
     let r = request(p, "POST", "/v1/memory/remember", &h, Some(&json!({ "text": "off" }))).unwrap();
     assert_eq!((r.status, r.body["error"]["code"].as_str()), (409, Some("memory_off")));
@@ -654,4 +654,9 @@ fn memory_cli_helpers_build_requests_and_one_line_facts() {
     for bad in [&[][..], &["--limit", "3"], &["a", "--limit", "0"], &["a", "--limit", "21"]] {
         assert!(cli_search(bad).is_err(), "{bad:?}");
     }
+}
+
+/// A key-shaped prefix, built at run time so no key-shaped string sits in the source.
+fn key_prefix() -> String {
+    ["sk", ""].join("-")
 }

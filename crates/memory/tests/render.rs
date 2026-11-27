@@ -57,8 +57,7 @@ Things you said you'd do
 Not sure yet (ask when it fits, once)
 - Maybe lives in Da Nang? You have Hanoi on record.
 
-You remember past chats. If the person asks about the past and it isn't
-here, run `buddy memory recall <date>` or `buddy memory search \"<words>\"`.";
+For anything not listed here, run `buddy memory search \"<words>\"`.";
     assert_eq!(s.section(), want);
 }
 
@@ -155,7 +154,7 @@ fn view_has_the_i6_shape() {
         "disputes": [{"id": 2, "key": "home_city", "label": "City", "value": "Da Nang", "text": "Lives in Da Nang",
                       "live": {"id": 1, "value": "Hanoi", "source": "chat"}}],
         "history": null, "historyMore": false,
-        "counts": {"live": 1, "disputes": 1},
+        "counts": {"live": 1, "disputes": 1, "hidden": 0},
     });
     assert_eq!(s.view(date(2026, 11, 27)), want);
 

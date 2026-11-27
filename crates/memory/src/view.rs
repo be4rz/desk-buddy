@@ -77,7 +77,7 @@ pub(crate) fn view(conn: &Connection, today: Date) -> Result<Value> {
         "disputes": asks,
         "history": null,
         "historyMore": false,
-        "counts": {"live": core.len(), "disputes": asks.len()},
+        "counts": {"live": core.len(), "disputes": asks.len(), "hidden": hidden(conn, core.len() + asks.len())?},
     }))
 }
 
@@ -86,6 +86,14 @@ pub(crate) fn empty(today: Date) -> Value {
     json!({
         "v": 1, "today": today.to_string(), "phrase": "forget everything",
         "groups": {"about": [], "help": [], "promises": []}, "disputes": [],
-        "history": null, "historyMore": false, "counts": {"live": 0, "disputes": 0},
+        "history": null, "historyMore": false, "counts": {"live": 0, "disputes": 0, "hidden": 0},
     })
+}
+
+/// What the file still holds that the window doesn't list (forgotten and superseded rows, chats
+/// waiting to be learned from): Forget everything stays offered while any of it is there.
+fn hidden(conn: &Connection, shown: usize) -> Result<i64> {
+    let facts: i64 = conn.query_row("SELECT count(*) FROM facts", [], |r| r.get(0))?;
+    let pending: i64 = conn.query_row("SELECT count(*) FROM pending_turns", [], |r| r.get(0))?;
+    Ok((facts - shown as i64).max(0) + pending)
 }

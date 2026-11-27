@@ -33,7 +33,14 @@ pub fn run(rest: &[&str], json_out: bool) -> ExitCode {
             Err(e) => usage(&e),
             Ok(body) => match call("POST", "/v1/memory/remember", Some(body)) {
                 Ok(r) if r.status == 200 && !json_out => {
-                    println!("#{} {}", r.body["id"], r.body["outcome"].as_str().unwrap_or("done"));
+                    let outcome = r.body["outcome"].as_str().unwrap_or("done");
+                    match (r.body["id"].as_i64(), outcome) {
+                        (Some(id), "disputed") => {
+                            println!("#{id} disputed (the person told you something else; it waits for their answer in What I remember)")
+                        }
+                        (Some(id), _) => println!("#{id} {outcome}"),
+                        (None, _) => println!("{outcome} (not stored: {})", why(r.body["reason"].as_str())),
+                    }
                     ExitCode::SUCCESS
                 }
                 other => finish(other, json_out, ""),
@@ -63,3 +70,11 @@ pub fn run(rest: &[&str], json_out: bool) -> ExitCode {
     }
 }
 
+/// A `skipped` remember's reason, in words.
+fn why(reason: Option<&str>) -> &str {
+    match reason {
+        Some("episode") => "events aren't remembered, only lasting facts",
+        Some(r) => r,
+        None => "no reason given",
+    }
+}

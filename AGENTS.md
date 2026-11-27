@@ -65,6 +65,17 @@ and talks through speech bubbles, powered by an LLM. The repo is public and open
   outside the check-in budget, log `[buddy] idle line <moment>` only). Tone only: the agent has no command to change it
   and `crates/policy` never reads it. `buddy studio persona render --pack <dir> [--preset <id>]`, `audit --preset <id>`;
   live eval `BUDDY_EVAL=1 bun run agent/scripts/persona-eval.ts` (real key, never in CI).
+  Memory (D19, p1): `crates/memory` (SQLite store `BUDDY_HOME/memory/memory.sqlite` + a rendered `MEMORY.md`; reconcile,
+  validate (secrets refused on every write path), the prompt's "What I know about you" section `render.rs`, the window view
+  `view.rs`) + `src/memory/` (owner of the store; jobs: after `BUDDY_MEMORY_IDLE_S` (default 300) idle seconds or 10 turns,
+  the sidecar's `memory.extract` (`agent/src/ext/memory/`) runs on the next 30 s tick; the window `memory`, page
+  `web/memory/index.html?mock=<state>`, only it may call `memory_*`). Tray **What I remember…**; `settings.memory.{enabled,
+  admission}`, settings.json v5; `BUDDY_MEMORY=0|1` overrides `enabled` (off: no turns kept, no section, CLI 409 except
+  forget). CLI `buddy memory remember|list|search|forget|open` (host `/v1/memory/*`; a store that won't open is 503
+  `no_memory`, retried at most every 5 s). The memory folder is private to every tool and shell word (`policy::memory`).
+  Logs carry ids, counts and outcome words only, never fact text, quotes or what was said. Replay
+  `crates/buddy-app/tests/fixtures/memory.jsonl`; live eval `BUDDY_EVAL=1 bun run agent/scripts/memory-eval.ts` (real key,
+  never in CI).
   Rooms (floors and pocket scenes, D13): a room pack is `rooms/<id>/room.json` + PNGs, mascot-independent
   (`rooms/README.md`; loader `mascot_core::room`, drawn by `mascot-render` via `Art::load_with`). `settings.room` (default
   `starter`), `BUDDY_ROOM=<dir>` overrides; a broken room exits 1 with `[buddy] cannot load room …`, none at all runs with

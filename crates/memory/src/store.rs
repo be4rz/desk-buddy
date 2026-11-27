@@ -369,6 +369,14 @@ impl Store {
                 let pred = old.predicate.as_deref().and_then(predicates::get);
                 let new_value = if pred.is_some() { value.or_else(|| old.value.clone()) } else { None };
                 let same = new_value.as_deref().map(fold) == old.value.as_deref().map(fold);
+                // A new value with the old sentence would keep saying the old fact (the prompt and
+                // MEMORY.md show the text): put the new value in the sentence, or ask for a new one.
+                let text = match (&old.value, &new_value) {
+                    (Some(was), Some(now_v)) if !same && fold(&text) == fold(&old.text) => {
+                        swap_value(&text, was, now_v).ok_or_else(|| Error::Usage("The sentence still says the old value: change it too.".into()))?
+                    }
+                    _ => text.clone(),
+                };
                 let it = Item {
                     kind: old.kind.clone(),
                     predicate: pred,
@@ -436,7 +444,11 @@ impl Store {
                 }
                 Ok(())
             })
-        })
+        })?;
+        // the erased rows' pages are zeroed in the WAL; move them into the main file and empty the WAL,
+        // so no copy of the text stays on disk after the window says it's gone
+        self.lock().query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        Ok(())
     }
 
     /// The person's answer to a dispute (`id` is the disputed row). Keep the new value: it becomes live
@@ -527,4 +539,15 @@ fn drop_orphan_disputes(tx: &Transaction, key: &str, qualifier: Option<&str>, ha
     };
     tx.execute(sql, params![key, q])?;
     Ok(())
+}
+
+/// `text` with the first case-insensitive match of `was` replaced by `now` (None when it isn't there).
+fn swap_value(text: &str, was: &str, now: &str) -> Option<String> {
+    let (lt, lw) = (text.to_lowercase(), was.to_lowercase());
+    // only when lowercasing keeps byte offsets (true for the ASCII and Vietnamese letters people use)
+    if lt.len() != text.len() || lw.is_empty() {
+        return text.find(was).map(|i| format!("{}{now}{}", &text[..i], &text[i + was.len()..]));
+    }
+    let i = lt.find(&lw)?;
+    Some(format!("{}{now}{}", &text[..i], &text[i + lw.len()..]))
 }

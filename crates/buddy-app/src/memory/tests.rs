@@ -227,6 +227,9 @@ fn the_routes_remember_list_search_and_forget() {
     let bad = m.on_op(MemoryOp::Remember { text: format!("token {key}"), key: None, qualifier: None, value: None, kind: None, importance: None, from: None }).unwrap_err();
     assert_eq!((bad.status, bad.code), (400, "secret"));
     assert_eq!(m.on_op(MemoryOp::List { kind: Some("hobby".into()) }).unwrap_err().code, "usage");
+    // a remember that isn't kept says why, with no id
+    let ep = m.on_op(MemoryOp::Remember { text: "Went hiking on Sunday".into(), key: None, qualifier: None, value: None, kind: Some("episode".into()), importance: None, from: None }).unwrap();
+    assert_eq!(ep, json!({"id": null, "outcome": "skipped", "reason": "episode"}));
     assert_eq!(m.on_op(MemoryOp::Forget { id: None, key: Some("home_city".into()), qualifier: None }).unwrap()["forgotten"], json!([id]));
     assert_eq!(m.on_op(MemoryOp::Forget { id: None, key: Some("home_city".into()), qualifier: None }).unwrap_err().code, "not_found");
 }
@@ -268,6 +271,23 @@ fn an_unwritable_store_dir_is_the_error_state_and_503_and_the_app_goes_on() {
     assert!(st["error"].is_null(), "{st}");
     m.add("profile", "Lives in Saigon").unwrap();
     assert!(fake.sections.lock().unwrap().last().cloned().flatten().unwrap().contains("Saigon"));
+}
+
+#[test]
+fn a_folder_without_permissions_opens_once_they_come_back() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = tmp("chmod");
+    let md = dir(&d);
+    std::fs::create_dir_all(&md).unwrap();
+    std::fs::set_permissions(&md, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let m = Mem::new(md.clone(), true, Box::new(|_| {}));
+    assert_eq!(m.state()["error"]["code"], "store");
+    assert_eq!(m.on_op(MemoryOp::List { kind: None }).unwrap_err().status, 503);
+    std::fs::set_permissions(&md, std::fs::Permissions::from_mode(0o755)).unwrap();
+    m.lock().tried = Some(Instant::now() - RETRY);
+    // the CLI's next call opens it, not only the window's
+    assert!(m.on_op(MemoryOp::List { kind: None }).is_ok());
+    assert!(m.state()["error"].is_null());
 }
 
 #[test]

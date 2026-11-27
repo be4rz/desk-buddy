@@ -179,6 +179,9 @@ fn the_secret_filter_matches_the_brief() {
         "My password is hunter2".to_string(),
         "the PASSCODE IS 4821".to_string(),
         "my pin is 0000".to_string(),
+        "wifi password: hunter2".to_string(),
+        "password for the router is lantern42".to_string(),
+        "door PIN = 4821".to_string(),
         "mật khẩu wifi là abc".to_string(),
         "mật khẩu: abc".to_string(), // `mật khẩu` then `:` is a token
         unicode_normalization::UnicodeNormalization::nfd("mật khẩu wifi").collect::<String>(), // decomposed: still caught
@@ -195,6 +198,8 @@ fn the_secret_filter_matches_the_brief() {
         "a1b2c3d4".repeat(3), // 24 hex chars: too short
         "Sister Lan visits on the 12th; session notes in a-very-long-but-plain-hyphenated-slug-here".to_string(),
         "Quên mật khẩu.".to_string(),
+        "Uses a password manager".to_string(),
+        "Forgot the password for the router again".to_string(),
         "2026-11-27T09:12:03+07:00".to_string(),
     ];
     for s in &no {
@@ -213,6 +218,9 @@ fn secrets_are_refused_on_every_write_path() {
         let op = RememberIn { text: text.into(), key: value.map(|_| "projects".into()), value: value.map(str::to_string), ..Default::default() };
         assert_eq!(s.remember(op, &now()), Err(Error::Secret));
     }
+    // remember: a key's qualifier (`--key people:<token>`)
+    let op = RememberIn { text: "Has a sister".into(), key: Some(format!("people:{key}")), value: Some("Lan".into()), ..Default::default() };
+    assert_eq!(s.remember(op, &now()), Err(Error::Secret));
     // add and edit
     assert_eq!(s.add("profile", &said, &now()), Err(Error::Secret));
     let id = s.add("profile", "Likes tea", &now()).unwrap();

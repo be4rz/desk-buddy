@@ -53,6 +53,10 @@ fn one(tx: &Transaction, key: &str, it: &Item, now: &Now) -> Result<Outcome> {
         None => Outcome::Created(insert(tx, it, "live", now)?),
         Some(l) if l.value.as_deref().map(fold) == it.value.as_deref().map(fold) => {
             extend(tx, l.id, it, now)?;
+            if it.authority >= 2 {
+                // Said again (not guessed): the person has answered the slot's open question.
+                delete_disputes(tx, key, it.qualifier.as_deref(), None)?;
+            }
             Outcome::Extended(l.id)
         }
         Some(l) if it.authority >= l.authority => {

@@ -127,6 +127,14 @@ impl Outcome {
             Outcome::Skipped(_) => None,
         }
     }
+
+    /// Why nothing was stored (a short word, never the text), for a skipped outcome.
+    pub fn reason(&self) -> Option<&'static str> {
+        match *self {
+            Outcome::Skipped(why) => Some(why),
+            _ => None,
+        }
+    }
 }
 
 /// A `buddy memory remember` request.

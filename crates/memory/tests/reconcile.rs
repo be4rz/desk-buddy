@@ -152,7 +152,7 @@ fn a_guess_disputes_a_stated_fact_and_the_person_resolves_it() {
     let Outcome::Disputed(d) = out else { panic!("{out:?}") };
 
     let v = s.view(date(2026, 11, 27));
-    assert_eq!(v["counts"], json!({"live": 1, "disputes": 1}));
+    assert_eq!(v["counts"], json!({"live": 1, "disputes": 1, "hidden": 0}));
     assert_eq!(v["disputes"][0]["id"], d);
     assert_eq!(v["disputes"][0]["live"], json!({"id": hanoi, "value": "Hanoi", "source": "chat"}));
     assert_eq!(v["groups"]["about"][0]["disputed"], true);
@@ -167,7 +167,7 @@ fn a_guess_disputes_a_stated_fact_and_the_person_resolves_it() {
     // Keep the old value: the guess is forgotten and the question is gone.
     s.resolve(d2, false, &now()).unwrap();
     let v = s.view(date(2026, 11, 27));
-    assert_eq!(v["counts"], json!({"live": 1, "disputes": 0}));
+    assert_eq!((&v["counts"]["live"], &v["counts"]["disputes"]), (&json!(1), &json!(0)));
     assert_eq!(v["groups"]["about"][0]["disputed"], false);
     assert_eq!(row(&tmp.mem(), d2).0, "forgotten");
     assert_eq!(row(&tmp.mem(), hanoi).0, "live");
@@ -204,6 +204,23 @@ fn a_dispute_clears_when_the_person_later_says_the_same_thing() {
     city_say(&s, "Da Nang", &now());
     assert_eq!(count(&tmp.mem(), "SELECT count(*) FROM facts WHERE status = 'disputed'"), 0);
     assert_eq!(s.view(date(2026, 11, 27))["groups"]["about"][0]["value"], "Da Nang");
+}
+
+#[test]
+fn saying_the_live_value_again_answers_the_dispute_but_guessing_it_does_not() {
+    let (tmp, s) = store();
+    let hanoi = city(&s, "Hanoi", 3, &now());
+    let guess = |v: &str| extract(&s, "x", vec![item("profile", Some("home_city"), Some(v), &format!("Lives in {v}"))], &now());
+    guess("Da Nang");
+    let disputes = || count(&tmp.mem(), "SELECT count(*) FROM facts WHERE status = 'disputed'");
+    // a guess of the live value leaves the question
+    assert_eq!(guess("Hanoi").items[0].outcome, Outcome::Extended(hanoi));
+    assert_eq!(disputes(), 1);
+    // the bear relays the person's answer: the question is gone
+    let op = RememberIn { text: "Lives in Hanoi".into(), key: Some("home_city".into()), value: Some("Hanoi".into()), ..Default::default() };
+    assert_eq!(s.remember(op, &now()).unwrap(), Outcome::Extended(hanoi));
+    assert_eq!(disputes(), 0);
+    assert!(!s.section().contains("Not sure yet"));
 }
 
 #[test]

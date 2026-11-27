@@ -354,7 +354,7 @@ fn memory_host(name: &str, store: bool) -> (Host, PathBuf, Arc<Mutex<Vec<host::M
         s2.lock().unwrap().push(op.clone());
         let fact = |id: i64, text: &str, since: Value| json!({ "id": id, "kind": "profile", "text": text, "key": null, "value": null, "since": since, "source": "chat" });
         match op {
-            host::MemoryOp::Remember { text, .. } if text.contains("sk-") => Err(Refusal::secret()),
+            host::MemoryOp::Remember { text, .. } if text.contains(&key_prefix()) => Err(Refusal::secret()),
             host::MemoryOp::Remember { .. } => Ok(json!({ "id": 12, "outcome": "created" })),
             host::MemoryOp::Forget { id: Some(99), .. } => Err(Refusal::new(404, "not_found", "Nothing like that to forget.")),
             host::MemoryOp::Forget { id: Some(id), .. } => Ok(json!({ "forgotten": [id] })),
@@ -434,7 +434,7 @@ fn memory_refusals_exit_1_usage_exits_2_and_no_store_is_503() {
     let (host, dir, seen) = memory_host("memory-bad", true);
     let file = host.file().to_path_buf();
     // refused by the app: exit 1, with its message
-    let o = buddy(&file, &["memory", "remember", "my key is sk-abc"]);
+    let o = buddy(&file, &["memory", "remember", &format!("my key is {}abc", key_prefix())]);
     assert_eq!(code(&o), 1);
     assert!(err(&o).contains("That looks like a password or key, so I won't keep it."), "{}", err(&o));
     let o = buddy(&file, &["memory", "forget", "99"]);
@@ -493,4 +493,9 @@ fn help_lists_the_memory_commands_and_marks_the_reads() {
     }
     drop(host);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A key-shaped prefix, built at run time so no key-shaped string sits in the source.
+fn key_prefix() -> String {
+    ["sk", ""].join("-")
 }

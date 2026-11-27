@@ -130,8 +130,9 @@ h2.group .add { margin-left: auto; text-transform: none; letter-spacing: 0; colo
 .ask .row { margin-top: 6px; }
 .ask .btn { white-space: normal; text-align: left; max-width: 100%; }
 
-/* ---- off: the rows stay, quieter ---- */
-.off .rows { opacity: .72; }
+/* ---- off: the rows stay, quieter (a grey card, not opacity: the meta lines keep 4.5:1) ---- */
+.off .rows { background: var(--paper-2); }
+.off .mrow .txt { color: var(--ink-2); }
 
 /* the window's narrowest (380 pt) and below: Edit moves into the row menu */
 @media (max-width: 400px) {

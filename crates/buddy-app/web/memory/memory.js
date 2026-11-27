@@ -3,7 +3,7 @@
 // open: {code, message, file}, groups then empty), `phrase` (Forget everything's typed confirm), the
 // three groups of live rows (about = profile, help = preference, promises = promise; each row {id, kind,
 // text, key, label, value, since "YYYY-MM", source window|chat|bear|guess, disputed}), the open
-// `disputes` ({id, label, value, text, live {id, value, source}}) and `counts` {live, disputes}.
+// `disputes` ({id, label, value, text, live {id, value, source}}) and `counts` {live, disputes, hidden}.
 // The page answers with memory_add {kind, text}, memory_edit {id, text, value?}, memory_forget {id, hard},
 // memory_resolve {id, keep: "new"|"old"}, memory_forget_all {confirm}, memory_set_enabled {on} and
 // memory_close. A refusal is one of `not allowed|secret|empty|too_long|not_found|bad_phrase|store`; a
@@ -23,6 +23,7 @@
     secret: "That looks like a password or key, so I won't keep it. Keys belong in Accounts…, not in my memory.",
     empty: "Write something first.",
     too_long: "That's too long for one thing: keep it under 200 characters (a value under 100).",
+    stale_text: "The sentence still says the old value: change it too.",
   };
   const NARROW = window.matchMedia("(max-width: 400px)");
 
@@ -106,7 +107,10 @@
     content.append(header());
     if (s.error) content.append(errorNote());
     else {
-      if (!s.enabled) content.append(el("p", "note info", "Memory is off. I'm not learning anything new, and I don't use what's below in our chats. It stays here until you forget it."));
+      const kept = ((s.counts && s.counts.live) || 0) + (s.disputes || []).length;
+      if (!s.enabled) content.append(el("p", "note info", kept
+        ? "Memory is off. I'm not learning anything new, and I don't use what's below in our chats. It stays here until you forget it."
+        : "Memory is off. I'm not learning anything new."));
       content.append(...asks(), ...groups());
     }
     const old = root.querySelector(".content");
@@ -215,8 +219,10 @@
     }
     if (!any && !(s.disputes || []).length) {
       const c = el("div", "empty-card");
-      c.append(el("b", null, "Nothing yet"));
-      c.append(el("p", null, "Tell me about yourself in chat and I'll keep what matters: where you live, how you like help, what I said I'd do. A few minutes after we stop talking, it shows up here."));
+      c.append(el("b", null, s.enabled ? "Nothing yet" : "Nothing saved"));
+      c.append(el("p", null, s.enabled
+        ? "Tell me about yourself in chat and I'll keep what matters: where you live, how you like help, what I said I'd do. A few minutes after we stop talking, it shows up here."
+        : "Memory is off, so I won't keep anything new from our chats. You can still add something here."));
       const r = el("div", "row start");
       r.append(btn("Add something", "small", "add-first", () => openAdd("about", "profile")));
       c.append(r);
@@ -396,11 +402,22 @@
     const text = f.text.trim();
     if (f.id == null && !text) return;
     if (f.id != null && text === f.was && (!f.keyed || f.value.trim() === f.orig)) return cancelForm();
+    let saveText = text;
+    if (f.id != null && f.keyed && f.value.trim() && f.value.trim() !== f.orig && text === f.was) {
+      // a new value with the old sentence would keep saying the old fact: swap it in, or ask
+      const i = f.orig ? text.toLowerCase().indexOf(f.orig.toLowerCase()) : -1;
+      if (i < 0 || text.toLowerCase().length !== text.length) {
+        f.err = "stale_text";
+        restore = ["f-text"];
+        return render();
+      }
+      saveText = text.slice(0, i) + f.value.trim() + text.slice(i + f.orig.length);
+    }
     f.busy = true;
     status = { kind: "idle" };
     const p = f.id == null
       ? call("memory_add", { kind: f.kind, text })
-      : call("memory_edit", { id: f.id, text, value: f.keyed && f.value.trim() ? f.value.trim() : null });
+      : call("memory_edit", { id: f.id, text: saveText, value: f.keyed && f.value.trim() ? f.value.trim() : null });
     p.then(() => {
       if (form === f) form = null;
       restore = f.id == null ? ["add:" + f.group] : ["switch"];
@@ -559,7 +576,8 @@
       stat.append(b);
     }
     const c = s.counts || {};
-    faBtn.disabled = !s.error && !c.live && !c.disputes;
+    // also offered for what the list doesn't show (forgotten or replaced notes, chats not learned yet)
+    faBtn.disabled = !s.error && !c.live && !c.disputes && !c.hidden;
   }
 
   // ---------- keys ----------

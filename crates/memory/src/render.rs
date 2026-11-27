@@ -12,8 +12,7 @@ const MAX_DISPUTES: usize = 2;
 const HEAD: &str = "## What I know about you
 These are notes from earlier chats. They can be out of date: if the person
 says otherwise, believe them. Never recite this list unprompted.";
-const TAIL: &str = "You remember past chats. If the person asks about the past and it isn't
-here, run `buddy memory recall <date>` or `buddy memory search \"<words>\"`.";
+const TAIL: &str = "For anything not listed here, run `buddy memory search \"<words>\"`.";
 const TITLES: [&str; 4] =
     ["About them", "How they like help", "Things you said you'd do", "Not sure yet (ask when it fits, once)"];
 const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

@@ -18,7 +18,11 @@ fn patterns() -> &'static Patterns {
         token: Regex::new(r"[A-Za-z0-9+/_-]{32,}").unwrap(),
         // `\b` keeps "desk-buddy" (…sk-b…) from matching `sk-`.
         prefix: Regex::new(r"\b(?:sk[-_]|ghp_|gho_|github_pat_|xox[abpr]-|AKIA)[A-Za-z0-9_-]").unwrap(),
-        spoken: Regex::new(r"(?i)(?:\b(?:password|passcode|pin)\s+is\s+|mật khẩu[\s:]+)\s*\S").unwrap(),
+        // "password is x", "wifi password: x", "pin = x", "password for the router is x"
+        spoken: Regex::new(
+            r"(?i)(?:\b(?:password|passcode|pin)(?:\s+for\s+[^.,;:=]{1,40}?)?(?:\s+is\s+|\s*[:=]\s*)|mật khẩu[\s:]+)\s*\S",
+        )
+        .unwrap(),
     })
 }
 
