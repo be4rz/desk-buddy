@@ -967,7 +967,8 @@ impl App {
         if let Some(w) = &self.bubble_win {
             w.give_keyboard_back();
         }
-        eprintln!("[buddy] prompt {}{}", serde_json::to_string(&text).unwrap_or_default(), if midturn { " (replaces the running turn)" } else { "" });
+        // what was typed never goes to the log: its length only
+        eprintln!("[buddy] prompt ({} chars){}", text.chars().count(), if midturn { " (replaces the running turn)" } else { "" });
         // already waiting for a replaced turn to end (it may have ended, its send not yet run):
         // this text goes instead, once
         if let Some((_, pending)) = &mut self.superseded {

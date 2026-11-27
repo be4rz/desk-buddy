@@ -117,13 +117,14 @@ pub(crate) fn drop_vectors_sql(ids_sql: &str) -> String {
 }
 
 /// Brings `facts_vec` in line with the module (each writable open, after [`migrate`]). Loaded: the table (one
-/// normalised embedding per row, keyed by fact id, cosine distance), its delete trigger, and no vector that
-/// `vec_rows` doesn't list or whose fact is no longer live. Not loaded: the trigger goes, so deleting a fact never
+/// normalised embedding per row, keyed by fact id, cosine distance), its delete trigger, a status trigger (a row
+/// forgotten or superseded loses its vector in the same transaction, not at the next backfill), and no vector that
+/// `vec_rows` doesn't list or whose fact is no longer live. Not loaded: the triggers go, so deleting or forgetting a fact never
 /// needs the missing module (`vec_rows` still forgets it; a later loaded open drops the vector). Returns whether
 /// vectors are on.
 pub(crate) fn ensure_vec(conn: &Connection, loaded: bool) -> Result<bool> {
     if !loaded {
-        conn.execute_batch("DROP TRIGGER IF EXISTS facts_vec_ad;")?;
+        conn.execute_batch("DROP TRIGGER IF EXISTS facts_vec_ad; DROP TRIGGER IF EXISTS facts_vec_au;")?;
         return Ok(false);
     }
     conn.execute_batch(&format!(
@@ -131,6 +132,12 @@ pub(crate) fn ensure_vec(conn: &Connection, loaded: bool) -> Result<bool> {
          CREATE TRIGGER IF NOT EXISTS facts_vec_ad AFTER DELETE ON facts BEGIN
            UPDATE facts_vec SET embedding = zeroblob({b}) WHERE rowid = old.id;
            DELETE FROM facts_vec WHERE rowid = old.id;
+         END;
+         CREATE TRIGGER IF NOT EXISTS facts_vec_au AFTER UPDATE OF status ON facts
+           WHEN old.status = 'live' AND new.status IS NOT 'live' BEGIN
+           UPDATE facts_vec SET embedding = zeroblob({b}) WHERE rowid = old.id;
+           DELETE FROM facts_vec WHERE rowid = old.id;
+           DELETE FROM vec_rows WHERE id = old.id;
          END;
          DELETE FROM vec_rows WHERE id NOT IN (SELECT id FROM facts WHERE status = 'live');
          {sweep}",

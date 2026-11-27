@@ -119,7 +119,10 @@ fn a17_only_http_on_loopback_is_accepted() {
 #[ignore]
 fn real_ollama_finds_the_talk_by_meaning() {
     let e = Embedder::new(DEFAULT_URL, DEFAULT_MODEL).unwrap();
-    assert!(e.probe(T), "Ollama on 127.0.0.1:11434 with {DEFAULT_MODEL} pulled");
+    assert!(
+        e.probe(T),
+        "needs a running Ollama on 127.0.0.1:11434 with {DEFAULT_MODEL} pulled (`ollama serve`, `ollama pull {DEFAULT_MODEL}`)"
+    );
     let (_t, s) = fixture();
     assert_eq!(backfill(&s, &e), 4);
     let q = e.query(CALM, Duration::from_secs(5)).unwrap();

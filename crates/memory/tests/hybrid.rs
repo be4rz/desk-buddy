@@ -177,8 +177,23 @@ fn forgotten_and_superseded_rows_lose_their_vector() {
     let id = s.list(Some("episode")).unwrap().into_iter().find(|f| f.text == TALK).unwrap().id;
     s.soft_forget(id).unwrap();
     assert!(hybrid(&s, "How do I calm down before speaking?").is_empty(), "never recalled once forgotten");
-    s.vectors_todo(1).unwrap();
-    assert_eq!(s.vector_count(), 3, "its vector went at the next backfill");
+    assert_eq!(s.vector_count(), 3, "its vector went with the forget, not at the next backfill");
+    assert_eq!(count(&_t.mem(), "SELECT count(*) FROM facts_vec"), 3);
+    assert!(s.vectors_todo(5).unwrap().is_empty(), "and it is not embedded again");
+}
+
+#[test]
+fn a_forgotten_rows_vector_bytes_are_gone_from_the_file_at_once() {
+    let (t, s) = store();
+    let id = episode(&s, date(2026, 11, 20), TALK, 7);
+    s.set_embed_model(MODEL).unwrap();
+    let mut v: Vec<f32> = (0..DIMS).map(|i| 0.011 + i as f32 * 0.0009).collect();
+    memory::embed::normalise(&mut v);
+    assert_eq!(s.put_vectors(MODEL, &[(id, TALK.to_string(), v.clone())]).unwrap(), 1);
+    s.soft_forget(id).unwrap();
+    assert_eq!(s.vector_count(), 0);
+    db(&t.mem()).query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(())).unwrap();
+    assert!(!file_has(&t.mem(), &needle(&v)), "forgotten: the vector's bytes are gone from the file");
 }
 
 /// The bytes of one vector as the file stores them.
