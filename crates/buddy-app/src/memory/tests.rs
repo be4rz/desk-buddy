@@ -31,6 +31,9 @@ struct Fake {
     reflected: Mutex<Vec<Value>>,
     reflect_reply: Mutex<Option<Result<Value, String>>>,
     down: AtomicBool,
+    admitted: Mutex<Vec<Value>>,
+    admit_reply: Mutex<Option<Result<Value, String>>>,
+    admit_delay: Mutex<Duration>,
 }
 
 impl Sidecar for Fake {
@@ -47,6 +50,11 @@ impl Sidecar for Fake {
     }
     fn running(&self) -> bool {
         !self.down.load(Ordering::SeqCst)
+    }
+    fn admit(&self, args: Value) -> Result<Value, String> {
+        self.admitted.lock().unwrap().push(args);
+        std::thread::sleep(*self.admit_delay.lock().unwrap());
+        self.admit_reply.lock().unwrap().clone().unwrap_or_else(|| Err("unsupported".into()))
     }
 }
 
@@ -603,4 +611,248 @@ fn the_memory_history_fixture_recalls_yesterday_during_the_turn() {
     let recall = items.iter().position(|i| matches!(&i.event, Some(MascotEvent::Working { tool, .. }) if tool == "buddy memory recall yesterday"));
     let idle = items.iter().position(|i| i.event == Some(MascotEvent::Idle));
     assert!(recall.is_some() && recall < idle, "the tool runs during the turn");
+}
+
+// ---- vectors and admission (p3) ----
+
+fn id_of(m: &Mem, text: &str) -> i64 {
+    m.store().unwrap().list(Some("episode")).unwrap().into_iter().find(|f| f.text == text).unwrap().id
+}
+
+const MSG: &str = "Late launch, lunch, Mochi and ramen";
+
+#[test]
+fn a18_admission_keeps_what_the_model_picks_of_the_top_ten() {
+    let (m, _) = mem("admit", true);
+    let fake = Arc::new(Fake::default());
+    m.attach(fake.clone());
+    moments(&m, &fake, "u:launch", &LAUNCH);
+    let plain = m.recall_for(MSG);
+    assert_eq!(plain.len(), 3, "{plain:?}");
+    assert!(fake.admitted.lock().unwrap().is_empty(), "admission is off by default");
+
+    m.set_admission(true);
+    let mochi = id_of(&m, LAUNCH[2]);
+    *fake.admit_reply.lock().unwrap() = Some(Ok(json!({"keep": [mochi, 9999]})));
+    let got = m.recall_for(MSG);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(got[0].ends_with(LAUNCH[2]), "{got:?}");
+    let args = fake.admitted.lock().unwrap().last().unwrap().clone();
+    assert_eq!(args["message"], json!(MSG));
+    let cands = args["candidates"].as_array().unwrap();
+    assert!((4..=memory::ADMIT_MAX).contains(&cands.len()), "all four went: {args}");
+    assert!(cands.iter().all(|c| c["id"].is_i64() && c["text"].is_string()), "{args}");
+
+    // keeps none: no notes; a bad answer or an error: the plain top 3
+    *fake.admit_reply.lock().unwrap() = Some(Ok(json!({"keep": []})));
+    assert!(m.recall_for(MSG).is_empty());
+    *fake.admit_reply.lock().unwrap() = Some(Ok(json!({"keep": "all"})));
+    assert_eq!(m.recall_for(MSG), plain);
+    *fake.admit_reply.lock().unwrap() = Some(Err("agent_error".into()));
+    assert_eq!(m.recall_for(MSG), plain);
+    // no message to admit (nothing matches): the sidecar is not asked
+    let n = fake.admitted.lock().unwrap().len();
+    assert!(m.recall_for("Can you open the music widget").is_empty());
+    assert_eq!(fake.admitted.lock().unwrap().len(), n);
+    // the message names the day: those rows always go, and are never sent for admission
+    *fake.admit_reply.lock().unwrap() = Some(Ok(json!({"keep": []})));
+    assert_eq!(m.recall_for("What did we do today?").len(), 3);
+    assert_eq!(fake.admitted.lock().unwrap().len(), n, "only dated rows: nothing to admit");
+}
+
+#[test]
+fn a18_a_slow_admission_falls_back_to_the_plain_top_3_within_1_5_s() {
+    let (m, _) = mem("admit-slow", true);
+    let fake = Arc::new(Fake::default());
+    m.attach(fake.clone());
+    moments(&m, &fake, "u:launch", &LAUNCH);
+    let plain = m.recall_for(MSG);
+    m.set_admission(true);
+    *fake.admit_reply.lock().unwrap() = Some(Ok(json!({"keep": []})));
+    *fake.admit_delay.lock().unwrap() = Duration::from_secs(3);
+    let t0 = Instant::now();
+    let got = m.recall_for(MSG);
+    let took = t0.elapsed();
+    assert!(took >= ADMIT_DEADLINE && took < ADMIT_DEADLINE + Duration::from_millis(1_000), "{took:?}");
+    assert_eq!(got, plain, "the late answer (keep none) is not used");
+    // no sidecar at all: the plain top 3 at once
+    let (m2, _) = mem("admit-none", true);
+    let fake2 = Arc::new(Fake::default());
+    m2.attach(fake2.clone());
+    moments(&m2, &fake2, "u:launch", &LAUNCH);
+    m2.set_admission(true);
+    let t0 = Instant::now();
+    assert_eq!(m2.recall_for(MSG).len(), 3, "unsupported: fallback");
+    assert!(t0.elapsed() < Duration::from_millis(500));
+}
+
+/// A stand-in Ollama: one shared axis for words about speaking, a separate one for anything else.
+/// `slow_ms` delays each embed reply; `dims` sets its vectors' length (a wrong model). Each request has a thread.
+struct Ollama {
+    url: String,
+    server: Arc<tiny_http::Server>,
+    slow_ms: Arc<std::sync::atomic::AtomicU64>,
+    dims: Arc<AtomicUsize>,
+}
+
+impl Ollama {
+    fn start() -> Ollama {
+        let server = Arc::new(tiny_http::Server::http("127.0.0.1:0").unwrap());
+        let url = format!("http://{}", server.server_addr().to_ip().unwrap());
+        let (slow_ms, dims) = (Arc::new(std::sync::atomic::AtomicU64::new(0)), Arc::new(AtomicUsize::new(memory::DIMS)));
+        let (srv, slow, dim) = (server.clone(), slow_ms.clone(), dims.clone());
+        std::thread::spawn(move || {
+            for mut rq in srv.incoming_requests() {
+                let (slow, dim) = (slow.load(Ordering::SeqCst), dim.load(Ordering::SeqCst));
+                std::thread::spawn(move || {
+                    let mut body = String::new();
+                    let _ = rq.as_reader().read_to_string(&mut body);
+                    let reply = match rq.url() {
+                        "/api/tags" => json!({"models": [{"name": "nomic-embed-text:latest"}]}),
+                        "/api/embed" => {
+                            std::thread::sleep(Duration::from_millis(slow));
+                            let v: Value = serde_json::from_str(&body).unwrap_or_default();
+                            let rows: Vec<Vec<f32>> = v["input"].as_array().unwrap().iter().map(|t| axis(t.as_str().unwrap())[..dim].to_vec()).collect();
+                            json!({"embeddings": rows})
+                        }
+                        _ => json!({}),
+                    };
+                    let _ = rq.respond(tiny_http::Response::from_string(reply.to_string()));
+                });
+            }
+        });
+        Ollama { url, server, slow_ms, dims }
+    }
+}
+
+impl Drop for Ollama {
+    /// Gone for real: the accept loop lets go of the server, so the socket closes with this last handle.
+    fn drop(&mut self) {
+        self.server.unblock();
+        let t0 = Instant::now();
+        while Arc::strong_count(&self.server) > 1 && t0.elapsed() < Duration::from_secs(2) {
+            std::thread::yield_now();
+        }
+    }
+}
+
+fn axis(text: &str) -> Vec<f32> {
+    let t = text.to_lowercase();
+    let i = if ["talk", "speak", "calm", "nervous"].iter().any(|w| t.contains(w)) {
+        0
+    } else {
+        1 + t.bytes().map(usize::from).sum::<usize>() % 700
+    };
+    let mut v = vec![0.0; memory::DIMS];
+    v[i] = 1.0;
+    v
+}
+
+const TALK: &str = "Stressed about Friday's talk at the meetup";
+const CALM: &str = "How do I calm down before speaking?";
+
+#[test]
+fn a16_a17_vectors_turn_on_with_a_local_embedder_and_off_when_it_goes() {
+    let (m, _) = mem("vectors", true);
+    let fake = Arc::new(Fake::default());
+    m.attach(fake.clone());
+    moments(&m, &fake, "u:week", &[TALK, LAUNCH[3]]);
+    let ollama = Ollama::start();
+    m.set_vectors(Vectors::with(memory::embed::Embedder::new(&ollama.url, "nomic-embed-text").unwrap()));
+    assert!(!m.vectors().up(), "off until the first probe");
+    assert!(m.recall_for(CALM).is_empty(), "keyword only before the probe");
+
+    assert_eq!(super::jobs::vectors_once(&m), 2, "probe, then the backfill");
+    assert!(m.vectors().up());
+    assert_eq!(m.store().unwrap().vector_count(), 2);
+    assert_eq!(super::jobs::vectors_once(&m), 0, "nothing left to embed");
+    let got = m.recall_for(CALM);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(got[0].ends_with(TALK));
+
+    // Ollama goes away: the next message falls back to keywords quickly, and the next look probes again
+    // (a refused connection is off at once; a socket left hanging is "slow", off after SLOW_MAX in a row)
+    drop(ollama);
+    for _ in 0..SLOW_MAX {
+        let t0 = Instant::now();
+        assert!(m.recall_for(CALM).is_empty());
+        assert!(t0.elapsed() < QUERY_WAIT + Duration::from_millis(300), "{:?}", t0.elapsed());
+    }
+    assert!(!m.vectors().up());
+    assert!(m.vectors().probe_due());
+    assert_eq!(super::jobs::vectors_once(&m), 0);
+    assert!(!m.vectors().probe_due(), "a failed probe waits for the next 10 min one");
+    assert!(m.recall_for("I'm nervous about speaking at the meetup again").iter().any(|l| l.ends_with(TALK)), "keywords still answer");
+}
+
+#[test]
+fn a17_an_embed_url_off_loopback_is_ignored_and_memory_off_embeds_nothing() {
+    let v = Vectors::from_settings("http://192.0.2.10:11434", "nomic-embed-text");
+    assert!(v.embedder.is_none());
+    let (m, _) = mem("vectors-remote", true);
+    m.set_vectors(v);
+    assert_eq!(super::jobs::vectors_once(&m), 0);
+    assert!(!m.vectors().up());
+    // memory off: no probe and no backfill, even with a local embedder
+    let ollama = Ollama::start();
+    let (off, _) = mem("vectors-off", false);
+    off.set_vectors(Vectors::with(memory::embed::Embedder::new(&ollama.url, "nomic-embed-text").unwrap()));
+    assert_eq!(super::jobs::vectors_once(&off), 0);
+    assert!(off.vectors().probe_due(), "never probed");
+}
+
+#[test]
+fn a17_a_slow_query_skips_vectors_for_that_message_only() {
+    let (m, _) = mem("vectors-slow", true);
+    let fake = Arc::new(Fake::default());
+    m.attach(fake.clone());
+    moments(&m, &fake, "u:week", &[TALK, LAUNCH[3]]);
+    let ollama = Ollama::start();
+    m.set_vectors(Vectors::with(memory::embed::Embedder::new(&ollama.url, "nomic-embed-text").unwrap()));
+    assert_eq!(super::jobs::vectors_once(&m), 2);
+    ollama.slow_ms.store(2_000, Ordering::SeqCst);
+    let t0 = Instant::now();
+    assert!(m.recall_for(CALM).is_empty(), "over 500 ms: keywords only");
+    assert!(t0.elapsed() < QUERY_WAIT + Duration::from_millis(300), "{:?}", t0.elapsed());
+    assert!(m.vectors().up(), "busy is not gone: vectors stay on");
+    assert!(!m.vectors().probe_due());
+    ollama.slow_ms.store(0, Ordering::SeqCst);
+    assert!(m.recall_for(CALM).iter().any(|l| l.ends_with(TALK)), "the next message has them again");
+    // slow every time (hung): off after SLOW_MAX messages in a row, and the next look probes
+    ollama.slow_ms.store(2_000, Ordering::SeqCst);
+    for _ in 0..SLOW_MAX {
+        assert!(m.recall_for(CALM).is_empty());
+    }
+    assert!(!m.vectors().up());
+    assert!(m.vectors().probe_due());
+}
+
+#[test]
+fn a17_a_model_with_the_wrong_size_stays_off_until_the_regular_probe() {
+    let (m, _) = mem("vectors-dims", true);
+    let fake = Arc::new(Fake::default());
+    m.attach(fake.clone());
+    moments(&m, &fake, "u:week", &[TALK]);
+    let ollama = Ollama::start();
+    ollama.dims.store(384, Ordering::SeqCst);
+    m.set_vectors(Vectors::with(memory::embed::Embedder::new(&ollama.url, "nomic-embed-text").unwrap()));
+    // listed, but the warm-up embed is the wrong size: off, and no new probe on the next tick
+    assert_eq!(super::jobs::vectors_once(&m), 0);
+    assert!(!m.vectors().up());
+    assert!(!m.vectors().probe_due(), "no probe every tick for a model that can't work");
+    assert_eq!(m.store().unwrap().vector_count(), 0);
+    // on, then the model changes under it: the backfill fails, off, the same 10 min wait
+    ollama.dims.store(memory::DIMS, Ordering::SeqCst);
+    m.vectors().state().probed = None;
+    assert_eq!(super::jobs::vectors_once(&m), 1);
+    moments(&m, &fake, "u:more", &[LAUNCH[0]]);
+    ollama.dims.store(384, Ordering::SeqCst);
+    assert_eq!(super::jobs::vectors_once(&m), 0);
+    assert!(!m.vectors().up());
+    assert!(!m.vectors().probe_due());
+}
+
+#[test]
+fn an_empty_embed_model_is_off_with_its_own_reason() {
+    assert!(Vectors::from_settings("http://127.0.0.1:11434", " ").embedder.is_none());
 }

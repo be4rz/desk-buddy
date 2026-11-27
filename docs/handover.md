@@ -238,6 +238,41 @@ The agent tested both levels with fakes only: nothing here ever captured a real 
 - [ ] **Killed mid-look.** Quit the app with `kill -9` while a look runs, then relaunch.
   **Expect:** the chat shows the look as interrupted, and no second capture happens.
 
+## 10. Memory (D19)
+
+The agent tested memory with a fake model and a stand-in Ollama only. These need a signed-in account, and the last block
+needs a real Ollama. Use a scratch home so your own memory stays as it is:
+`BUDDY_HOME=$(mktemp -d) BUDDY_MEMORY_IDLE_S=30 cargo run -p buddy-app` (extraction after 30 idle seconds, not 5 minutes).
+
+- [ ] **The window.** In the tray, click **What I remember…**.
+  **Expect:** the window opens, empty, with the "Remember new things" switch on.
+- [ ] **Something told in chat.** Tell the bear "My cat is called Mochi and I live in Da Lat", then wait about a minute
+  (5 minutes without `BUDDY_MEMORY_IDLE_S`).
+  **Expect:** stderr shows `[buddy] memory extract 1 turns → 2 items` (counts only), and the window lists both facts.
+  After a relaunch the bear still knows them.
+- [ ] **Erase completely.** Erase the cat fact in the window, then ask "what's my cat called?".
+  **Expect:** the next reply doesn't know the name. `buddy memory search Mochi` finds nothing.
+- [ ] **History.** Chat about a few things over a day (or two), then open the window's History, and ask "what did we
+  talk about yesterday?".
+  **Expect:** History shows the days with their moments; the reply uses at most three of them.
+- [ ] **Admission (optional).** Quit, set `"admission": true` under `memory` in `settings.json`, relaunch and ask about
+  something remembered.
+  **Expect:** `[buddy] memory admit kept N of M` on stderr and a reply that uses only relevant notes. A slow model shows
+  `[buddy] memory admit fallback`, and the reply still comes, at most about 1.5 s later.
+
+**With Ollama running** (`ollama serve`, then `ollama pull nomic-embed-text`; loopback only, nothing else is ever asked).
+
+- [ ] **The real model.** `cargo test -p memory --test embed_local -- --ignored`.
+  **Expect:** it passes: "How do I calm down before speaking?" recalls the talk episode, and an unrelated message
+  recalls nothing.
+- [ ] **Vectors on.** Start the app with Ollama up.
+  **Expect:** `[buddy] memory vectors on` within a few seconds, then `[buddy] memory vectors embedded <n>` while it
+  catches up. Tell the bear about a stressful talk, wait for the extraction, then ask "how do I calm down before
+  speaking?" (no shared word): the reply draws on it.
+- [ ] **Ollama goes away.** Quit Ollama and send a message.
+  **Expect:** `[buddy] memory vectors off`, the reply is not held up, and recall goes on by keywords. Start Ollama again:
+  within 10 minutes `[buddy] memory vectors on` returns.
+
 ## Known limitations to judge
 
 These are known and unfixed. Each needs your call, not more QA. Some are design changes, others are

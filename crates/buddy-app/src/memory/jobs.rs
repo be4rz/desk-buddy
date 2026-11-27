@@ -12,14 +12,26 @@
 //! (`reflect_args`), asks the sidecar's `memory.reflect` (one model call, ≤ 125 s) and applies the reply
 //! in one transaction (`apply_reflect`, the 30% guard and retention inside), or marks the run failed.
 //!
-//! Logs: `[buddy] memory extract <n> turns → <m> items`, `[buddy] memory <outcome> <id>`,
+//! Vectors (p3): every tick, while memory is on and `settings.memory.embed` is a local URL, [`vectors_once`]
+//! probes the embedder (lists the model in 2 s, then one warm-up embed so the first message isn't a cold load;
+//! at start, every 10 min, and on the tick after an unreachable or slow call; a wrong-sized or refused reply
+//! waits for the 10 min probe, so a bad model doesn't retry every tick) and, while it
+//! answers, embeds up to [`BACKFILL`] rows without a vector (one call, ≤ 10 s, no store held) and stores
+//! them (`put_vectors`: dropped if the model changed or the row went meanwhile). A new model drops every
+//! vector first. No model, no module (`vectors_on`), or Ollama down: recall stays keyword only.
+//!
+//! Logs: `[buddy] memory vectors on|off`, `[buddy] memory vectors embedded <n>`, `[buddy] memory vectors failed (<why>)`,
+//! `[buddy] memory vectors reset (model changed, <n> dropped)`, `[buddy] memory extract <n> turns → <m> items`, `[buddy] memory <outcome> <id>`,
 //! `[buddy] memory extract failed (<code>)`, `[buddy] memory drop <request_id>`,
 //! `[buddy] memory reflect <batch8> done|failed|rejected (<pct>% changed)`. Never text.
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::{now, werr, Mem};
+use memory::embed::Embedder;
+use memory::Store;
+
+use super::{now, werr, Mem, Vectors, BACKFILL, BACKFILL_WAIT, PROBE_WAIT};
 
 /// How often the worker looks.
 pub const TICK: Duration = Duration::from_secs(30);
@@ -184,6 +196,81 @@ pub fn reflect_once(m: &Mem, user_idle: Duration) -> Ran {
     Ran::Reflected { batch8, outcome, pct }
 }
 
+/// The vector look (p3, every tick): the probe when due (at start, every 10 min, and after a failure),
+/// then one backfill batch of rows without a vector. Never on the prompt path. Returns how many it stored.
+pub fn vectors_once(m: &Mem) -> usize {
+    let v = m.vectors();
+    let Some(e) = v.embedder.clone() else { return 0 };
+    if !m.enabled() {
+        return 0;
+    }
+    let Some((store, gen)) = m.store_gen() else { return 0 };
+    if !store.vectors_on() {
+        v.set(false);
+        return 0;
+    }
+    if v.probe_due() {
+        drop(store);
+        // listed, then loaded (a cold model would miss the first message's 500 ms)
+        let ok = e.probe(PROBE_WAIT) && e.warm(BACKFILL_WAIT);
+        v.probed();
+        v.set(ok);
+        if !ok {
+            return 0;
+        }
+        let Some((s, g)) = m.store_gen() else { return 0 };
+        if g != gen {
+            return 0;
+        }
+        return backfill(m, &v, &e, s, g);
+    }
+    if !v.up() {
+        return 0;
+    }
+    backfill(m, &v, &e, store, gen)
+}
+
+fn backfill(m: &Mem, v: &Vectors, e: &Embedder, store: Arc<Store>, gen: u64) -> usize {
+    let had = store.vector_count();
+    match store.set_embed_model(e.model()) {
+        Ok(true) if had > 0 => eprintln!("[buddy] memory vectors reset (model changed, {had} dropped)"),
+        Ok(_) => {}
+        Err(err) => {
+            eprintln!("[buddy] memory vectors not kept: {}", werr(&err));
+            return 0;
+        }
+    }
+    let todo = match store.vectors_todo(BACKFILL) {
+        Ok(t) if !t.is_empty() => t,
+        _ => return 0,
+    };
+    drop(store);
+    let texts: Vec<String> = todo.iter().map(|(_, t)| t.clone()).collect();
+    let vecs = match e.documents(&texts, BACKFILL_WAIT) {
+        Ok(x) => x,
+        Err(why) => {
+            eprintln!("[buddy] memory vectors failed ({why})");
+            v.failed(why);
+            return 0;
+        }
+    };
+    let Some((store, g)) = m.store_gen() else { return 0 };
+    if g != gen || !m.enabled() {
+        return 0;
+    }
+    let rows: Vec<(i64, String, Vec<f32>)> = todo.into_iter().zip(vecs).map(|((id, t), v)| (id, t, v)).collect();
+    match store.put_vectors(e.model(), &rows) {
+        Ok(n) => {
+            eprintln!("[buddy] memory vectors embedded {n}");
+            n
+        }
+        Err(err) => {
+            eprintln!("[buddy] memory vectors not kept: {}", werr(&err));
+            0
+        }
+    }
+}
+
 /// Start the worker (with the harness). It lives as long as the app.
 pub fn start(m: Arc<Mem>) {
     let idle = idle();
@@ -192,9 +279,12 @@ pub fn start(m: Arc<Mem>) {
     }
     let spawned = std::thread::Builder::new().name("buddy-memory".into()).spawn(move || {
         let mut last_reflect = std::time::Instant::now();
+        // the first probe at start, not 30 s in
+        vectors_once(&m);
         loop {
             std::thread::sleep(TICK);
             run_once(&m, idle);
+            vectors_once(&m);
             if last_reflect.elapsed() >= REFLECT_EVERY {
                 last_reflect = std::time::Instant::now();
                 reflect_once(&m, Duration::from_millis(crate::senses::idle::idle_ms()));

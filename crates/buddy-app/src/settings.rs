@@ -184,18 +184,36 @@ impl Persona {
 }
 
 /// `settings.memory` (v5): `enabled` is the window's "Remember new things" switch (on by default);
-/// `admission` is stored only (nothing reads it yet).
+/// `admission` (p3, off by default) sends recall's top 10 to a quick model call that keeps the ones that matter;
+/// `embed` (p3, serde defaults, no version bump) is the local Ollama recall's vectors come from.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Memory {
     pub enabled: bool,
     pub admission: bool,
+    pub embed: Embed,
     #[serde(flatten)]
     pub extra: Extra,
 }
 impl Default for Memory {
     fn default() -> Self {
-        Memory { enabled: true, admission: false, extra: Extra::new() }
+        Memory { enabled: true, admission: false, embed: Embed::default(), extra: Extra::new() }
+    }
+}
+
+/// `settings.memory.embed` (I7): `url` must be `http://` on `127.0.0.1`, `localhost` or `[::1]`; any other is
+/// ignored (`[buddy] memory embed url ignored (not local)`) and recall stays keyword only.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct Embed {
+    pub url: String,
+    pub model: String,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+impl Default for Embed {
+    fn default() -> Self {
+        Embed { url: memory::embed::DEFAULT_URL.into(), model: memory::embed::DEFAULT_MODEL.into(), extra: Extra::new() }
     }
 }
 
@@ -439,7 +457,7 @@ mod tests {
             "org.keepassxc.keepassxc","com.lastpass.*","com.dashlane.*","com.apple.Passwords",
             "com.apple.keychainaccess","com.apple.MobileSMS","com.apple.mail","net.whatsapp.WhatsApp",
             "ru.keepcoder.Telegram","org.whispersystems.signal-desktop"]},
-            "memory":{"enabled":true,"admission":false}}"#,
+            "memory":{"enabled":true,"admission":false,"embed":{"url":"http://127.0.0.1:11434","model":"nomic-embed-text"}}}"#,
         )
         .unwrap();
         assert_eq!(v, want);
@@ -658,6 +676,23 @@ mod tests {
         // a v5 file without the key is on
         std::fs::write(path(&h), r#"{"settings_version":5}"#).unwrap();
         assert_eq!(load(&h).0.memory, Memory::default());
+    }
+
+    #[test]
+    fn memory_embed_has_defaults_without_a_version_bump_and_keeps_the_persons_values() {
+        let h = tmp_home("embed");
+        std::fs::write(path(&h), r#"{"settings_version":5,"memory":{"enabled":true,"admission":true}}"#).unwrap();
+        let (s, note) = load(&h);
+        assert_eq!(note, None);
+        assert_eq!((s.settings_version, s.memory.admission), (5, true));
+        assert_eq!(s.memory.embed, Embed::default());
+        assert_eq!((s.memory.embed.url.as_str(), s.memory.embed.model.as_str()), ("http://127.0.0.1:11434", "nomic-embed-text"));
+        std::fs::write(path(&h), r#"{"settings_version":5,"memory":{"embed":{"url":"http://localhost:11500","model":"mxbai-embed-large","x":1}}}"#).unwrap();
+        let (s, _) = load(&h);
+        assert_eq!((s.memory.embed.url.as_str(), s.memory.embed.model.as_str()), ("http://localhost:11500", "mxbai-embed-large"));
+        s.save(&h).unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(path(&h)).unwrap()).unwrap();
+        assert_eq!((v["settings_version"].as_u64(), v["memory"]["embed"]["x"].as_u64()), (Some(5), Some(1)));
     }
 
     #[test]

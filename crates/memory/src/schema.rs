@@ -4,7 +4,7 @@ use crate::Result;
 use rusqlite::{Connection, Params, TransactionBehavior};
 
 /// The `user_version` this crate writes. A file with a higher one opens read-only.
-pub const VERSION: i64 = 2;
+pub const VERSION: i64 = 3;
 
 const V1: &str = "
 CREATE TABLE facts (
@@ -80,8 +80,65 @@ END;
 INSERT INTO facts_fts(facts_fts) VALUES ('rebuild');
 ";
 
+// Vectors (p3). `facts_vec` needs the sqlite-vec module, so [`ensure_vec`] makes it on each writable open where the
+// module loaded, and a store without it is keyword only. `vec_rows` is a plain table (no module needed) naming the
+// facts that have a vector; its trigger runs on every delete, so a fact erased while the module was missing never
+// lends its vector to a later fact that reuses the id: the next open with the module drops every vector it doesn't list.
+const V3: &str = "
+CREATE TABLE vec_rows (id INTEGER PRIMARY KEY);
+CREATE TRIGGER vec_rows_ad AFTER DELETE ON facts BEGIN
+  DELETE FROM vec_rows WHERE id = old.id;
+END;
+";
+
 /// `MIGRATIONS[n]` takes a file from user_version `n` to `n + 1`.
-const MIGRATIONS: [&str; 2] = [V1, V2];
+const MIGRATIONS: [&str; 3] = [V1, V2, V3];
+
+/// The embedding size `facts_vec` holds (`nomic-embed-text`).
+pub const DIMS: usize = 768;
+
+/// Whether this connection has the sqlite-vec functions (`vec_version()` answers).
+pub(crate) fn vec_loaded(conn: &Connection) -> bool {
+    conn.query_row("SELECT vec_version()", [], |r| r.get::<_, String>(0)).is_ok()
+}
+
+/// The rows recall may bring back (live day moments and keyless notes); the core section is taken out later.
+pub(crate) const RECALLABLE: &str = "f.status = 'live' AND (f.kind IN ('episode', 'insight') OR f.predicate IS NULL)";
+
+/// Zeroes, then deletes, the vectors of the facts `ids_sql` (a subquery) names. The zeroing writes over the
+/// vector's bytes in its chunk, so an erased fact's embedding is not left in the file even if a vec0 delete only
+/// cleared its validity bit (sqlite-vec 0.1.9 with `secure_delete` already leaves none: `tests/hybrid.rs` checks the bytes).
+pub(crate) fn drop_vectors_sql(ids_sql: &str) -> String {
+    format!(
+        "UPDATE facts_vec SET embedding = zeroblob({b}) WHERE rowid IN ({ids_sql});
+         DELETE FROM facts_vec WHERE rowid IN ({ids_sql});",
+        b = DIMS * 4
+    )
+}
+
+/// Brings `facts_vec` in line with the module (each writable open, after [`migrate`]). Loaded: the table (one
+/// normalised embedding per row, keyed by fact id, cosine distance), its delete trigger, and no vector that
+/// `vec_rows` doesn't list or whose fact is no longer live. Not loaded: the trigger goes, so deleting a fact never
+/// needs the missing module (`vec_rows` still forgets it; a later loaded open drops the vector). Returns whether
+/// vectors are on.
+pub(crate) fn ensure_vec(conn: &Connection, loaded: bool) -> Result<bool> {
+    if !loaded {
+        conn.execute_batch("DROP TRIGGER IF EXISTS facts_vec_ad;")?;
+        return Ok(false);
+    }
+    conn.execute_batch(&format!(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS facts_vec USING vec0(embedding float[{DIMS}] distance_metric=cosine);
+         CREATE TRIGGER IF NOT EXISTS facts_vec_ad AFTER DELETE ON facts BEGIN
+           UPDATE facts_vec SET embedding = zeroblob({b}) WHERE rowid = old.id;
+           DELETE FROM facts_vec WHERE rowid = old.id;
+         END;
+         DELETE FROM vec_rows WHERE id NOT IN (SELECT id FROM facts WHERE status = 'live');
+         {sweep}",
+        b = DIMS * 4,
+        sweep = drop_vectors_sql("SELECT rowid FROM facts_vec WHERE rowid NOT IN (SELECT id FROM vec_rows)")
+    ))?;
+    Ok(true)
+}
 
 pub fn user_version(conn: &Connection) -> Result<i64> {
     Ok(conn.pragma_query_value(None, "user_version", |r| r.get(0))?)

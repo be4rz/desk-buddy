@@ -31,6 +31,8 @@ export type ExtractArgs = { turns: MemoryTurnIn[]; known: MemoryKnown[]; registr
 export const bad = (message: string) => new CmdError("bad_request", message);
 export const clip = (s: string, max: number) => (s.length <= max ? s : [...s].slice(0, max).join(""));
 export const str = (v: unknown): string | null => (typeof v === "string" ? v : typeof v === "number" && Number.isFinite(v) ? String(v) : null);
+/** An integer id or count: a whole number, or a string of digits. */
+export const int = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) ? v : typeof v === "string" && /^\d+$/.test(v) ? Number(v) : null);
 
 /** Check the command's arguments (1..10 turns, `u:` ids only). */
 export function parseArgs(args: Record<string, unknown>): ExtractArgs {

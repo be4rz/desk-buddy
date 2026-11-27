@@ -15,3 +15,13 @@ jiff = "0.2"
 unicode-normalization = "0.1"
 regex = "1"
 sha2 = "0.10"
+# vectors (p3): sqlite-vec compiled in (MIT/Apache-2.0); ureq without TLS or proxies, so only http on loopback can connect
+sqlite-vec = { version = "0.1.6", optional = true }
+ureq = { version = "2", default-features = false, features = ["json"] }
+
+[features]
+default = ["vec"]
+vec = ["dep:sqlite-vec"]
+
+[dev-dependencies]
+tiny_http.workspace = true

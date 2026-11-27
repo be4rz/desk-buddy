@@ -536,7 +536,7 @@ animation plugs into it.
 | A5 | **Real clips for the borrowed intents** | ✅ built (stages e + x, 19 one-shots; the 11 intents play their own clip first with the old chain behind; 16 new gesture emotes in `mascot list` and the prompt; `emotes.jsonl` replay) | A1 |
 | A6 | **Desktop reactions, prop activities, rare surprises** | ✅ built (p4 reactions: pack `contexts` + `reactions`, cursor sense, drag dangle/land/dizzy, flinch/pet/follow, morning, evening, away, approval_wait, edge entries; stages r s w. p5: 16 prop activities in set stages sit_a sit_b play out + nightcap, idle `long` entries and `buddy mascot do`; 11 rare surprises in stage z on 2400–3600 s cooldowns, seasonal hats by month; sheet index `out/bear3d/sheets.html`) | A4 |
 | A7 | **Personality** (added 2026-11-26) | ✅ built (pack `persona` block, 4 bear presets, "Who you are" prompt section + `set_persona`, settings v3 `persona`, tray Personality ▸ + `persona` window, canned idle lines, persona-voiced check-ins, studio Personality tab, `buddy studio persona render`, `audit --preset`) | A1, A6 |
-| M | **Memory** (bs-yvhhdi5o, added 2026-11-27, D19): p1 core, p2 history/search/reflection, p3 vectors/admission | ✅ p1 built (`crates/memory` facts store + reconcile + render, `memory.extract`, `set_memory` section, `buddy memory remember\|forget\|list\|search\|open`, the gate's private-folder deny, What I remember window + tray item, settings v5 `memory`) · ⬜ p2 · ⬜ p3 | A7 |
+| M | **Memory** (bs-yvhhdi5o, added 2026-11-27, D19): p1 core, p2 history/search/reflection, p3 vectors/admission | ✅ p1 built (`crates/memory` facts store + reconcile + render, `memory.extract`, `set_memory` section, `buddy memory remember\|forget\|list\|search\|open`, the gate's private-folder deny, What I remember window + tray item, settings v5 `memory`) · ✅ p2 built (episodes, FTS5 search, recall on the message, `buddy memory recall`, reflection, History) · ✅ p3 built (optional sqlite-vec vectors from a loopback Ollama, hybrid recall, `memory.admit` under 1.5 s) | A7 |
 
 **Who decides an animation** (applies to every step):
 
@@ -699,8 +699,19 @@ choice > the automatic default.
 - Person: tray **What I remember…** opens the window: what it knows by group,
   disputes to answer, edit, forget, erase completely, forget everything (typed
   phrase) and the "Remember new things" switch (`settings.memory`, v5).
-- Next: p2 history, keyword search, recall on the message and reflection; p3
-  optional local vectors and admission.
+- History (p2): episodes, keyword search (FTS5), up to 3 recalled lines on each
+  chat message, `buddy memory recall <day>`, reflection while away, History.
+- Vectors and admission (p3): schema v3 adds `facts_vec` (sqlite-vec, 768-dim
+  cosine; optional, the store runs keyword only without it) in the same private
+  file. Embeddings come only from an Ollama on loopback (`settings.memory.embed`,
+  default `http://127.0.0.1:11434` + `nomic-embed-text`; any other URL is
+  ignored, the client has no TLS, proxy or redirects and resolves only to
+  loopback), backfilled on the jobs thread. Recall is hybrid (0.7 cosine + 0.3
+  BM25, never below the keyword score, then recency × importance) while it
+  answers, keywords otherwise; erase removes the vector too. With
+  `settings.memory.admission` the top 10 undated candidates go to the sidecar's
+  `memory.admit` (one call on the chat model), cut at 1.5 s back to the plain
+  top 3; rows the message names the day of always go.
 
 ## 8. Open questions
 

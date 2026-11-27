@@ -15,16 +15,16 @@ fn guess_city(s: &Store, v: &str) -> Outcome {
 // ---- open, files, versions ----
 
 #[test]
-fn open_creates_a_wal_store_at_user_version_2() {
+fn open_creates_a_wal_store_at_user_version_3() {
     let tmp = Tmp::new();
     let dir = tmp.0.join("a").join("memory");
     let s = Store::open(&dir).unwrap();
     assert!(!s.is_newer());
     assert_eq!(s.dir(), dir);
     let c = db(&dir);
-    assert_eq!(c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
+    assert_eq!(c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), 3);
     assert_eq!(c.query_row("PRAGMA journal_mode", [], |r| r.get::<_, String>(0)).unwrap(), "wal");
-    for t in ["facts", "pending_turns", "reflections", "insight_sources", "meta", "facts_fts"] {
+    for t in ["facts", "pending_turns", "reflections", "insight_sources", "meta", "facts_fts", "vec_rows", "facts_vec"] {
         assert_eq!(count(&dir, &format!("SELECT count(*) FROM sqlite_master WHERE name = '{t}'")), 1, "{t}");
     }
     assert_eq!(count(&dir, "SELECT count(*) FROM pragma_table_info('pending_turns') WHERE name = 'tries'"), 1);
@@ -102,7 +102,7 @@ fn a_newer_file_opens_read_only() {
     let fresh = Store::forget_all(&tmp.mem()).unwrap();
     assert!(!fresh.is_newer());
     assert_eq!(fresh.list(None).unwrap().len(), 0);
-    assert_eq!(count(&tmp.mem(), "PRAGMA user_version"), 2);
+    assert_eq!(count(&tmp.mem(), "PRAGMA user_version"), 3);
     fresh.add("profile", "Likes tea", &now()).unwrap();
 }
 

@@ -22,12 +22,55 @@ const MAX_TRIES: i64 = 3;
 const MAX_PENDING_DAYS: i32 = 7;
 /// `meta` key: the importance of everything stored since the last reflection run.
 pub(crate) const REFLECT_IMPORTANCE: &str = "importance_since_reflection";
+/// `meta` key: the model the vectors in `facts_vec` were made with.
+const EMBED_MODEL: &str = "embed_model";
+
+/// An embedding as sqlite-vec's float32 blob (little-endian).
+pub(crate) fn vec_blob(v: &[f32]) -> Vec<u8> {
+    v.iter().flat_map(|x| x.to_le_bytes()).collect()
+}
+
+/// How a store opens.
+#[derive(Debug, Clone, Copy)]
+pub struct Opts {
+    /// Use sqlite-vec when it loads (the default). `false` opens keyword only, as when the module failed to load.
+    pub vec: bool,
+}
+
+impl Default for Opts {
+    fn default() -> Opts {
+        Opts { vec: true }
+    }
+}
+
+/// Registers sqlite-vec for every connection this process opens later (once).
+fn register_vec() {
+    #[cfg(feature = "vec")]
+    {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            // SAFETY: sqlite3_vec_init is the extension's entry point with the signature auto_extension expects
+            // (sqlite-vec's own documented use); it is registered once, before any connection of this crate opens.
+            unsafe {
+                type Init = unsafe extern "C" fn(
+                    *mut rusqlite::ffi::sqlite3,
+                    *mut *mut std::os::raw::c_char,
+                    *const rusqlite::ffi::sqlite3_api_routines,
+                ) -> std::os::raw::c_int;
+                let init: Init = std::mem::transmute(sqlite_vec::sqlite3_vec_init as *const ());
+                rusqlite::ffi::sqlite3_auto_extension(Some(init));
+            }
+        });
+    }
+}
 
 /// The memory store. `Send + Sync`: share it as `Arc<Store>`.
 pub struct Store {
     conn: Mutex<Connection>,
     dir: PathBuf,
     newer: bool,
+    /// `facts_vec` is there and sqlite-vec answers: recall can be hybrid (p3).
+    vec: bool,
     /// The core-section revision and the text it was last seen as.
     rev: Mutex<(u64, String)>,
     /// Held while the generated files are read from the store and written, so two threads never share a
@@ -40,6 +83,15 @@ impl Store {
     /// A file with a newer user_version opens **read-only** (see [`Store::is_newer`]); a file that
     /// isn't a database fails with `Error::Store`.
     pub fn open(dir: &Path) -> Result<Store> {
+        Store::open_opts(dir, Opts::default())
+    }
+
+    /// [`Store::open`] with options. With `vec` (the default) and sqlite-vec loaded, the store keeps
+    /// `facts_vec`; otherwise it is keyword only (see [`Store::vectors_on`]).
+    pub fn open_opts(dir: &Path, opts: Opts) -> Result<Store> {
+        if opts.vec {
+            register_vec();
+        }
         std::fs::create_dir_all(dir)?;
         let mut conn = Connection::open(dir.join(DB))?;
         conn.busy_timeout(Duration::from_secs(2))?;
@@ -48,13 +100,15 @@ impl Store {
         // An erased row's bytes are zeroed in the file, not left in a free page.
         conn.pragma_update(None, "secure_delete", true)?;
         let newer = schema::user_version(&conn)? > VERSION;
+        let mut vec = false;
         if newer {
             conn.pragma_update(None, "query_only", true)?;
         } else {
             schema::migrate(&mut conn)?;
+            vec = schema::ensure_vec(&conn, opts.vec && schema::vec_loaded(&conn))?;
         }
         let first = if newer { String::new() } else { render::section(&conn)? };
-        Ok(Store { conn: Mutex::new(conn), dir: dir.to_path_buf(), newer, rev: Mutex::new((0, first)), files: Mutex::new(()) })
+        Ok(Store { conn: Mutex::new(conn), dir: dir.to_path_buf(), newer, vec, rev: Mutex::new((0, first)), files: Mutex::new(()) })
     }
 
     pub fn dir(&self) -> &Path {
@@ -94,6 +148,102 @@ impl Store {
 
     pub(crate) fn vacuum(&self) -> Result<()> {
         Ok(self.lock().execute_batch("VACUUM")?)
+    }
+
+    // ---- vectors (p3) ----
+
+    /// Whether `facts_vec` is there and sqlite-vec answers (and the file is ours to write): recall can be hybrid.
+    pub fn vectors_on(&self) -> bool {
+        self.vec && !self.newer
+    }
+
+    /// Records the embedding model. A different one than the vectors were made with drops them all (the next
+    /// backfill makes new ones); returns whether it did. A no-op without vectors.
+    pub fn set_embed_model(&self, model: &str) -> Result<bool> {
+        if !self.vectors_on() {
+            return Ok(false);
+        }
+        self.write_quiet(|c| {
+            if schema::meta_get(c, EMBED_MODEL).as_deref() == Some(model) {
+                return Ok(false);
+            }
+            let tx = c.transaction()?;
+            tx.execute_batch(&schema::drop_vectors_sql("SELECT id FROM vec_rows"))?;
+            tx.execute("DELETE FROM vec_rows", [])?;
+            schema::meta_set(&tx, EMBED_MODEL, model)?;
+            tx.commit()?;
+            Ok(true)
+        })
+    }
+
+    /// Up to `n` recallable rows without a vector, newest first, as `(id, text)` for the embedder. Vectors of
+    /// rows that stopped being live go first. Empty without vectors.
+    pub fn vectors_todo(&self, n: usize) -> Result<Vec<(i64, String)>> {
+        if !self.vectors_on() || n == 0 {
+            return Ok(Vec::new());
+        }
+        self.write_quiet(|c| {
+            let stale = "SELECT v.id FROM vec_rows v LEFT JOIN facts f ON f.id = v.id WHERE f.status IS NOT 'live'";
+            // a write only when something went stale (this runs every jobs tick)
+            let any: bool = c.query_row(&format!("SELECT EXISTS ({stale})"), [], |r| r.get(0))?;
+            if any {
+                let tx = c.transaction()?;
+                tx.execute_batch(&schema::drop_vectors_sql(stale))?;
+                tx.execute(&format!("DELETE FROM vec_rows WHERE id IN ({stale})"), [])?;
+                tx.commit()?;
+            }
+            let mut st = c.prepare(&format!(
+                "SELECT f.id, f.text FROM facts f WHERE {} AND f.id NOT IN (SELECT id FROM vec_rows)
+                 ORDER BY f.observed_at DESC, f.id DESC LIMIT ?1",
+                schema::RECALLABLE
+            ))?;
+            let rows = st.query_map([n as i64], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// Stores embeddings made with `model` (each [`schema::DIMS`] long and normalised) as `(id, the text that was
+    /// embedded, vector)`, for rows that are still live, recallable and hold that same text (ids are reused, so a
+    /// row erased during the embed call can't hand its vector to a new one). Nothing is stored when the model
+    /// changed since (a late batch). Returns how many.
+    pub fn put_vectors(&self, model: &str, rows: &[(i64, String, Vec<f32>)]) -> Result<usize> {
+        if !self.vectors_on() || rows.is_empty() {
+            return Ok(0);
+        }
+        if rows.iter().any(|(_, _, v)| v.len() != schema::DIMS || v.iter().any(|x| !x.is_finite())) {
+            return Err(Error::Usage("an embedding of the wrong size".into()));
+        }
+        self.write_quiet(|c| {
+            if schema::meta_get(c, EMBED_MODEL).as_deref() != Some(model) {
+                return Ok(0);
+            }
+            let tx = c.transaction()?;
+            let mut n = 0;
+            for (id, text, v) in rows {
+                let ok: bool = tx.query_row(
+                    &format!("SELECT EXISTS (SELECT 1 FROM facts f WHERE f.id = ?1 AND f.text = ?2 AND {})", schema::RECALLABLE),
+                    params![id, text],
+                    |r| r.get(0),
+                )?;
+                if !ok {
+                    continue;
+                }
+                tx.execute_batch(&schema::drop_vectors_sql(&id.to_string()))?;
+                tx.execute("INSERT INTO facts_vec (rowid, embedding) VALUES (?1, ?2)", params![id, vec_blob(v)])?;
+                tx.execute("INSERT OR IGNORE INTO vec_rows (id) VALUES (?1)", [id])?;
+                n += 1;
+            }
+            tx.commit()?;
+            Ok(n)
+        })
+    }
+
+    /// How many rows have a vector (tests and the log's counts).
+    pub fn vector_count(&self) -> usize {
+        if !self.vectors_on() {
+            return 0;
+        }
+        self.lock().query_row("SELECT count(*) FROM vec_rows", [], |r| r.get::<_, i64>(0)).map_or(0, |n| n as usize)
     }
 
     // ---- extraction ----

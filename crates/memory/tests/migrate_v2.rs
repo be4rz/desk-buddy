@@ -8,13 +8,14 @@ fn fts(dir: &std::path::Path, q: &str) -> i64 {
     count(dir, &format!("SELECT count(*) FROM facts_fts WHERE facts_fts MATCH '{q}'"))
 }
 
-/// A file exactly as v1 left it: the v2 index, its triggers and the version stamp removed.
+/// A file exactly as v1 left it: the v2 index, the v3 vector tables, their triggers and the version stamp removed.
 fn v1_file(tmp: &Tmp) {
     let s = Store::open(&tmp.mem()).unwrap();
     drop(s);
     let c = db(&tmp.mem());
     c.execute_batch(
-        "DROP TRIGGER facts_ai; DROP TRIGGER facts_ad; DROP TRIGGER facts_au; DROP TABLE facts_fts; PRAGMA user_version = 1;",
+        "DROP TRIGGER facts_vec_ad; DROP TABLE facts_vec; DROP TRIGGER vec_rows_ad; DROP TABLE vec_rows;
+         DROP TRIGGER facts_ai; DROP TRIGGER facts_ad; DROP TRIGGER facts_au; DROP TABLE facts_fts; PRAGMA user_version = 1;",
     )
     .unwrap();
     // rows written while the file was v1 (no triggers)
@@ -41,8 +42,8 @@ fn a_v1_file_opens_migrates_and_finds_its_old_rows() {
 
     let s = Store::open(&tmp.mem()).unwrap();
     assert!(!s.is_newer());
-    assert_eq!(count(&tmp.mem(), "PRAGMA user_version"), 2);
-    for t in ["facts_fts", "facts_ai", "facts_ad", "facts_au"] {
+    assert_eq!(count(&tmp.mem(), "PRAGMA user_version"), 3);
+    for t in ["facts_fts", "facts_ai", "facts_ad", "facts_au", "vec_rows", "vec_rows_ad"] {
         assert_eq!(count(&tmp.mem(), &format!("SELECT count(*) FROM sqlite_master WHERE name = '{t}'")), 1, "{t}");
     }
     // the rebuild indexed the old rows, accents folded
@@ -84,16 +85,17 @@ fn erase_removes_the_text_from_the_index() {
 }
 
 #[test]
-fn a_file_newer_than_v2_opens_read_only_and_is_not_touched() {
+fn a_file_newer_than_v3_opens_read_only_and_is_not_touched() {
     let tmp = Tmp::new();
     let s = Store::open(&tmp.mem()).unwrap();
     episode(&s, date(2026, 11, 26), "Fixed the login bug", 5);
     drop(s);
-    db(&tmp.mem()).pragma_update(None, "user_version", 3).unwrap();
+    db(&tmp.mem()).pragma_update(None, "user_version", 4).unwrap();
     let s = Store::open(&tmp.mem()).unwrap();
     assert!(s.is_newer());
+    assert!(!s.vectors_on(), "a newer file is never written, vectors included");
     assert_eq!(s.search("login", 5).unwrap().len(), 1, "reads still use the index");
     assert_eq!(s.add("profile", "x", &now()), Err(memory::Error::Newer));
     drop(s);
-    assert_eq!(count(&tmp.mem(), "PRAGMA user_version"), 3);
+    assert_eq!(count(&tmp.mem(), "PRAGMA user_version"), 4);
 }

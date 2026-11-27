@@ -65,6 +65,12 @@ services:
     # opens only the studio window (no pack: the library view); no host.json, app.lock or sidecar; writes BUDDY_HOME/packs
     # and settings `pack` only on an explicit action (create, save, delete, customize, restore, Put on desktop)
     start: BUDDY_HOME=<tmp> cargo run -p buddy-app -- --studio mascots/bear
+  memory:
+    cwd: .
+    # memory (D19): store, reconcile, history, recall; p3 vectors from a stand-in Ollama on loopback (never a real one in
+    # CI; real model: cargo test -p memory --test embed_local -- --ignored) and admission under the 1.5 s deadline
+    check: cargo test -p memory -p buddy-app -p bridge && (cd agent && bun test test/scenarios/memory.test.ts)
+    start: cargo build -p host --bin buddy && BUDDY_HOME=<tmp> BUDDY_MEMORY_IDLE_S=30 BUDDY_FAKE_MODEL=http://127.0.0.1:<p> cargo run -p buddy-app
   agent-sidecar:
     cwd: agent
     # needs bun; builds dist/buddy-agent (~68 MB) and runs it against the scripted fake model
@@ -120,5 +126,9 @@ flows: >-
   studio_delete / studio_save aimed at a built-in → refused, the shipped folder's bytes unchanged;
   studio error: a truncated or garbage .aseprite → "…; nothing written", exit 1, the pack unchanged; a second import of the same name refuses;
   a broken pack.json while the studio is open → banner #studio-lint-error, the last good pack keeps playing; bad CLI args exit 2;
+  memory: with Ollama absent the app logs no "memory vectors on" and recall is keyword only; a stand-in Ollama on loopback turns
+  "[buddy] memory vectors on" and recall finds an episode by meaning; settings.memory.embed.url off loopback logs
+  "[buddy] memory embed url ignored (not local)"; memory error: admission slower than 1.5 s → "[buddy] memory admit fallback"
+  and the plain top 3; erase leaves no vector in the file;
   human checks on the real desktop: docs/handover.md;
   harness error: a denied card never reaches the host; a model error ends in an "error" event and exit 1; kill -9 mid-tool restarts with an "interrupted" entry

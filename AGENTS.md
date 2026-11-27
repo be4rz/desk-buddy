@@ -78,7 +78,15 @@ and talks through speech bubbles, powered by an LLM. The repo is public and open
   typed words), `buddy memory recall <YYYY-MM-DD|today|yesterday|last-week>`, reflection on the jobs thread every 10 min
   after 30 min away (`memory.reflect`, `agent/src/ext/memory/reflect.ts`; one tx, the 30% guard, retention inside; log
   `[buddy] memory reflect <batch8> done|failed|rejected (<pct>% changed)`), `BUDDY_HOME/memory/notes/YYYY-MM-DD.md`, and
-  the window's History (`memory_history {before}`, `?mock=history`); replay `crates/buddy-app/tests/fixtures/memory_history.jsonl`. The memory folder is private to every tool and shell word (`policy::memory`).
+  the window's History (`memory_history {before}`, `?mock=history`); replay `crates/buddy-app/tests/fixtures/memory_history.jsonl`. Vectors and admission (p3): schema v3 `facts_vec` (sqlite-vec, feature `vec`, 768-dim cosine; missing module = keyword
+  only) + `vec_rows`; embeddings only from a loopback Ollama (`settings.memory.embed {url, model}`, default
+  `http://127.0.0.1:11434` + `nomic-embed-text`, no version bump; `memory::embed`: http on 127.0.0.1/localhost/[::1] only,
+  no TLS/proxy/redirects, loopback-only resolver; else `[buddy] memory embed url ignored (not local)`, an empty model `[buddy] memory embed model missing`); the jobs thread
+  probes (lists the model, then a warm-up embed; start, every 10 min, after an unreachable or slow call; `[buddy] memory vectors on|off`) and backfills ≤ 32 a tick; hybrid recall
+  0.7 cos + 0.3 BM25, never below the keyword score (`recall.rs` `VEC_FLOOR`/`VEC_SPAN`), query embed ≤ 500 ms (3 slow in a row = off). `settings.memory.admission`: top 10 undated (rows the message names the day of always go) →
+  sidecar `memory.admit` (`agent/src/ext/memory/admit.ts`, 1.4 s) under the app's 1.5 s deadline, else the plain top 3
+  (`[buddy] memory admit fallback`). Tests use a stand-in Ollama; real model: `cargo test -p memory --test embed_local --
+  --ignored`. The memory folder is private to every tool and shell word (`policy::memory`).
   Logs carry ids, counts and outcome words only, never fact text, quotes or what was said. Replay
   `crates/buddy-app/tests/fixtures/memory.jsonl`; live eval `BUDDY_EVAL=1 bun run agent/scripts/memory-eval.ts` (real key,
   never in CI).

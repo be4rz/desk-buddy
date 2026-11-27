@@ -312,3 +312,57 @@ test("memory.reflect: an empty answer is empty lists; no JSON is bad_output; arg
   expect(await d.send("memory.reflect", reflectArgs())).toMatchObject({ ok: false, error: { code: "no_provider" } });
   await d.shutdown();
 }, 40000);
+
+// ---- p3: memory.admit ----
+
+const admitArgs = (extra: Record<string, unknown> = {}) => ({
+  message: "How do I calm down before speaking?",
+  candidates: [
+    { id: 101, text: "2026-11-20: Stressed about Friday's talk at the meetup; practised the intro twice" },
+    { id: 102, text: "2026-11-25: Cooked noodles for lunch and fixed a bike tyre" },
+    { id: 103, text: "2026-11-26: Walked to the lake with Lan" },
+  ],
+  ...extra,
+});
+const admitRequests = (since: number) => bodies(since).filter((b) => system(b).includes("You pick which notes from earlier chats"));
+
+test("memory.admit: one direct call sees the message and the numbered notes; keep is filtered to the candidates; the chat is untouched", async () => {
+  fake.setScript([{ match: "Notes:", reply: { text: 'Here: {"keep": [103, "101", 999, 101]}' } }, { match: /./, reply: { text: "ok" } }]);
+  const { d } = await chatted("hello");
+  const before = JSON.stringify(await d.snapshot());
+  const since = fake.requests().length;
+  const ack = await d.send("memory.admit", admitArgs());
+  expect(ack).toMatchObject({ ok: true, result: { keep: [101, 103] } });
+  const reqs = admitRequests(since);
+  expect(reqs).toHaveLength(1);
+  const sent = flat(reqs[0]);
+  expect(sent).toContain("How do I calm down before speaking?");
+  expect(sent).toContain("#101 2026-11-20: Stressed about Friday's talk");
+  expect(system(reqs[0])).not.toContain("desk-buddy");
+  expect(JSON.stringify(await d.snapshot())).toBe(before);
+  // none helps: an empty keep is an answer, not an error
+  fake.setScript([{ match: "Notes:", reply: { text: '{"keep": []}' } }, { match: /./, reply: { text: "ok" } }]);
+  expect(await d.send("memory.admit", admitArgs())).toMatchObject({ ok: true, result: { keep: [] } });
+  await d.shutdown();
+}, 40000);
+
+test("memory.admit: a slow model is cut at 1.4 s (timeout); no list is bad_output; arguments are checked; no model is no_provider", async () => {
+  fake.setScript([{ match: "Notes:", reply: { text: '{"keep": [101]}', delayMs: 3000 } }, { match: /./, reply: { text: "ok" } }]);
+  const { d } = await chatted("hello");
+  const t0 = Date.now();
+  expect(await d.send("memory.admit", admitArgs())).toMatchObject({ ok: false, error: { code: "timeout" } });
+  const took = Date.now() - t0;
+  expect(took).toBeGreaterThanOrEqual(1300);
+  expect(took).toBeLessThan(2000);
+  fake.setScript([{ match: "Notes:", reply: { text: "Note 101 looks useful." } }, { match: /./, reply: { text: "ok" } }]);
+  expect(await d.send("memory.admit", admitArgs())).toMatchObject({ ok: false, error: { code: "bad_output" } });
+  const refused = async (a: Record<string, unknown>) => expect(await d.send("memory.admit", a)).toMatchObject({ ok: false, error: { code: "bad_request" } });
+  await refused(admitArgs({ message: " " }));
+  await refused(admitArgs({ candidates: [] }));
+  await refused(admitArgs({ candidates: Array.from({ length: 11 }, (_, i) => ({ id: i + 1, text: "x" })) }));
+  await refused(admitArgs({ candidates: [{ id: 1, text: "a" }, { id: 1, text: "b" }] }));
+  await refused(admitArgs({ candidates: [{ id: "x", text: "a" }] }));
+  expect((await d.send("set_model", { model: null })).ok).toBe(true);
+  expect(await d.send("memory.admit", admitArgs())).toMatchObject({ ok: false, error: { code: "no_provider" } });
+  await d.shutdown();
+}, 40000);

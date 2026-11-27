@@ -119,6 +119,9 @@ fn script() -> Value {
         { "match": "/Exchanges:[\\s\\S]*launch week/", "reply": { "text": "{\"items\": [{\"exchange\": 1, \"kind\": \"episode\", \"predicate\": null, \"qualifier\": null, \"value\": null, \"text\": \"Stayed late at Lanternfish Labs for the launch\", \"importance\": 6, \"valid_from\": null, \"quote\": \"launch week\"}, {\"exchange\": 1, \"kind\": \"episode\", \"predicate\": null, \"qualifier\": null, \"value\": null, \"text\": \"Skipped lunch to fix the launch build\", \"importance\": 5, \"valid_from\": null, \"quote\": \"launch week\"}, {\"exchange\": 1, \"kind\": \"episode\", \"predicate\": null, \"qualifier\": null, \"value\": null, \"text\": \"Walked Mochi after the late shift\", \"importance\": 4, \"valid_from\": null, \"quote\": \"launch week\"}, {\"exchange\": 1, \"kind\": \"profile\", \"predicate\": \"employer\", \"qualifier\": null, \"value\": \"Lanternfish Labs\", \"text\": \"Works at Lanternfish Labs\", \"importance\": 7, \"valid_from\": null, \"quote\": \"launch week\"}]}" } },
         { "match": "/Episodes:[\\s\\S]*Lanternfish/", "times": 1, "reply": { "delayMs": 4000, "text": "{\"updates\": [], \"insights\": [{\"text\": \"Works late in launch weeks\", \"importance\": 6, \"sources\": [1, 2]}], \"merges\": []}" } },
         { "match": "/Episodes:[\\s\\S]*Lanternfish/", "reply": { "text": "{\"updates\": [], \"insights\": [{\"text\": \"Works late in launch weeks\", \"importance\": 6, \"sources\": [1, 2]}], \"merges\": []}" } },
+        // p3: admission (its user message opens with "Message:"); the slow one streams for over 3 s
+        { "match": "/Message:\\nslow admit/", "reply": { "delayMs": 3000, "text": "{\"keep\": [7]}" } },
+        { "match": "/Message:\\nquick admit/", "reply": { "text": "{\"keep\": [8, 99]}" } },
         { "match": "said", "reply": { "text": "I said hi." } },
         { "match": "set for", "reply": { "text": "Reminder set." } },
         { "match": "remind me", "reply": { "toolCalls": [{ "name": "bash", "args": { "command": "buddy remind --in 2s stretch" } }] } },
@@ -940,4 +943,30 @@ fn a13_a_reflection_killed_midway_is_rerun_as_the_same_batch_and_applied_once() 
     store.write_files().unwrap();
     let notes = std::fs::read_to_string(store.dir().join("notes/2026-11-27.md")).unwrap_or_default();
     assert!(notes.contains("Pattern: Works late in launch weeks (from 2 moments)"), "{notes}");
+}
+
+fn admit_args(message: &str) -> Value {
+    json!({"message": message, "candidates": [
+        {"id": 7, "text": "2026-11-20: Stressed about Friday's talk at the meetup"},
+        {"id": 8, "text": "2026-11-26: Walked to the lake with Lan"},
+    ]})
+}
+
+#[test]
+fn a18_memory_admit_keeps_candidate_ids_and_a_slow_model_errors_by_1_5_s() {
+    let fx = fixture("mem-a18");
+    chat(&fx, "hello");
+    let ack = fx.agent.memory_admit(admit_args("quick admit please")).unwrap();
+    assert_eq!(ack, json!({"keep": [8]}), "an id that wasn't a candidate is dropped");
+
+    let t = Instant::now();
+    let err = fx.agent.memory_admit(admit_args("slow admit please")).unwrap_err();
+    let took = t.elapsed();
+    // the sidecar's own cut (its `timeout`, mapped to agent_error) or the bridge's wait: either way the caller falls back
+    assert!(matches!(err.code, "timeout" | "agent_error"), "{err:?}");
+    assert!(took < Duration::from_millis(2_500), "the bridge gave up in time: {took:?}");
+    assert!(took >= Duration::from_millis(1_300), "the sidecar's own 1.4 s cut answered first: {took:?}");
+    // the sidecar is fine afterwards, and admission wrote nothing to the chat
+    assert_eq!(fx.agent.memory_admit(json!({"message": "x", "candidates": []})).unwrap_err().code, "usage");
+    chat(&fx, "hello again");
 }

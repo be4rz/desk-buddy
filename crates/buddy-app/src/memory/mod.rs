@@ -11,6 +11,14 @@
 //! - **After every change** (window, host, jobs): `MEMORY.md` is re-rendered, the agent gets the new
 //!   section when it changed ([`Mem::sync_agent`]), and the window gets `memory://state`.
 //!
+//! - **Recall** (p2, p3). [`Mem::recall_for`] picks up to 3 notes for a chat message: keyword recall, hybrid with
+//!   the message's embedding while the local embedder answers ([`Vectors`]: `settings.memory.embed`, loopback only,
+//!   500 ms per query; a slow one skips vectors for that message, [`SLOW_MAX`] in a row turn them off), and with
+//!   `settings.memory.admission` the top 10 undated candidates go to the sidecar's `memory.admit` under a 1.5 s
+//!   deadline ([`ADMIT_DEADLINE`]); a timeout or a bad answer sends the plain top 3 (`[buddy] memory admit
+//!   fallback`). Rows the message names the day of are always kept. Vectors are written only on the jobs thread
+//!   (`jobs::vectors_once`).
+//!
 //! Logs carry ids and counts only, never a fact's text, a quote or what the person said.
 
 pub mod jobs;
@@ -22,11 +30,22 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
 use host::{MemoryOp, Refusal};
-use memory::{Error, Now, RememberIn, Store};
+use memory::embed::Embedder;
+use memory::{Error, Now, Recalled, RememberIn, Store};
 use serde_json::{json, Value};
 
 /// The shortest wait between two tries to open a store that failed.
 pub const RETRY: Duration = Duration::from_secs(5);
+/// Admission's whole budget on the prompt path (the bridge waits as long; the sidecar cuts its call at 1.4 s).
+pub const ADMIT_DEADLINE: Duration = bridge::agent::ADMIT_WAIT;
+/// The embedder: per message, per backfill batch, per probe; how often the probe runs; rows per batch.
+pub const QUERY_WAIT: Duration = Duration::from_millis(500);
+pub const BACKFILL_WAIT: Duration = Duration::from_secs(10);
+pub const PROBE_WAIT: Duration = Duration::from_secs(2);
+pub const PROBE_EVERY: Duration = Duration::from_secs(600);
+pub const BACKFILL: usize = 32;
+/// Messages in a row whose query ran out of time before vectors count as gone (a hung Ollama).
+pub const SLOW_MAX: u8 = 3;
 
 /// The store's folder under `BUDDY_HOME` (also the agent's private dir: its tools never read it).
 pub fn dir(home: &Path) -> PathBuf {
@@ -49,6 +68,10 @@ pub trait Sidecar: Send + Sync {
     fn reflect(&self, args: Value) -> Result<Value, String>;
     /// The sidecar is up (an extraction could run).
     fn running(&self) -> bool;
+    /// One memory.admit call (p3): `{message, candidates}` → `{keep: [ids]}`; `Err` is the error code only.
+    fn admit(&self, _args: Value) -> Result<Value, String> {
+        Err("unsupported".into())
+    }
 }
 
 impl Sidecar for bridge::Agent {
@@ -65,6 +88,106 @@ impl Sidecar for bridge::Agent {
     }
     fn running(&self) -> bool {
         self.is_running()
+    }
+    fn admit(&self, args: Value) -> Result<Value, String> {
+        self.memory_admit(args).map_err(|e| e.code.to_string())
+    }
+}
+
+/// The local embedder and whether it answers (p3). Off until the first probe says on.
+#[derive(Default)]
+pub struct Vectors {
+    embedder: Option<Arc<Embedder>>,
+    state: Mutex<VecState>,
+}
+
+#[derive(Default)]
+struct VecState {
+    /// The last probe (or embed) worked and the store has vectors.
+    up: bool,
+    /// What `[buddy] memory vectors on|off` last said.
+    logged: Option<bool>,
+    /// When the probe last ran; None asks for one on the next look.
+    probed: Option<Instant>,
+    /// Queries in a row that ran out of time.
+    slow: u8,
+}
+
+impl Vectors {
+    /// From `settings.memory.embed`: a URL that isn't `http://` on loopback is ignored, with one log line.
+    pub fn from_settings(url: &str, model: &str) -> Vectors {
+        match Embedder::new(url, model) {
+            Ok(e) => Vectors { embedder: Some(Arc::new(e)), state: Mutex::default() },
+            Err(_) if model.trim().is_empty() => {
+                eprintln!("[buddy] memory embed model missing");
+                Vectors::default()
+            }
+            Err(_) => {
+                eprintln!("[buddy] memory embed url ignored (not local)");
+                Vectors::default()
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub fn with(embedder: Embedder) -> Vectors {
+        Vectors { embedder: Some(Arc::new(embedder)), state: Mutex::default() }
+    }
+
+    fn state(&self) -> MutexGuard<'_, VecState> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Records whether vectors work now; logs a change.
+    fn set(&self, up: bool) {
+        let mut st = self.state();
+        st.up = up;
+        st.slow = 0;
+        if st.logged != Some(up) {
+            st.logged = Some(up);
+            eprintln!("[buddy] memory vectors {}", if up { "on" } else { "off" });
+        }
+    }
+
+    /// An embed call failed with `why` ([`Embedder::embed`]'s reason). Unreachable or slow: off, and the next
+    /// jobs look probes again (not in 10 min). A reply that can never work (`dims`, `status`, `bad_reply`: a
+    /// wrong or missing model): off until the regular probe, so a bad model doesn't flap every tick.
+    fn failed(&self, why: &str) {
+        self.set(false);
+        if matches!(why, "io" | "transport" | "slow") {
+            self.state().probed = None;
+        }
+    }
+
+    /// A query ran out of time: vectors stay on for the next message, unless that kept happening.
+    fn slow(&self) {
+        let n = {
+            let mut st = self.state();
+            st.slow = st.slow.saturating_add(1);
+            st.slow
+        };
+        if n >= SLOW_MAX {
+            self.failed("slow");
+        }
+    }
+
+    /// A query worked.
+    fn answered(&self) {
+        self.state().slow = 0;
+    }
+
+    /// The probe ran now.
+    fn probed(&self) {
+        self.state().probed = Some(Instant::now());
+    }
+
+    /// A probe is due: none yet, a failure since, or [`PROBE_EVERY`] since the last.
+    fn probe_due(&self) -> bool {
+        self.state().probed.is_none_or(|t| t.elapsed() >= PROBE_EVERY)
+    }
+
+    pub fn up(&self) -> bool {
+        self.state().up
     }
 }
 
@@ -116,6 +239,10 @@ pub struct Mem {
     feed: Mutex<Feed>,
     last_chat: Mutex<Instant>,
     sidecar: Mutex<Option<Arc<dyn Sidecar>>>,
+    /// `settings.memory.admission` (p3).
+    admission: AtomicBool,
+    /// The local embedder (p3).
+    vectors: Mutex<Arc<Vectors>>,
     /// Where `memory://state` goes after a change (the window; tests count calls).
     notify: Box<dyn Fn(&Mem) + Send + Sync>,
 }
@@ -128,9 +255,12 @@ pub fn get() -> Option<Arc<Mem>> {
 }
 
 /// At launch, before the harness: open the store (when on) and keep it for the app.
-pub fn start(home: &Path, enabled: bool) -> Arc<Mem> {
+pub fn start(home: &Path, cfg: &crate::settings::Memory) -> Arc<Mem> {
+    let enabled = cfg.enabled_now();
     let m = Arc::new(Mem::new(dir(home), enabled, Box::new(|m: &Mem| window::emit_from(m))));
     eprintln!("[buddy] memory {}", if enabled { "on" } else { "off" });
+    m.set_admission(cfg.admission);
+    m.set_vectors(Vectors::from_settings(&cfg.embed.url, &cfg.embed.model));
     let _ = MEM.set(m.clone());
     m
 }
@@ -167,6 +297,8 @@ impl Mem {
             feed: Mutex::default(),
             last_chat: Mutex::new(Instant::now()),
             sidecar: Mutex::new(None),
+            admission: AtomicBool::new(false),
+            vectors: Mutex::new(Arc::new(Vectors::default())),
             notify,
         };
         if enabled {
@@ -414,17 +546,114 @@ impl Mem {
     }
 
     /// The notes for one chat message (I1 `prompt.recall`): none while memory is off, the store is
-    /// closed, or the store fails (a failed recall never stops the message).
+    /// closed, or the store fails (a failed recall never stops the message). Hybrid while vectors are on;
+    /// admission when switched on (see the module doc). Bounded: ≤ 500 ms of embedding, ≤ 1.5 s of admission.
     pub fn recall_for(&self, text: &str) -> Vec<String> {
         if !self.enabled() {
             return vec![];
         }
-        let Some(s) = self.store() else { return vec![] };
-        match s.recall(text, &now()) {
-            Ok(lines) => lines,
+        // the HTTP call holds no store (Forget everything may replace it meanwhile)
+        let query = self.query_vec(text);
+        let Some((s, gen)) = self.store_gen() else { return vec![] };
+        let n = now();
+        let cands = match s.recall_candidates(text, &n, query.as_deref()) {
+            Ok(c) => c,
             Err(e) => {
                 eprintln!("[buddy] memory recall skipped: {}", werr(&e));
-                vec![]
+                return vec![];
+            }
+        };
+        let keep = if self.admission() && !cands.is_empty() {
+            drop(s);
+            let keep = self.admit(text, &cands);
+            match self.store_gen() {
+                Some((again, g)) if g == gen => (again, keep),
+                // erased or replaced while admission ran: these lines belong to nothing now
+                _ => return vec![],
+            }
+        } else {
+            (s, None)
+        };
+        let (s, keep) = keep;
+        let picked = memory::pick(&cands, keep.as_deref());
+        s.mark_recalled(&picked.iter().map(|c| c.id).collect::<Vec<_>>(), &n);
+        picked.into_iter().map(|c| c.line.clone()).collect()
+    }
+
+    pub fn admission(&self) -> bool {
+        self.admission.load(Ordering::SeqCst)
+    }
+
+    /// `settings.memory.admission` (read at launch).
+    pub fn set_admission(&self, on: bool) {
+        self.admission.store(on, Ordering::SeqCst);
+    }
+
+    /// The local embedder to use (at launch, from `settings.memory.embed`; tests pass a stub's).
+    pub fn set_vectors(&self, v: Vectors) {
+        *self.vectors.lock().unwrap_or_else(|e| e.into_inner()) = Arc::new(v);
+    }
+
+    pub fn vectors(&self) -> Arc<Vectors> {
+        self.vectors.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// The message's embedding while vectors are on. Too slow for this message: keywords only, vectors stay on
+    /// (off after [`SLOW_MAX`] in a row); any other failure turns them off until the next probe.
+    fn query_vec(&self, text: &str) -> Option<Vec<f32>> {
+        let v = self.vectors();
+        let e = v.embedder.as_ref().filter(|_| v.up())?;
+        match e.query(text, QUERY_WAIT) {
+            Ok(q) => {
+                v.answered();
+                Some(q)
+            }
+            Err("slow") => {
+                v.slow();
+                None
+            }
+            Err(why) => {
+                v.failed(why);
+                None
+            }
+        }
+    }
+
+    /// Admission: the ids to keep of the top [`memory::ADMIT_MAX`] undated candidates, or None (the plain top 3)
+    /// when the sidecar isn't there, errs, answers badly or takes longer than [`ADMIT_DEADLINE`]. Rows the message
+    /// named the day of are never sent: they are always kept ([`memory::pick`]).
+    fn admit(&self, text: &str, cands: &[Recalled]) -> Option<Vec<i64>> {
+        let top: Vec<&Recalled> = cands.iter().filter(|c| !c.dated).take(memory::ADMIT_MAX).collect();
+        if top.is_empty() {
+            return None;
+        }
+        let ids: Vec<i64> = top.iter().map(|c| c.id).collect();
+        let kept = self.sidecar().and_then(|side| {
+            let args = json!({
+                "message": text,
+                "candidates": top.iter().map(|c| json!({"id": c.id, "text": c.line})).collect::<Vec<_>>(),
+            });
+            // on its own thread, so a sidecar that hangs can't hold the person's message past the deadline
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::Builder::new()
+                .name("buddy-memory-admit".into())
+                .spawn(move || {
+                    let _ = tx.send(side.admit(args));
+                })
+                .ok()?;
+            let reply = rx.recv_timeout(ADMIT_DEADLINE).ok()?.ok()?;
+            let keep = reply.get("keep")?.as_array()?;
+            keep.iter().map(|v| v.as_i64()).collect::<Option<Vec<i64>>>()
+        });
+        match kept {
+            Some(k) => {
+                let k: Vec<i64> = ids.iter().copied().filter(|id| k.contains(id)).collect();
+                eprintln!("[buddy] memory admit kept {} of {}", k.len(), ids.len());
+                Some(k)
+            }
+            None => {
+                eprintln!("[buddy] memory admit fallback");
+                None
             }
         }
     }

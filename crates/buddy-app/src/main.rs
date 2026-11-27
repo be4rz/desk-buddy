@@ -362,7 +362,7 @@ fn main() {
                 persona: persona::tray(&pack, &settings.persona.user),
             };
             let wanted = settings.model.clone();
-            let memory_on = settings.memory.enabled_now();
+            let memory_cfg = settings.memory.clone();
             let home2 = home.clone();
             driver::start(driver::Init { pack, art, settings, home, panel, brain, t0 }, app.handle().clone());
             let win = bubble::window::BubbleWin::new(app, mtm)?;
@@ -373,7 +373,7 @@ fn main() {
             studio::window::init(app.handle().clone());
             memory::window::init(app.handle().clone());
             // before the harness: the agent starts with the memory section (a failed open is the window's error)
-            let mem = memory::start(&home2, memory_on);
+            let mem = memory::start(&home2, &memory_cfg);
             let mut host_port = None;
             match harness::Harness::start(&home2, &wanted) {
                 Ok(h) => {

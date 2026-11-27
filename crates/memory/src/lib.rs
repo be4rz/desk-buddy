@@ -6,6 +6,7 @@
 //! ids and counts only, never text, quotes or what the person said.
 
 pub mod dates;
+pub mod embed;
 mod files;
 mod notes;
 pub mod predicates;
@@ -21,10 +22,11 @@ mod validate;
 mod view;
 
 pub use dates::Span;
-pub use recall::{MAX_CHARS, MIN_SCORE, TOP};
+pub use recall::{pick, Recalled, ADMIT_MAX, MAX_CHARS, MIN_SCORE, TOP};
+pub use schema::DIMS;
 pub use reflect::{ReflectJob, Reflected, GUARD, MAX_EPISODES, MAX_TRIES, TRIGGER};
 pub use secret::looks_secret;
-pub use store::Store;
+pub use store::{Opts, Store};
 
 use jiff::civil::Date;
 use serde::Serialize;

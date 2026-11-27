@@ -131,3 +131,28 @@ pub fn meta(dir: &Path, key: &str) -> Option<String> {
 pub fn now_at(day: Date, hms: &str) -> Now {
     Now::new(day, format!("{day}T{hms}+07:00"))
 }
+
+pub mod ollama;
+
+/// Made-up embeddings for the tests (no model): one axis per topic a text names, plus a small axis of its own,
+/// normalised. Two texts on the same topic come out close (cosine ≈ 0.9) whatever their words; unrelated ones ≈ 0.
+pub fn concept_vec(text: &str) -> Vec<f32> {
+    const TOPICS: &[&[&str]] = &[
+        &["speak", "nervous", "calm", "talk", "stress", "present", "anxious", "intro"],
+        &["cook", "noodle", "lunch", "pasta", "dinner", "recipe", "food"],
+        &["bug", "login", "code", "deploy"],
+        &["lake", "walk", "hike"],
+        &["cat", "mochi", "vet"],
+    ];
+    let t = text.to_lowercase();
+    let mut v = vec![0.0f32; memory::DIMS];
+    for (i, words) in TOPICS.iter().enumerate() {
+        if words.iter().any(|w| t.contains(w)) {
+            v[i] = 1.0;
+        }
+    }
+    let own = 100 + (t.bytes().fold(7u64, |h, b| h.wrapping_mul(31).wrapping_add(u64::from(b))) % 600) as usize;
+    v[own] += 0.35;
+    memory::embed::normalise(&mut v);
+    v
+}

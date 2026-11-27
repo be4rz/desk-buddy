@@ -4,7 +4,7 @@
 // answer. Nothing is written to agent.sqlite, and nothing here logs episode or fact text.
 
 import { CmdError, type MemoryReflectAck, type MemoryRegistryEntry } from "../../protocol.ts";
-import { bad, callModel, clip, DAY, parseObject, str } from "./extract.ts";
+import { bad, callModel, clip, DAY, int, parseObject, str } from "./extract.ts";
 
 export const REFLECT_TIMEOUT_MS = 120_000;
 export const MAX_EPISODES = 50;
@@ -17,8 +17,6 @@ const TEXT_MAX = 400;
 export type ReflectEpisode = { id: number; day: string; text: string; importance: number | null };
 export type ReflectKnown = { id: number; kind: string; predicate: string | null; qualifier: string | null; value: string | null; text: string };
 export type ReflectArgs = { episodes: ReflectEpisode[]; known: ReflectKnown[]; registry: MemoryRegistryEntry[]; today: string };
-
-const int = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) ? v : typeof v === "string" && /^\d+$/.test(v) ? Number(v) : null);
 
 /** Check the command's arguments: 1..50 episodes with integer ids, and today. */
 export function parseReflectArgs(args: Record<string, unknown>): ReflectArgs {

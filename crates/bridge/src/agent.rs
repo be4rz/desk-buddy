@@ -36,6 +36,8 @@ pub const MEMORY_MAX_CHARS: usize = 4_000;
 const EXTRACT_WAIT: Duration = Duration::from_secs(65);
 /// `memory.reflect` times its model call out at 120 s.
 const REFLECT_WAIT: Duration = Duration::from_secs(125);
+/// `memory.admit` is on the prompt path: the sidecar aborts its model call at 1,400 ms, and the caller falls back.
+pub const ADMIT_WAIT: Duration = Duration::from_millis(1_500);
 /// A sign-in waits for the person (a browser, a pasted code).
 const LOGIN_WAIT: Duration = Duration::from_secs(600);
 
@@ -372,6 +374,13 @@ impl Agent {
     /// in, `{updates, insights, merges}` out. Rust checks and applies the answer; the sidecar writes nothing.
     pub fn memory_reflect(&self, args: Value) -> Res<Value> {
         self.bridge()?.cmd("memory.reflect", args, REFLECT_WAIT)
+    }
+
+    /// Admission's one quick model call (design I1 `memory.admit`, p3): the message and ≤ 10 recall candidates
+    /// `{id, text}` in, `{keep: [ids]}` out (a subset, maybe empty). Waits 1,500 ms; `timeout` or any error means
+    /// the caller sends its plain top 3.
+    pub fn memory_admit(&self, args: Value) -> Res<Value> {
+        self.bridge()?.cmd("memory.admit", args, ADMIT_WAIT)
     }
 
     pub fn model(&self) -> Option<ModelRef> {
